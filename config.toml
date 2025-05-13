@@ -1,0 +1,41 @@
+# ZMQ Communication Configuration
+[zmq]
+# Ports
+braid_port = 5555
+trigger_port = 5556
+
+# Topics
+braid_topic = "BRAID"
+trigger_topic = "TRIGGER"
+lens_topic = "LENS"
+
+[opto_trigger]
+active = true
+port = "/dev/ttyUSB0"
+baudrate = 115200
+duration = 300
+intensity = 255
+frequency = 0
+sham_probability = 0.1
+
+[liquid_lens]
+active = true
+port = "/dev/ttyUSB1"
+baudrate = 115200
+
+[braid_subscriber]
+url = "http://10.40.80.6:8397"
+timeout = 30
+reconnect_delay = 5
+
+[trigger_handler]
+min_trajectory_time = 1.0
+min_trigger_interval = 5.0
+radius = 0.025
+z_lim = [0.15, 0.25]
+
+[camera]
+FOV = [[-0.5, 0.5], [-0.5, 0.5]] # Field of View in meters, [x_min, x_max], [y_min, y_max]
+
+[logging]
+level = "INFO"
