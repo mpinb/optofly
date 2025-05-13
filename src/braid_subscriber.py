@@ -75,7 +75,9 @@ class BraidSubscriber(mp.Process):
     """
 
     def __init__(
-        self, config_path: str = "config.toml", event: Optional[mp.Event] = None # type: ignore
+        self,
+        config_path: str = "config.toml",
+        event: Optional[mp.Event] = None,  # type: ignore
     ):  # type: ignore
         """
         Initialize the BraidSubscriber.
@@ -167,7 +169,9 @@ class BraidSubscriber(mp.Process):
             # Initialize ZMQ context and socket
             self.zmq_context = zmq.Context()
             self.zmq_socket = self.zmq_context.socket(zmq.PUB)
-            bind_address = self.config.zmq.get_publisher_address(self.config.zmq.braid_port)
+            bind_address = self.config.zmq.get_publisher_address(
+                self.config.zmq.braid_port
+            )
 
             logger.debug(f"Binding ZMQ publisher to {bind_address}")
             self.zmq_socket.bind(bind_address)
@@ -188,8 +192,8 @@ class BraidSubscriber(mp.Process):
         while not self.stop_event.is_set():
             try:
                 # Get event stream with timeout
-                response = self.session.get( # type: ignore
-                    self.events_url, # type: ignore
+                response = self.session.get(  # type: ignore
+                    self.events_url,  # type: ignore
                     stream=True,
                     headers={"Accept": "text/event-stream"},
                     timeout=self.config.timeout,
@@ -212,7 +216,7 @@ class BraidSubscriber(mp.Process):
                         if "msg" in data:
                             # Publish to ZMQ
                             message = json.dumps(data["msg"])
-                            self.zmq_socket.send_string( # type: ignore
+                            self.zmq_socket.send_string(  # type: ignore
                                 f"{self.config.zmq.braid_topic} {message}"
                             )
                             logger.debug(f"Published message: {message[:50]}...")

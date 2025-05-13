@@ -14,8 +14,10 @@ from config import OptoTriggerConfig
 
 logger.remove()
 logger.add(
-    sys.stderr, level="INFO",
+    sys.stderr,
+    level="INFO",
 )
+
 
 class OptoTrigger:
     """
