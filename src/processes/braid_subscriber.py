@@ -3,10 +3,8 @@ Braid Server subscriber that connects to a Braid server and publishes events to 
 """
 
 import json
-import logging
 import multiprocessing as mp
 import signal
-import sys
 import time
 from threading import Thread
 from typing import Any, Dict, Optional
@@ -14,7 +12,9 @@ from typing import Any, Dict, Optional
 import requests
 import zmq
 
-from config import BraidSubscriberConfig
+from src.utils.config import BraidSubscriberConfig
+from src.utils.custom_logger import init_class_logger
+from src.utils.worker_process import WorkerProcess
 
 # Constants
 DATA_PREFIX = "data: "
@@ -22,14 +22,6 @@ MAX_RETRIES = 5
 RETRY_DELAY = 2
 
 # Configure logging
-logger = logging.getLogger(__name__)
-# Set up logging format
-formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-# Add console handler
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setFormatter(formatter)
-logger.addHandler(console_handler)
-logger.setLevel(logging.DEBUG)  # Set to DEBUG for detailed output
 
 
 def parse_chunk(chunk: str) -> Dict[str, Any]:
@@ -66,7 +58,7 @@ def parse_chunk(chunk: str) -> Dict[str, Any]:
         raise ValueError(f"Failed to parse JSON: {e}")
 
 
-class BraidSubscriber(mp.Process):
+class BraidSubscriber(WorkerProcess):
     """
     Process that subscribes to a Braid server and publishes events to ZMQ.
 
@@ -77,18 +69,35 @@ class BraidSubscriber(mp.Process):
     def __init__(
         self,
         config_path: str = "config.toml",
-        event: Optional[mp.Event] = None,  # type: ignore
-    ):  # type: ignore
+        event: Optional[mp.Event] = None,
+        process_name: str = "BraidSubscriber",
+        log_level: str = "INFO",
+        log_color: str = "GREEN",  # Use uppercase for consistency
+    ):
         """
         Initialize the BraidSubscriber.
 
         Args:
             config_path: Path to the configuration file
             event: Event to signal process termination (created if None)
+            log_level: Logging level to use
+            log_color: Color for log messages
+            process_name: Name to display in logs
         """
-        super().__init__()
+        # Pass parameters to parent class
+        super().__init__(
+            event=event,
+            log_level=log_level,
+            log_color=log_color,
+            process_name=process_name,
+        )
+
+        # Initialize our specific attributes
         self.config = BraidSubscriberConfig(config_path)
         self.stop_event = event if event is not None else mp.Event()
+
+        # Initialize logger
+        self._initialize_logger()
 
         # Connection objects (initialized later)
         self.session = None
@@ -104,7 +113,7 @@ class BraidSubscriber(mp.Process):
 
     def _handle_signal(self, signum, frame):
         """Handle termination signals by setting the stop event."""
-        logger.debug(f"Received signal {signum}, shutting down...")
+        self.logger.debug(f"Received signal {signum}, shutting down...")
         self.stop_event.set()
 
     def initialize(self) -> bool:
@@ -120,7 +129,7 @@ class BraidSubscriber(mp.Process):
             self.is_connected = True
             return True
         except Exception as e:
-            logger.error(f"Failed to initialize BraidSubscriber: {e}")
+            self.logger.error(f"Failed to initialize BraidSubscriber: {e}")
             self.close()
             return False
 
@@ -131,7 +140,7 @@ class BraidSubscriber(mp.Process):
         Raises:
             Exception: If connection fails
         """
-        logger.debug(f"Connecting to Braid server at {self.config.url}")
+        self.logger.debug(f"Connecting to Braid server at {self.config.url}")
 
         self.session = requests.Session()
 
@@ -143,7 +152,7 @@ class BraidSubscriber(mp.Process):
                 break
             except requests.RequestException as e:
                 if attempt < MAX_RETRIES - 1:
-                    logger.warning(
+                    self.logger.warning(
                         f"Connection attempt {attempt + 1}/{MAX_RETRIES} failed: {e}"
                     )
                     time.sleep(RETRY_DELAY)
@@ -154,7 +163,7 @@ class BraidSubscriber(mp.Process):
 
         # Prepare events URL
         self.events_url = f"{self.config.url.rstrip('/')}/events"
-        logger.info(
+        self.logger.info(
             f"Successfully connected to Braid server. Event stream at {self.events_url}"
         )
 
@@ -173,13 +182,13 @@ class BraidSubscriber(mp.Process):
                 self.config.zmq.braid_port
             )
 
-            logger.debug(f"Binding ZMQ publisher to {bind_address}")
+            self.logger.debug(f"Binding ZMQ publisher to {bind_address}")
             self.zmq_socket.bind(bind_address)
 
             # Small delay to allow ZMQ to establish connection
             time.sleep(0.1)
 
-            logger.info(
+            self.logger.info(
                 f"ZMQ publisher bound to port {self.config.zmq.braid_port} with topic '{self.config.zmq.braid_topic}'"
             )
         except zmq.ZMQError as e:
@@ -192,8 +201,13 @@ class BraidSubscriber(mp.Process):
         while not self.stop_event.is_set():
             try:
                 # Get event stream with timeout
-                response = self.session.get(  # type: ignore
-                    self.events_url,  # type: ignore
+                if self.session is None or self.events_url is None:
+                    self.logger.error("Session or events URL not initialized")
+                    time.sleep(1)
+                    continue
+
+                response = self.session.get(
+                    self.events_url,
                     stream=True,
                     headers={"Accept": "text/event-stream"},
                     timeout=self.config.timeout,
@@ -201,7 +215,7 @@ class BraidSubscriber(mp.Process):
                 response.raise_for_status()
                 connection_attempts = 0
 
-                logger.debug("Connected to event stream, processing events...")
+                self.logger.debug("Connected to event stream, processing events...")
 
                 # Process events
                 for chunk in response.iter_content(
@@ -213,15 +227,15 @@ class BraidSubscriber(mp.Process):
                     try:
                         data = parse_chunk(chunk)
 
-                        if "msg" in data:
+                        if "msg" in data and self.zmq_socket is not None:
                             # Publish to ZMQ
                             message = json.dumps(data["msg"])
-                            self.zmq_socket.send_string(  # type: ignore
+                            self.zmq_socket.send_string(
                                 f"{self.config.zmq.braid_topic} {message}"
                             )
-                            logger.debug(f"Published message: {message[:50]}...")
+                            self.logger.debug(f"Published message: {message[:50]}...")
                     except Exception as e:
-                        logger.error(f"Error processing chunk: {e}")
+                        self.logger.error(f"Error processing chunk: {e}")
 
             except (requests.RequestException, ConnectionError) as e:
                 if self.stop_event.is_set():
@@ -230,10 +244,12 @@ class BraidSubscriber(mp.Process):
                 connection_attempts += 1
                 retry_delay = min(self.config.reconnect_delay * connection_attempts, 30)
 
-                logger.error(f"Connection error: {e}. Retrying in {retry_delay}s...")
+                self.logger.error(
+                    f"Connection error: {e}. Retrying in {retry_delay}s..."
+                )
                 time.sleep(retry_delay)
 
-        logger.debug("Stream processing thread exited")
+        self.logger.debug("Stream processing thread exited")
 
     def run(self) -> None:
         """
@@ -243,10 +259,10 @@ class BraidSubscriber(mp.Process):
         monitors the stop event.
         """
         if not self.is_connected and not self.initialize():
-            logger.error("Failed to initialize, exiting process")
+            self.logger.error("Failed to initialize, exiting process")
             return
 
-        logger.debug("Starting BraidSubscriber process")
+        self.logger.debug("Starting BraidSubscriber process")
 
         # Start stream processing in a separate thread
         self.stream_thread = Thread(target=self._process_stream)
@@ -257,49 +273,72 @@ class BraidSubscriber(mp.Process):
         while not self.stop_event.is_set():
             time.sleep(0.1)
 
-        logger.debug("Stop event received, cleaning up...")
+        self.logger.debug("Stop event received, cleaning up...")
         self.close()
 
     def close(self) -> None:
         """Clean up resources and connections."""
-        logger.debug("Closing BraidSubscriber...")
+        self.logger.debug("Closing BraidSubscriber...")
 
         # Set stop event to signal threads to exit
         self.stop_event.set()
 
         # Close ZMQ socket and context
         if self.zmq_socket:
-            logger.debug("Closing ZMQ socket")
+            self.logger.debug("Closing ZMQ socket")
             self.zmq_socket.close()
             self.zmq_socket = None
 
         if self.zmq_context:
-            logger.debug("Terminating ZMQ context")
+            self.logger.debug("Terminating ZMQ context")
             self.zmq_context.term()
             self.zmq_context = None
 
         # Close requests session
         if self.session:
-            logger.debug("Closing requests session")
+            self.logger.debug("Closing requests session")
             self.session.close()
             self.session = None
 
         # Wait for stream thread to exit
         if self.stream_thread and self.stream_thread.is_alive():
-            logger.debug("Waiting for stream thread to exit")
+            self.logger.debug("Waiting for stream thread to exit")
             self.stream_thread.join(timeout=2)
 
         self.is_connected = False
-        logger.info("BraidSubscriber closed successfully")
+        self.logger.info("BraidSubscriber closed successfully")
 
 
 # Example usage when run directly
 if __name__ == "__main__":
-    import sys
+    import argparse
+
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description="Braid Subscriber Process")
+    parser.add_argument(
+        "--config", "-c", default="config.toml", help="Path to config file"
+    )
+    parser.add_argument(
+        "--log-level",
+        "-l",
+        default="DEBUG",
+        choices=["TRACE", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Set logging level",
+    )
+    args = parser.parse_args()
+
+    # Configure logging with command line level
+    logger = init_class_logger(
+        "BraidSubscriber",
+        log_level=args.log_level,
+        color="green",
+        process_name="BraidSubscriber",
+    )
+    logger.info("Starting BraidSubscriber...")
 
     # Create and run subscriber
     stop_event = mp.Event()
-    subscriber = BraidSubscriber(event=stop_event)
+    subscriber = BraidSubscriber(config_path=args.config, event=stop_event)
 
     try:
         if subscriber.initialize():

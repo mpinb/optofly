@@ -6,27 +6,19 @@ and sends trigger signals for optical stimulation and liquid lens systems based 
 configurable spatial and temporal criteria.
 """
 
+from collections import deque
+from dataclasses import dataclass, field
 import json
 import multiprocessing as mp
-import sys
 import time
-from dataclasses import dataclass, field
-from typing import Dict, Optional, Any
-from collections import deque
-
+from typing import Any, Dict, Optional
 import numpy as np
-import zmq
-from loguru import logger
 from scipy import stats
+import zmq
 
-from config import TriggerHandlerConfig, ConfigBase
-
-# Configure logger
-logger.remove()
-logger.add(
-    sys.stderr,
-    level="INFO",
-)
+from src.utils.config import ConfigBase, TriggerHandlerConfig
+from src.utils.custom_logger import init_class_logger
+from src.utils.worker_process import WorkerProcess
 
 # Constants
 HEADING_HISTORY_SIZE = 10  # Number of frames to keep for heading calculation
@@ -154,7 +146,7 @@ class TrackedObject:
         return diff < HEADING_THRESHOLD
 
 
-class TriggerHandler(mp.Process):
+class TriggerHandler(WorkerProcess):
     """
     Process that evaluates tracking data and generates stimulation triggers.
 
@@ -164,7 +156,12 @@ class TriggerHandler(mp.Process):
     """
 
     def __init__(
-        self, config_path: str = "config.toml", event: Optional[mp.Event] = None
+        self,
+        config_path: str = "config.toml",
+        event: Optional[mp.Event] = None,
+        process_name: str = "TriggerHandler",
+        log_level: str = "INFO",
+        log_color: str = "MAGENTA",  # Added log_color parameter with default value
     ):
         """
         Initialize the TriggerHandler.
@@ -172,8 +169,19 @@ class TriggerHandler(mp.Process):
         Args:
             config_path: Path to the configuration file
             event: Event to signal process termination (created if None)
+            process_name: Name to display in logs
+            log_level: Logging level to use
+            log_color: Color for log messages
         """
-        super().__init__()
+        # Pass parameters to parent class (WorkerProcess)
+        super().__init__(
+            event=event,
+            log_level=log_level,
+            log_color=log_color,
+            process_name=process_name,
+        )
+
+        # Initialize TriggerHandler-specific attributes
         self.config_base = ConfigBase(config_path)._load_config()
         self.config = TriggerHandlerConfig(config_path)
         self.stop_event = event if event is not None else mp.Event()
@@ -194,7 +202,9 @@ class TriggerHandler(mp.Process):
         self.subscriber = None
         self.publisher = None
 
-        logger.info(f"TriggerHandler initialized with config: {self.config}")
+        # Initialize logger
+        self._initialize_logger()
+        self.logger.info(f"Initializing TriggerHandler with config: {config_path}")
 
     def initialize(self) -> bool:
         """
@@ -206,10 +216,10 @@ class TriggerHandler(mp.Process):
         try:
             self._initialize_zmq()
             self.is_initialized = True
-            logger.info("TriggerHandler initialized successfully")
+            self.logger.info("TriggerHandler initialized successfully")
             return True
         except Exception as e:
-            logger.error(f"Failed to initialize TriggerHandler: {e}")
+            self.logger.error(f"Failed to initialize TriggerHandler: {e}")
             return False
 
     def _initialize_zmq(self) -> None:
@@ -225,7 +235,7 @@ class TriggerHandler(mp.Process):
             publisher_address = self.config.zmq.get_publisher_address(
                 self.config.zmq.trigger_port
             )
-            logger.info(f"Binding ZMQ publisher to {publisher_address}")
+            self.logger.info(f"Binding ZMQ publisher to {publisher_address}")
             self.publisher.bind(publisher_address)
 
             # Set up subscriber to receive from Braid
@@ -233,20 +243,20 @@ class TriggerHandler(mp.Process):
             subscriber_address = self.config.zmq.get_subscriber_address(
                 self.config.zmq.braid_port
             )
-            logger.info(f"Connecting ZMQ subscriber to {subscriber_address}")
+            self.logger.info(f"Connecting ZMQ subscriber to {subscriber_address}")
             self.subscriber.connect(subscriber_address)
 
             # Subscribe to Braid messages
             self.subscriber.setsockopt_string(
                 zmq.SUBSCRIBE, self.config.zmq.braid_topic
             )
-            logger.info(f"Subscribed to topic: {self.config.zmq.braid_topic}")
+            self.logger.info(f"Subscribed to topic: {self.config.zmq.braid_topic}")
 
         except zmq.ZMQError as e:
-            logger.error(f"ZMQ initialization error: {e}")
+            self.logger.error(f"ZMQ initialization error: {e}")
             raise
         except Exception as e:
-            logger.error(f"Unexpected error during ZMQ initialization: {e}")
+            self.logger.error(f"Unexpected error during ZMQ initialization: {e}")
             raise
 
     def is_in_camera_fov(self, x: float, y: float) -> bool:
@@ -265,7 +275,9 @@ class TriggerHandler(mp.Process):
             y_min, y_max = self.camera_fov[1]
             return (x_min <= x <= x_max) and (y_min <= y <= y_max)
         except (IndexError, TypeError) as e:
-            logger.error(f"Error checking camera FOV: {e}, using default FOV check")
+            self.logger.error(
+                f"Error checking camera FOV: {e}, using default FOV check"
+            )
             # Default to a square FOV if config is invalid
             return -0.5 <= x <= 0.5 and -0.5 <= y <= 0.5
 
@@ -306,9 +318,9 @@ class TriggerHandler(mp.Process):
             elif "Death" in message_data:
                 self._process_death(message_data["Death"])
             else:
-                logger.warning(f"Unknown message type: {message_data.keys()}")
+                self.logger.warning(f"Unknown message type: {message_data.keys()}")
         except Exception as e:
-            logger.error(f"Error processing message: {e}")
+            self.logger.error(f"Error processing message: {e}")
 
     def _process_birth(self, data: Dict[str, Any]) -> None:
         """
@@ -337,14 +349,14 @@ class TriggerHandler(mp.Process):
 
             # Add to tracked objects
             self.tracked_objects[obj_id] = tracked_obj
-            logger.debug(
+            self.logger.debug(
                 f"Started tracking object {obj_id} at position "
                 f"({data['x']:.3f}, {data['y']:.3f}, {data['z']:.3f})"
             )
         except KeyError as e:
-            logger.error(f"Missing field in Birth message: {e}")
+            self.logger.error(f"Missing field in Birth message: {e}")
         except Exception as e:
-            logger.error(f"Error processing Birth message: {e}")
+            self.logger.error(f"Error processing Birth message: {e}")
 
     def _process_update(self, data: Dict[str, Any]) -> None:
         """
@@ -359,7 +371,7 @@ class TriggerHandler(mp.Process):
 
             # Check if we're already tracking this object
             if obj_id not in self.tracked_objects:
-                logger.warning(
+                self.logger.warning(
                     f"Received Update for unknown object {obj_id}, creating new tracking entry"
                 )
                 self._process_birth(data)  # Treat as Birth if not already tracking
@@ -381,9 +393,9 @@ class TriggerHandler(mp.Process):
             self._evaluate_triggers(tracked_obj)
 
         except KeyError as e:
-            logger.error(f"Missing field in Update message: {e}")
+            self.logger.error(f"Missing field in Update message: {e}")
         except Exception as e:
-            logger.error(f"Error processing Update message: {e}")
+            self.logger.error(f"Error processing Update message: {e}")
 
     def _process_death(self, obj_id: int) -> None:
         """
@@ -394,12 +406,12 @@ class TriggerHandler(mp.Process):
         """
         try:
             if obj_id in self.tracked_objects:
-                logger.debug(f"Stopped tracking object {obj_id}")
+                self.logger.debug(f"Stopped tracking object {obj_id}")
                 del self.tracked_objects[obj_id]
             else:
-                logger.warning(f"Received Death for unknown object {obj_id}")
+                self.logger.warning(f"Received Death for unknown object {obj_id}")
         except Exception as e:
-            logger.error(f"Error processing Death message: {e}")
+            self.logger.error(f"Error processing Death message: {e}")
 
     def _evaluate_triggers(self, tracked_obj: TrackedObject) -> None:
         """
@@ -443,7 +455,7 @@ class TriggerHandler(mp.Process):
             obj_id: ID of the object that triggered the stimulation
         """
         if not self.config.opto_trigger_active:
-            logger.debug(
+            self.logger.debug(
                 f"Stimulation trigger skipped for object {obj_id} (opto_trigger not active)"
             )
             return
@@ -453,9 +465,9 @@ class TriggerHandler(mp.Process):
             message = json.dumps({"timestamp": timestamp, "obj_id": obj_id})
 
             self.publisher.send_string(f"{self.config.zmq.trigger_topic} {message}")
-            logger.info(f"Sent TRIGGER for object {obj_id} at {timestamp:.3f}")
+            self.logger.info(f"Sent TRIGGER for object {obj_id} at {timestamp:.3f}")
         except Exception as e:
-            logger.error(f"Error sending trigger: {e}")
+            self.logger.error(f"Error sending trigger: {e}")
 
     def _send_lens_trigger(self, obj_id: int) -> None:
         """
@@ -469,9 +481,11 @@ class TriggerHandler(mp.Process):
             message = json.dumps({"timestamp": timestamp, "obj_id": obj_id})
 
             self.publisher.send_string(f"{self.config.zmq.lens_topic} {message}")
-            logger.debug(f"Sent LENS trigger for object {obj_id} at {timestamp:.3f}")
+            self.logger.debug(
+                f"Sent LENS trigger for object {obj_id} at {timestamp:.3f}"
+            )
         except Exception as e:
-            logger.error(f"Error sending lens trigger: {e}")
+            self.logger.error(f"Error sending lens trigger: {e}")
 
     def _cleanup_stale_objects(self) -> None:
         """Remove objects that haven't been updated recently."""
@@ -483,7 +497,7 @@ class TriggerHandler(mp.Process):
                 stale_ids.append(obj_id)
 
         for obj_id in stale_ids:
-            logger.debug(f"Removing stale object {obj_id}")
+            self.logger.debug(f"Removing stale object {obj_id}")
             del self.tracked_objects[obj_id]
 
     def run(self) -> None:
@@ -491,10 +505,10 @@ class TriggerHandler(mp.Process):
         Main process loop for the trigger handler.
         """
         if not self.is_initialized and not self.initialize():
-            logger.error("Failed to initialize, exiting process")
+            self.logger.error("Failed to initialize, exiting process")
             return
 
-        logger.info("Starting TriggerHandler process")
+        self.logger.info("Starting TriggerHandler process")
 
         # Set up poller for non-blocking receive
         poller = zmq.Poller()
@@ -521,9 +535,9 @@ class TriggerHandler(mp.Process):
                     self.process_message(message_data)
 
                 except json.JSONDecodeError as e:
-                    logger.error(f"Error decoding JSON message: {e}")
+                    self.logger.error(f"Error decoding JSON message: {e}")
                 except Exception as e:
-                    logger.error(f"Error processing message: {e}")
+                    self.logger.error(f"Error processing message: {e}")
 
             # Periodically clean up stale objects
             current_time = time.time()
@@ -532,7 +546,7 @@ class TriggerHandler(mp.Process):
                 cleanup_timer = current_time
 
         # Clean up
-        logger.info("Stopping TriggerHandler")
+        self.logger.info("Stopping TriggerHandler")
         self._cleanup()
 
     def _cleanup(self) -> None:
@@ -546,7 +560,7 @@ class TriggerHandler(mp.Process):
         if self.context:
             self.context.term()
 
-        logger.info("TriggerHandler cleaned up successfully")
+        self.logger.info("TriggerHandler cleaned up successfully")
 
 
 # Example usage when run directly
@@ -568,9 +582,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Configure logging
-    logger.remove()
-    logger.add(sys.stderr, level=args.log_level)
-
+    logger = init_class_logger(
+        instance=None,
+        log_level=args.log_level,
+        process_name="TriggerHandler",
+        init_message="Starting TriggerHandler process",
+    )
     # Create and run trigger handler
     stop_event = mp.Event()
     handler = TriggerHandler(config_path=args.config, event=stop_event)

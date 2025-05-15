@@ -2,21 +2,16 @@
 OptoTrigger module for controlling Arduino-based optical stimulation.
 """
 
+import os
 import random
-import sys
 import time
 from typing import Optional
 
 import serial
-from loguru import logger
 
-from config import OptoTriggerConfig
-
-logger.remove()
-logger.add(
-    sys.stderr,
-    level="INFO",
-)
+from src.utils.config import OptoTriggerConfig
+from src.classes.csv_writer import CSVWriter
+from src.utils.custom_logger import init_class_logger
 
 
 class OptoTrigger:
@@ -28,17 +23,40 @@ class OptoTrigger:
     intensity, and frequency.
     """
 
-    def __init__(self, config_path: str = "config.toml"):
+    def __init__(
+        self,
+        config_path: str = "config.toml",
+        braid_folder: str = None,
+        process_name: str = "OptoTrigger",
+        log_level: str = "INFO",
+        log_color: str = "RED",
+    ):
         """
         Initialize the OptoTrigger controller.
 
         Args:
             config_path: Path to the configuration file
         """
+
         self.config = OptoTriggerConfig(config_path)
         self.serial_conn = None
         self.is_initialized = False
-        logger.debug(f"OptoTrigger initialized with config: {self.config}")
+
+        # Initialize CSV writer
+        if braid_folder is None:
+            raise ValueError("braid folder path must be provided")
+        self.csv_writer = CSVWriter(os.path.join(braid_folder, "opto.csv"))
+
+        # Initialize logger
+        self.logger = init_class_logger(
+            instance=self,
+            process_name=process_name,
+            log_level=log_level,
+            log_color=log_color,
+        )
+
+        # Initialize logger
+        self.logger.debug(f"OptoTrigger initialized with config: {self.config}")
 
     def initialize(self) -> bool:
         """
@@ -48,7 +66,7 @@ class OptoTrigger:
             True if connection was successful, False otherwise
         """
         try:
-            logger.debug(f"Connecting to Arduino at {self.config.port}")
+            self.logger.debug(f"Connecting to Arduino at {self.config.port}")
             self.serial_conn = serial.Serial(
                 port=self.config.port,
                 baudrate=self.config.baudrate,
@@ -63,13 +81,15 @@ class OptoTrigger:
             self.serial_conn.reset_output_buffer()
 
             self.is_initialized = True
-            logger.info(f"Connected to Arduino at {self.config.port}")
+            self.logger.info(f"Connected to Arduino at {self.config.port}")
             return True
         except serial.SerialException as e:
-            logger.error(f"Failed to initialize OptoTrigger: {e}")
+            self.logger.error(f"Failed to initialize OptoTrigger: {e}")
             return False
 
-    def trigger(self, sham: Optional[bool] = None) -> bool:
+    def trigger(
+        self, obj_id: int, frame: int, timestamp: int, sham: Optional[bool] = None
+    ) -> bool:
         """
         Send trigger command to the Arduino.
 
@@ -79,8 +99,20 @@ class OptoTrigger:
         Returns:
             True if command was sent successfully, False otherwise
         """
+
+        # Prepare the row for CSV logging
+        row = {
+            "obj_id": obj_id,
+            "frame": frame,
+            "timestamp": timestamp,
+            "duration": self.config.duration,
+            "intensity": self.config.intensity,
+            "frequency": self.config.frequency,
+        }
+
+        # Check if the trigger is initialized
         if not self.is_initialized:
-            logger.error("OptoTrigger not initialized. Call initialize() first.")
+            self.logger.error("OptoTrigger not initialized. Call initialize() first.")
             return False
 
         # Determine if this should be a sham stimulation
@@ -88,20 +120,25 @@ class OptoTrigger:
             sham = random.random() < self.config.sham_probability
 
         if sham:
-            logger.info("Executing sham stimulation (no signal sent)")
+            self.logger.info("Executing sham stimulation (no signal sent)")
+            self.csv_writer.append(row.update({"sham": True}))
+            self.logger.debug(f"Sham stimulation row: {row}")
             return True
 
         try:
             # Get the command string from config
             command = self.config.get_trigger_command()
-            logger.debug(f"Sending trigger command: {command}")
+            self.logger.debug(f"Sending trigger command: {command}")
 
             # Send the command
             if self.serial_conn:
                 self.serial_conn.write(command.encode("utf-8"))
             else:
-                logger.error("Serial connection is not established.")
+                self.logger.error("Serial connection is not established.")
                 return False
+
+            self.csv_writer.append(row.update({"sham": False}))
+            self.logger.debug(f"CSV row written: {row}")
 
             # Wait for response
             response = (
@@ -109,7 +146,7 @@ class OptoTrigger:
             )
             if response:
                 # Parse timing information if available
-                logger.debug(f"Arduino response: {response}")
+                self.logger.debug(f"Arduino response: {response}")
                 if "Total processing time" in response:
                     timing_lines = []
                     for _ in range(4):  # Try to collect 4 lines of timing info
@@ -120,18 +157,18 @@ class OptoTrigger:
                         )
                         if line:
                             timing_lines.append(line)
-                            logger.debug(line)
+                            self.logger.debug(line)
 
                 # Log the completion of stimulation
-                logger.info(
+                self.logger.info(
                     f"Stimulation command processed ({self.config.duration}ms, {self.config.intensity}/255, {self.config.frequency}Hz)"
                 )
             else:
-                logger.warning("No response received from Arduino")
+                self.logger.warning("No response received from Arduino")
 
             return True
         except Exception as e:
-            logger.error(f"Error triggering stimulation: {e}")
+            self.logger.error(f"Error triggering stimulation: {e}")
             return False
 
     def close(self) -> bool:
@@ -145,10 +182,10 @@ class OptoTrigger:
             try:
                 self.serial_conn.close()
                 self.is_initialized = False
-                logger.info("OptoTrigger connection closed")
+                self.logger.info("OptoTrigger connection closed")
                 return True
             except Exception as e:
-                logger.error(f"Error closing OptoTrigger connection: {e}")
+                self.logger.error(f"Error closing OptoTrigger connection: {e}")
                 return False
         return True
 
@@ -182,7 +219,7 @@ class OptoTrigger:
         if frequency is not None:
             self.config.frequency = max(0, int(frequency))
 
-        logger.debug(f"Parameters updated: {self.config.get_trigger_command()}")
+        self.logger.debug(f"Parameters updated: {self.config.get_trigger_command()}")
         return True
 
 
@@ -212,8 +249,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    # Run the trigger
-    with OptoTrigger(args.config) as trigger:
+    with OptoTrigger(args.config, braid_folder=".") as trigger:
         # Apply any parameter overrides
         params_changed = False
         if (
@@ -230,9 +266,7 @@ if __name__ == "__main__":
 
         # Log the parameters being used
         if params_changed:
-            logger.info(
-                f"Using custom parameters: {trigger.config.get_trigger_command()}"
-            )
+            print(f"Using custom parameters: {trigger.config.get_trigger_command()}")
 
         # Trigger the stimulation
         trigger.trigger(sham=args.sham if args.sham else None)
