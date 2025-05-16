@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 import requests
 import zmq
 
-from src.utils.config import BraidSubscriberConfig
+from src.utils.config import BraidPublisherConfig
 from src.utils.custom_logger import init_class_logger
 from src.utils.worker_process import WorkerProcess
 
@@ -58,7 +58,7 @@ def parse_chunk(chunk: str) -> Dict[str, Any]:
         raise ValueError(f"Failed to parse JSON: {e}")
 
 
-class BraidSubscriber(WorkerProcess):
+class BraidPublisher(WorkerProcess):
     """
     Process that subscribes to a Braid server and publishes events to ZMQ.
 
@@ -70,12 +70,12 @@ class BraidSubscriber(WorkerProcess):
         self,
         config_path: str = "config.toml",
         event: Optional[mp.Event] = None,
-        process_name: str = "BraidSubscriber",
+        process_name: str = "BraidPublisher",
         log_level: str = "INFO",
         log_color: str = "GREEN",  # Use uppercase for consistency
     ):
         """
-        Initialize the BraidSubscriber.
+        Initialize the BraidPublisher.
 
         Args:
             config_path: Path to the configuration file
@@ -93,7 +93,7 @@ class BraidSubscriber(WorkerProcess):
         )
 
         # Initialize our specific attributes
-        self.config = BraidSubscriberConfig(config_path)
+        self.config = BraidPublisherConfig(config_path)
         self.stop_event = event if event is not None else mp.Event()
 
         # Initialize logger
@@ -338,7 +338,7 @@ if __name__ == "__main__":
 
     # Create and run subscriber
     stop_event = mp.Event()
-    subscriber = BraidSubscriber(config_path=args.config, event=stop_event)
+    subscriber = BraidPublisher(config_path=args.config, event=stop_event)
 
     try:
         if subscriber.initialize():

@@ -1,10 +1,7 @@
-# ZMQ Communication Configuration
 [zmq]
-# Ports
 braid_port = 5555
 trigger_port = 5556
 
-# Topics
 braid_topic = "BRAID"
 trigger_topic = "TRIGGER"
 lens_topic = "LENS"
@@ -21,21 +18,33 @@ sham_probability = 0.1
 [liquid_lens]
 active = true
 port = "/dev/ttyUSB1"
-baudrate = 115200
+mode = "diopter"
+calibration_file = "calibrations/liquid_lens.csv"
+tracking_timeout = 3.0
 
-[braid_subscriber]
+[braid_publisher]
 url = "http://10.40.80.6:8397"
 timeout = 30
 reconnect_delay = 5
 
 [trigger_handler]
 min_trajectory_time = 1.0
-min_trigger_interval = 5.0
+min_trigger_interval = 10.0
 radius = 0.025
 z_lim = [0.15, 0.25]
 
 [camera]
-FOV = [[-0.5, 0.5], [-0.5, 0.5]] # Field of View in meters, [x_min, x_max], [y_min, y_max]
+resolution = [2016, 2016]
+fps = 500
+exposure_time = 2000
+pre_trigger_time = 0.5
+post_trigger_time = 1.5
+
+[camera.FOV]
+x_min = -0.1
+x_max = 0.1
+y_min = -0.1
+y_max = 0.1
 
 [logging]
 level = "INFO"

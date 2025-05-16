@@ -1,0 +1,482 @@
+import multiprocessing as mp
+from typing import Optional, Dict, Tuple, Any, Literal
+
+import time
+import numpy as np
+import pandas as pd
+import zmq
+from sklearn.linear_model import LinearRegression
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import PolynomialFeatures
+import json
+
+from src.utils.config import LiquidLensConfig, ZMQConfig, CameraConfig
+from src.utils.worker_process import WorkerProcess
+from src.classes.optotune_py import LensDriver
+
+class LensCalibration:
+    """
+    Calibration utility for mapping z position to lens diopter values.
+
+    This class handles the conversion between z positions and corresponding
+    lens diopter settings using polynomial regression.
+    """
+
+    def __init__(self, z_values, dpt_values, n_elements=1000):
+        """
+        Initialize the LensCalibration class.
+
+        Args:
+            z_values: Array of z position values
+            dpt_values: Array of corresponding diopter values
+            n_elements: Number of elements in the lookup table
+        """
+        self.z_values = np.array(z_values)
+        self.dpt_values = np.array(dpt_values)
+        self.n_elements = n_elements
+        self.create_lookup_table()
+
+    def create_lookup_table(self):
+        """Create a lookup table for diopter values using polynomial regression."""
+        # Generate evenly spaced z values for the lookup table
+        self.z_table = np.linspace(
+            self.z_values.min(), self.z_values.max(), self.n_elements
+        )
+
+        # Interpolate dpt values for the lookup table using polynomial regression
+        self.model = make_pipeline(PolynomialFeatures(2), LinearRegression())
+        self.model.fit(self.z_values.reshape(-1, 1), self.dpt_values)
+        self.dpt_table = self.model.predict(self.z_table.reshape(-1, 1))
+
+    def get_dpt(self, z: float) -> float:
+        """
+        Get the diopter value for a given z position.
+
+        Args:
+            z: The z position
+
+        Returns:
+            The corresponding diopter value from the lookup table
+        """
+        z = np.asarray(z)
+        # Find the index of the closest z value in the lookup table
+        idx = np.abs(self.z_table - z).argmin()
+        return self.dpt_table[idx]
+
+
+def setup_lens_calibration(interp_file: str, n_elements=1000) -> LensCalibration:
+    """
+    Set up the lens calibration model from a CSV file.
+
+    Args:
+        interp_file: Path to the CSV file containing calibration data
+        n_elements: Number of elements in the lookup table
+
+    Returns:
+        A LensCalibration object
+
+    Raises:
+        Exception: If calibration data cannot be loaded or processed
+    """
+    try:
+        interp_data = pd.read_csv(interp_file)
+        z_values, dpt_values = interp_data["z"].values, interp_data["dpt"].values
+        return LensCalibration(z_values, dpt_values, n_elements)
+    except Exception as e:
+        raise RuntimeError(f"Error setting up lens calibration: {e}")
+
+
+class LiquidLens(WorkerProcess):
+    def __init__(
+        self,
+        config_path: str = "config.toml",
+        event: Optional[mp.Event] = None,
+        process_name: str = "LiquidLens",
+        log_level: str = "INFO",
+        log_color: str = "GREEN",  # Use uppercase for consistency
+    ):
+        """
+        Initialize the BraidSubscriber.
+
+        Args:
+            config_path: Path to the configuration file
+            event: Event to signal process termination (created if None)
+            log_level: Logging level to use
+            log_color: Color for log messages
+            process_name: Name to display in logs
+        """
+        # Pass parameters to parent class
+        super().__init__(
+            event=event,
+            log_level=log_level,
+            log_color=log_color,
+            process_name=process_name,
+        )
+
+        # Initialize our specific attributes
+        self.lens_config = LiquidLensConfig(config_path)
+        self.zmq_config = ZMQConfig(config_path)
+        self.camera_config = CameraConfig(config_path)
+        self.stop_event = event if event is not None else mp.Event()
+
+        # Check if it's enabled
+        self.is_enabled = self.lens_config.active
+        if not self.is_enabled:
+            self.logger.warning("Liquid Lens process is disabled. Exiting.")
+            return
+        
+        self.is_running = False
+        self.is_tracking = False
+        self.current_tracked_obj = None
+
+        # Initialize logger
+        self._initialize_logger()
+
+        # Initalize
+        self.initialize()
+
+    def initialize(self):
+        """
+        Initialize the process.
+        """
+
+        self.logger.debug(f"Liquid Lens config: {self.lens_config}")
+        
+        # initialize the ZMQ sockets
+        self._initialize_zmq()
+
+        # initialize the liquid lens calibration model
+        self._initialize_calibration_model()
+
+        # initialize the lens
+        self._initialize_lens()
+
+        self.logger.info("Liquid Lens process initialized.")    
+
+    def _initialize_lens(self):
+        try:
+            self.lens_driver = LensDriver(port=self.lens_config.port)
+            
+            if self.lens_config.mode == "diopter":
+                self.lens_driver.to_focal_power_mode()
+            elif self.lens_config.mode == "current":
+                self.lens_driver.to_current_mode()
+            else:
+                raise ValueError(f"Invalid lens mode: {self.lens_config.mode}")
+        except Exception as e:
+            self.logger.error(f"Error initializing lens driver: {e}")
+            raise
+
+    def _initialize_calibration_model(self):
+        """
+        Initialize the lens calibration model.
+        """
+        try:
+            self.lens_calibration = setup_lens_calibration(
+                self.lens_config.interp_file, n_elements=self.lens_config.n_elements
+            )
+            self.logger.debug("Lens calibration model initialized successfully.")
+        except Exception as e:
+            self.logger.error(f"Error setting up lens calibration: {e}")
+            raise
+
+    def _initialize_zmq(self):
+        # Connect to the BraidPublisher
+        try:
+            self.context = zmq.Context()
+            self.braid_socket = self.context.socket(zmq.SUB)
+            self.braid_socket.connect(self.zmq_config.get_subscriber_address(self.zmq_config.braid_port))
+            self.braid_socket.setsockopt_string(zmq.SUBSCRIBE, self.zmq_config.braid_topic)
+
+            # Connect to the TriggerHandler
+            self.trigger_socket = self.context.socket(zmq.SUB)
+            self.trigger_socket.connect(self.zmq_config.get_subscriber_address(self.zmq_config.trigger_port))
+            self.trigger_socket.setsockopt_string(zmq.SUBSCRIBE, self.zmq_config.trigger_topic)
+            self.logger.debug("Connected to BraidPublisher and TriggerHandler.")
+        except Exception as e:
+            self.logger.error(f"Error connecting to ZMQ sockets: {e}")
+            raise
+    
+    def _receive_message(self, socket: zmq.Socket, message_type: str) -> Dict:
+        """
+        Receive a message from the specified ZMQ socket.
+
+        Args:
+            socket: The ZMQ socket to receive from
+            message_type: Type of message ('braid' or 'trigger') for error logging
+
+        Returns:
+            The parsed message or None if no message available
+        """
+        try:
+            message = socket.recv_string(flags=zmq.NOBLOCK)
+            _, json_data = message.split(" ", 1)
+            return json.loads(json_data)
+        except zmq.Again:
+            return None
+        except Exception as e:
+            self.logger.error(f"Error receiving {message_type} message: {e}")
+            return None
+
+    def _parse_message(self, message: Dict, message_type: Literal['braid', 'trigger']) -> Dict:
+        """
+        Parse different message types (BRAID tracking or trigger) into a standardized format.
+        
+        Args:
+            message: The raw message dictionary
+            message_type: Type of message ('braid' or 'trigger')
+            
+        Returns:
+            Standardized message dictionary or None if parsing fails
+        """
+        if message is None:
+            return None
+            
+        try:
+            if message_type == 'trigger':
+                # Trigger messages have a simple format with obj_id and frame
+                # Just return as is, since it's already in the expected format
+                return message
+                
+            elif message_type == 'braid':
+                # BRAID messages have a more complex structure with event types
+                if "Birth" in message:
+                    # Birth events can be ignored in this implementation
+                    return None
+                    
+                elif "Death" in message:
+                    # Death events indicate an object is no longer tracked
+                    obj_data = message["Death"]
+                    return {
+                        "event": "Death",
+                        "obj_id": obj_data.get("obj_id"),
+                        "frame": obj_data.get("frame")
+                    }
+                    
+                elif "Update" in message:
+                    # Update events contain position and velocity data
+                    obj_data = message["Update"]
+                    return {
+                        "event": "Update",
+                        "obj_id": obj_data.get("obj_id"),
+                        "frame": obj_data.get("frame"),
+                        "timestamp": obj_data.get("timestamp"),
+                        "x": obj_data.get("x"),
+                        "y": obj_data.get("y"),
+                        "z": obj_data.get("z"),
+                        "xvel": obj_data.get("xvel"),
+                        "yvel": obj_data.get("yvel"),
+                        "zvel": obj_data.get("zvel")
+                    }
+                else:
+                    # Unknown message type
+                    self.logger.warning(f"Unknown BRAID message type: {message}")
+                    return None
+            else:
+                self.logger.error(f"Unknown message type: {message_type}")
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"Error parsing {message_type} message: {e}")
+            return None
+
+    def _get_position(self, message: Dict) -> Optional[Tuple[float, float, float]]:
+        """
+        Extract position data for a specific object from the message.
+        
+        Args:
+            message: The parsed message containing object data
+            
+        Returns:
+            Tuple of (x, y, z) coordinates or None if position data not available
+        """
+        try:
+            if not message:
+                return None
+                
+            # For standardized BRAID update messages
+            if message.get("event") == "Update":
+                x = message.get("x")
+                y = message.get("y")
+                z = message.get("z")
+                
+                # Ensure all position values are present
+                if x is not None and y is not None and z is not None:
+                    return (x, y, z)
+            
+            return None
+        except Exception as e:
+            self.logger.error(f"Error extracting position data: {e}")
+            return None
+
+    def _is_in_camera_FOV(self, x: float, y: float):
+        """
+        Check if position is within camera field of view.
+        
+        Args:
+            x: X coordinate of the object
+            y: Y coordinate of the object
+            
+        Returns:
+            Boolean indicating if object is in FOV
+        """
+        # Check if coordinates are within the defined FOV boundaries
+        # FOV boundaries are now directly accessible from the lens_config
+        return (self.lens_config.fov_x_min <= x <= self.lens_config.fov_x_max and
+                self.lens_config.fov_y_min <= y <= self.lens_config.fov_y_max)
+
+    def run(self):
+        if not self.is_enabled:
+            self.logger.warning("Liquid Lens process is disabled. Exiting.")
+            return
+
+        self.is_running = True
+        self.logger.info("Liquid Lens process started.")
+
+        while self.is_running and not self.stop_event.is_set():
+            try:
+                # Check for messages from the TriggerHandler
+                trigger_data = self._parse_message(
+                    self._receive_message(self.trigger_socket, "trigger"), 
+                    "trigger"
+                )
+
+                if trigger_data is not None:
+                    obj_id = trigger_data.get("obj_id")
+                    frame = trigger_data.get("frame")
+                    
+                    if obj_id is not None and frame is not None:
+                        self.logger.info(f"Received trigger for object {obj_id} on frame {frame}")
+                        self.is_tracking = True
+                        self.tracking_start_time = time.time()
+                        self.current_tracked_obj = obj_id
+                        self.last_position_time = time.time()  # Track last time we got position data
+
+                # Inner loop for tracking object
+                position_timeout = 0.5  # Time to wait for position data before giving up (seconds)
+                
+                while (self.is_tracking and 
+                       time.time() - self.tracking_start_time < self.lens_config.tracking_timeout):
+                    
+                    # Check if a new trigger has arrived that should interrupt current tracking
+                    new_trigger = self._parse_message(
+                        self._receive_message(self.trigger_socket, "trigger"),
+                        "trigger"
+                    )
+                    
+                    if new_trigger is not None:
+                        new_obj_id = new_trigger.get("obj_id")
+                        new_frame = new_trigger.get("frame")
+                        
+                        if new_obj_id is not None and new_frame is not None:
+                            self.logger.info(f"Interrupting tracking of obj {self.current_tracked_obj} for new trigger on obj {new_obj_id}")
+                            # Break out of inner loop to handle the new trigger
+                            break
+                    
+                    # Try to get position data for the tracked object
+                    braid_data = self._parse_message(
+                        self._receive_message(self.braid_socket, "braid"),
+                        "braid"
+                    )
+                    
+                    if braid_data is None:
+                        # Check if we've waited too long for position data
+                        if time.time() - self.last_position_time > position_timeout:
+                            self.logger.warning(f"No position data received for {position_timeout}s, stopping tracking")
+                            self.is_tracking = False
+                            break
+                        time.sleep(0.01)  # Short sleep to avoid busy waiting
+                        continue
+                    
+                    # Check for Death messages
+                    if braid_data.get("event") == "Death" and braid_data.get("obj_id") == self.current_tracked_obj:
+                        self.logger.info(f"Tracked object {self.current_tracked_obj} is no longer visible")
+                        self.is_tracking = False
+                        break
+                    
+                    # Skip messages for other objects
+                    if braid_data.get("obj_id") != self.current_tracked_obj:
+                        continue
+                    
+                    # Update time of last received position
+                    self.last_position_time = time.time()
+                    
+                    # Get the position of the object
+                    position = self._get_position(braid_data)
+                    if position is None:
+                        self.logger.warning(f"Received message for obj {self.current_tracked_obj} but couldn't extract position")
+                        continue
+                        
+                    x, y, z = position
+
+                    # Check if the object is in the camera's field of view
+                    if not self._is_in_camera_FOV(x, y):
+                        self.logger.info(f"Object {self.current_tracked_obj} is out of camera FOV at position ({x}, {y})")
+                        self.is_tracking = False
+                        break
+
+                    # Get the diopter value from the calibration model
+                    try:
+                        dpt = self.lens_calibration.get_dpt(z)
+                        self.lens_driver.set_focal_power(dpt)
+                        self.logger.debug(f"Setting lens to {dpt} diopters for z={z}")
+                    except Exception as e:
+                        self.logger.error(f"Error adjusting lens: {e}")
+                        # Continue tracking even if lens adjustment fails
+                
+                # Check if tracking timed out
+                if self.is_tracking and time.time() - self.tracking_start_time >= self.lens_config.tracking_timeout:
+                    self.logger.info(f"Tracking timeout reached for object {self.current_tracked_obj}")
+                    self.is_tracking = False
+            
+            except Exception as e:
+                self.logger.error(f"Error in Liquid Lens process: {e}")
+                # Continue running despite errors, only exit if stop event is set
+
+            finally:
+                # Sleep to avoid busy waiting in the outer loop
+                time.sleep(0.01)
+
+        self.logger.info("Liquid Lens process stopped.")
+
+        # Close the lens driver and sockets
+        self.close()
+        self.logger.info("Liquid Lens process closed.")
+
+    def close(self):
+        """Close all resources and connections."""
+        self.is_running = False
+        self.is_tracking = False
+
+        # Close lens driver if it exists
+        if hasattr(self, "lens_driver") and self.lens_driver:
+            try:
+                self.lens_driver.close()
+                self.logger.debug("Lens driver closed successfully")
+            except Exception as e:
+                self.logger.error(f"Error closing lens driver: {e}")
+        
+        # Close ZMQ sockets if they exist
+        if hasattr(self, "braid_socket") and self.braid_socket:
+            try:
+                self.braid_socket.close()
+                self.logger.debug("Braid socket closed successfully")
+            except Exception as e:
+                self.logger.error(f"Error closing Braid socket: {e}")
+
+        if hasattr(self, "trigger_socket") and self.trigger_socket:
+            try:
+                self.trigger_socket.close()
+                self.logger.debug("Trigger socket closed successfully")
+            except Exception as e:
+                self.logger.error(f"Error closing Trigger socket: {e}")
+
+        # Terminate ZMQ context if it exists
+        if hasattr(self, "context") and self.context:
+            try:
+                self.context.term()
+                self.logger.debug("ZMQ context terminated successfully")
+            except Exception as e:
+                self.logger.error(f"Error terminating ZMQ context: {e}")
+        
+        self.logger.info("Liquid Lens process closed.")
