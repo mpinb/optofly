@@ -197,7 +197,7 @@ class LiquidLens(WorkerProcess):
             self.logger.error(f"Error connecting to ZMQ sockets: {e}")
             raise
     
-    def _receive_message(self, socket: zmq.Socket, message_type: str) -> Dict:
+    def _receive_message(self, socket: zmq.Socket, message_type: Literal['braid', 'trigger']) -> Dict:
         """
         Receive a message from the specified ZMQ socket.
 
@@ -357,21 +357,6 @@ class LiquidLens(WorkerProcess):
                 
                 while (self.is_tracking and 
                        time.time() - self.tracking_start_time < self.lens_config.tracking_timeout):
-                    
-                    # Check if a new trigger has arrived that should interrupt current tracking
-                    new_trigger = self._parse_message(
-                        self._receive_message(self.trigger_socket, "trigger"),
-                        "trigger"
-                    )
-                    
-                    if new_trigger is not None:
-                        new_obj_id = new_trigger.get("obj_id")
-                        new_frame = new_trigger.get("frame")
-                        
-                        if new_obj_id is not None and new_frame is not None:
-                            self.logger.info(f"Interrupting tracking of obj {self.current_tracked_obj} for new trigger on obj {new_obj_id}")
-                            # Break out of inner loop to handle the new trigger
-                            break
                     
                     # Try to get position data for the tracked object
                     braid_data = self._parse_message(
