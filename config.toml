@@ -22,6 +22,14 @@ mode = "diopter"
 calibration_file = "calibrations/liquid_lens.csv"
 tracking_timeout = 3.0
 
+[liquid_lens.kalman]
+enabled = true
+process_noise = 0.01  # Process noise covariance (how quickly velocity can change)
+measurement_noise = 0.1  # Measurement noise covariance (accuracy of position measurements)
+initial_covariance = 1.0  # Initial state covariance (uncertainty in initial state)
+system_latency = 0.05  # System latency in seconds (message processing + lens adjustment time)
+prediction_horizon = 0.1  # How far in the future to predict (in seconds)
+
 [braid_publisher]
 url = "http://10.40.80.6:8397"
 timeout = 30

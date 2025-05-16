@@ -1,5 +1,5 @@
 import multiprocessing as mp
-from typing import Optional, Dict, Tuple, Any, Literal
+from typing import Optional, Dict, Tuple, Literal
 
 import time
 import numpy as np
@@ -12,6 +12,7 @@ import json
 
 from src.utils.config import LiquidLensConfig, ZMQConfig, CameraConfig
 from src.utils.worker_process import WorkerProcess
+from src.utils.kalman_filter import KalmanFilter
 from src.classes.optotune_py import LensDriver
 
 class LensCalibration:
@@ -129,6 +130,9 @@ class LiquidLens(WorkerProcess):
         self.is_tracking = False
         self.current_tracked_obj = None
 
+        # Dictionary to store Kalman filters for each tracked object
+        self.kalman_filters = {}
+
         # Initialize logger
         self._initialize_logger()
 
@@ -150,6 +154,16 @@ class LiquidLens(WorkerProcess):
 
         # initialize the lens
         self._initialize_lens()
+
+        # Log the Kalman filter configuration
+        if self.lens_config.kalman_enabled:
+            self.logger.info(
+                f"Kalman filter enabled with process_noise={self.lens_config.process_noise}, "
+                f"measurement_noise={self.lens_config.measurement_noise}, "
+                f"prediction_horizon={self.lens_config.prediction_horizon}s"
+            )
+        else:
+            self.logger.info("Kalman filter is disabled")
 
         self.logger.info("Liquid Lens process initialized.")    
 
@@ -308,6 +322,97 @@ class LiquidLens(WorkerProcess):
         except Exception as e:
             self.logger.error(f"Error extracting position data: {e}")
             return None
+            
+    def _get_velocity(self, message: Dict) -> Optional[Tuple[float, float, float]]:
+        """
+        Extract velocity data for a specific object from the message.
+        
+        Args:
+            message: The parsed message containing object data
+            
+        Returns:
+            Tuple of (vx, vy, vz) velocities or None if velocity data not available
+        """
+        try:
+            if not message:
+                return None
+                
+            # For standardized BRAID update messages
+            if message.get("event") == "Update":
+                vx = message.get("xvel")
+                vy = message.get("yvel")
+                vz = message.get("zvel")
+                
+                # Ensure all velocity values are present
+                if vx is not None and vy is not None and vz is not None:
+                    return (vx, vy, vz)
+            
+            return None
+        except Exception as e:
+            self.logger.error(f"Error extracting velocity data: {e}")
+            return None
+            
+    def _update_kalman_filter(self, obj_id: str, message: Dict) -> None:
+        """
+        Update or initialize the Kalman filter for an object.
+        
+        Args:
+            obj_id: The ID of the tracked object
+            message: The parsed message containing object data
+        """
+        if not self.lens_config.kalman_enabled:
+            return
+            
+        try:
+            position = self._get_position(message)
+            velocity = self._get_velocity(message)
+            timestamp = message.get("timestamp")
+            
+            if position is None:
+                return
+                
+            # If we don't have a filter for this object yet, create one
+            if obj_id not in self.kalman_filters:
+                self.logger.debug(f"Initializing Kalman filter for object {obj_id}")
+                self.kalman_filters[obj_id] = KalmanFilter(
+                    process_noise=self.lens_config.process_noise,
+                    measurement_noise=self.lens_config.measurement_noise,
+                    initial_covariance=self.lens_config.initial_covariance
+                )
+                # Initialize with the current position, velocity, and timestamp
+                self.kalman_filters[obj_id].init(position, velocity, timestamp)
+            else:
+                # Update the existing filter
+                self.kalman_filters[obj_id].update(position, velocity, timestamp)
+                
+        except Exception as e:
+            self.logger.error(f"Error updating Kalman filter for object {obj_id}: {e}")
+            
+    def _predict_position(self, obj_id: str, prediction_time: float = None) -> Optional[Tuple[float, float, float]]:
+        """
+        Predict the future position of an object using its Kalman filter.
+        
+        Args:
+            obj_id: The ID of the tracked object
+            prediction_time: Time in the future to predict (seconds)
+            
+        Returns:
+            Predicted position (x, y, z) or None if prediction fails
+        """
+        if not self.lens_config.kalman_enabled or obj_id not in self.kalman_filters:
+            return None
+            
+        try:
+            # If no specific prediction time is provided, use the configured prediction horizon
+            if prediction_time is None:
+                prediction_time = self.lens_config.prediction_horizon
+                
+            # Get the predicted position
+            return self.kalman_filters[obj_id].predict(prediction_time)
+            
+        except Exception as e:
+            self.logger.error(f"Error predicting position for object {obj_id}: {e}")
+            return None
 
     def _is_in_camera_FOV(self, x: float, y: float):
         """
@@ -393,6 +498,10 @@ class LiquidLens(WorkerProcess):
                         continue
                         
                     x, y, z = position
+                    
+                    # Update the Kalman filter with the new measurement
+                    if self.lens_config.kalman_enabled:
+                        self._update_kalman_filter(self.current_tracked_obj, braid_data)
 
                     # Check if the object is in the camera's field of view
                     if not self._is_in_camera_FOV(x, y):
@@ -400,11 +509,33 @@ class LiquidLens(WorkerProcess):
                         self.is_tracking = False
                         break
 
-                    # Get the diopter value from the calibration model
+                    # Set the lens focus based on current or predicted position
                     try:
-                        dpt = self.lens_calibration.get_dpt(z)
+                        # Use Kalman filter to predict the future position if enabled
+                        focus_position = None
+                        if self.lens_config.kalman_enabled:
+                            # Get predicted position with latency compensation
+                            # This combines both the system latency and the prediction horizon
+                            prediction_time = self.lens_config.system_latency + self.lens_config.prediction_horizon
+                            predicted_position = self._predict_position(self.current_tracked_obj, prediction_time)
+                            
+                            if predicted_position is not None:
+                                # Use the predicted z-coordinate for focus
+                                focus_position = predicted_position[2]
+                                self.logger.debug(
+                                    f"Using predicted position for object {self.current_tracked_obj}: "
+                                    f"current z={z:.3f}, predicted z={focus_position:.3f}, "
+                                    f"prediction_time={prediction_time:.3f}s"
+                                )
+                        
+                        # If prediction failed or Kalman filter is disabled, use the current position
+                        if focus_position is None:
+                            focus_position = z
+                            
+                        # Get the diopter value from the calibration model and set the lens
+                        dpt = self.lens_calibration.get_dpt(focus_position)
                         self.lens_driver.set_focal_power(dpt)
-                        self.logger.debug(f"Setting lens to {dpt} diopters for z={z}")
+                        self.logger.debug(f"Setting lens to {dpt} diopters for z={focus_position}")
                     except Exception as e:
                         self.logger.error(f"Error adjusting lens: {e}")
                         # Continue tracking even if lens adjustment fails
@@ -432,6 +563,11 @@ class LiquidLens(WorkerProcess):
         """Close all resources and connections."""
         self.is_running = False
         self.is_tracking = False
+
+        # Clean up Kalman filters
+        if hasattr(self, "kalman_filters") and self.kalman_filters:
+            self.kalman_filters.clear()
+            self.logger.debug("Kalman filters cleared")
 
         # Close lens driver if it exists
         if hasattr(self, "lens_driver") and self.lens_driver:

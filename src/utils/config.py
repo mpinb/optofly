@@ -1,30 +1,33 @@
+#!/usr/bin/env python3
 """
-Configuration classes for OptoFly components.
+Configuration classes for the OptoFly system.
+
+These utilities load and validate configuration from TOML files.
 """
 
-import logging
 import tomllib
-from typing import Any, Dict, Optional, List, Tuple
+
+# Setup custom logger for this module
+import logging
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+
 
 class ConfigBase:
-    """Base class for configuration objects with common functionality."""
+    """Base class for all configuration objects."""
 
-    def __init__(self, config_path: str = "config.toml", section: Optional[str] = None):
-        """Initialize configuration from TOML file.
+    def __init__(self, config_path: str, section: str = None):
+        """Initialize the configuration.
 
         Args:
-            config_path: Path to the TOML configuration file
-            section: Section name in the TOML file to read from
+            config_path: Path to the configuration file
+            section: Optional section in the config file to load
         """
         self.config_path = config_path
         self.section = section
-        self._load_config()
 
-    def _load_config(self) -> Dict[str, Any]:
-        """Load configuration from TOML file."""
+    def _load_config(self):
+        """Load configuration from file."""
         try:
             with open(self.config_path, "rb") as f:
                 config = tomllib.load(f)
@@ -42,6 +45,7 @@ class ConfigBase:
         except Exception as e:
             logger.error(f"Error opening config file: {e}")
             raise
+
 
 class LiquidLensConfig(ConfigBase):
     """Configuration for the Liquid Lens hardware control."""
@@ -62,8 +66,42 @@ class LiquidLensConfig(ConfigBase):
         self.port: str = config["port"]
         self.baudrate: int = config["baudrate"]
 
+        # Control mode
+        self.mode: str = config.get("mode", "diopter")
+        
+        # Calibration and tracking settings
+        self.calibration_file: str = config.get("calibration_file", "calibrations/liquid_lens.csv")
+        self.tracking_timeout: float = config.get("tracking_timeout", 3.0)
+        
+        # For lens calibration
+        self.interp_file: str = config.get("calibration_file", "calibrations/liquid_lens.csv")
+        self.n_elements: int = config.get("n_elements", 1000)
+        
+        # Get camera FOV boundaries from CameraConfig
+        camera_config = CameraConfig(config_path)
+        self.fov_x_min = camera_config.fov_x_min
+        self.fov_x_max = camera_config.fov_x_max
+        self.fov_y_min = camera_config.fov_y_min
+        self.fov_y_max = camera_config.fov_y_max
+
+        # Kalman filter settings
+        kalman_config = config.get("kalman", {})
+        # Enable/disable Kalman filtering
+        self.kalman_enabled: bool = kalman_config.get("enabled", True)
+        # Process noise covariance (how quickly velocity can change)
+        self.process_noise: float = kalman_config.get("process_noise", 0.01)
+        # Measurement noise covariance (accuracy of position measurements)
+        self.measurement_noise: float = kalman_config.get("measurement_noise", 0.1)
+        # Initial state covariance (uncertainty in initial state)
+        self.initial_covariance: float = kalman_config.get("initial_covariance", 1.0)
+        # System latency in seconds (message processing + lens adjustment time)
+        self.system_latency: float = kalman_config.get("system_latency", 0.05)
+        # How far in the future to predict (in seconds)
+        self.prediction_horizon: float = kalman_config.get("prediction_horizon", 0.1)
+
         # ZMQ configuration
         self.zmq = ZMQConfig(config_path)
+
 
 class ZMQConfig(ConfigBase):
     """Configuration for ZMQ communication channels across the system."""
@@ -85,312 +123,57 @@ class ZMQConfig(ConfigBase):
         # Validate configuration
         self._validate_config()
 
-    def _validate_config(self) -> None:
-        """Validate port values."""
-        for port_name, port_value in [
-            ("braid_port", self.braid_port),
-            ("trigger_port", self.trigger_port),
-        ]:
-            if port_value <= 1024 or port_value > 65535:
-                raise ValueError(
-                    f"{port_name} must be between 1025 and 65535, got: {port_value}"
-                )
+    def _validate_config(self):
+        """Validate the ZMQ configuration."""
+        if self.braid_port == self.trigger_port:
+            raise ValueError("Braid and trigger ports must be different")
 
-    def get_publisher_address(self, port: int) -> str:
-        """Get the address string for a publisher socket."""
+    def get_subscriber_address(self, port: int):
+        """Get the subscriber address for a given port."""
+        return f"tcp://localhost:{port}"
+
+    def get_publisher_address(self, port: int):
+        """Get the publisher address for a given port."""
         return f"tcp://*:{port}"
 
-    def get_subscriber_address(self, port: int, host: str = "localhost") -> str:
-        """Get the address string for a subscriber socket."""
-        return f"tcp://{host}:{port}"
 
-    def __str__(self) -> str:
-        """Human-readable representation of configuration."""
-        return (
-            f"ZMQ Config:\n"
-            f"  Braid Port: {self.braid_port}\n"
-            f"  Trigger Port: {self.trigger_port}\n"
-            f"  Braid Topic: {self.braid_topic}\n"
-            f"  Trigger Topic: {self.trigger_topic}\n"
-            f"  Lens Topic: {self.lens_topic}"
-        )
-
-
-class TriggerHandlerConfig(ConfigBase):
-    """Configuration for the TriggerHandler process.
-
-    This class defines parameters for trajectory-based triggering including
-    timing constraints, spatial dimensions, and trigger area geometry.
-    All spatial measurements are in meters.
-    """
+class TriggerConfig(ConfigBase):
+    """Configuration for the trigger handler."""
 
     def __init__(self, config_path: str = "config.toml"):
-        """Initialize TriggerHandler configuration.
-
-        Args:
-            config_path: Path to the TOML configuration file
-        """
-        super().__init__(config_path, "trigger_handler")
+        """Initialize trigger configuration."""
+        super().__init__(config_path, "trigger")
         config = self._load_config()
 
-        # Timing parameters
-        self.min_trajectory_time: float = config["min_trajectory_time"]
-        self.min_trigger_interval: float = config["min_trigger_interval"]
+        # Speed thresholds
+        self.min_speed: float = config["min_speed"]
+        self.max_speed: float = config["max_speed"]
+        self.pre_trigger_frames: int = config["pre_trigger_frames"]
+        self.post_trigger_frames: int = config["post_trigger_frames"]
 
-        # Spatial parameters (in meters)
-        self.radius: float = config["radius"]
+        # Frame rate used to convert between time and frames
+        self.frame_rate: float = config["frame_rate"]
 
-        # Z-axis limits
-        self.z_lim: List[float] = self._parse_z_lim(config["z_lim"])
+        # Calculate time equivalents for convenience
+        self.pre_trigger_time: float = self.pre_trigger_frames / self.frame_rate
+        self.post_trigger_time: float = self.post_trigger_frames / self.frame_rate
 
-        # Component status (from full config)
-        full_config = ConfigBase(config_path)._load_config()
-        self.opto_trigger_active: bool = full_config.get("opto_trigger", {}).get(
-            "active", True
-        )
-        self.liquid_lens_active: bool = full_config.get("liquid_lens", {}).get(
-            "active", False
-        )
+        # Get camera config for FOV boundaries
+        camera_config = CameraConfig(config_path)
+        self.fov_x_min = camera_config.fov_x_min
+        self.fov_x_max = camera_config.fov_x_max
+        self.fov_y_min = camera_config.fov_y_min
+        self.fov_y_max = camera_config.fov_y_max
 
-        # ZMQ configuration
-        self.zmq = ZMQConfig(config_path)
-
-        # Validate configuration
-        self._validate_config()
-
-    def _parse_z_lim(self, z_lim_value) -> List[float]:
-        """Parse Z-limit values with validation."""
-        if isinstance(z_lim_value, list) and len(z_lim_value) == 2:
-            return [float(z_lim_value[0]), float(z_lim_value[1])]
-        else:
-            raise ValueError(
-                f"z_lim must be a list of two float values, got: {z_lim_value}"
-            )
-
-    def _validate_config(self) -> None:
-        """Validate configuration values."""
-        if self.min_trajectory_time <= 0:
-            raise ValueError(
-                f"min_trajectory_time must be positive, got: {self.min_trajectory_time}"
-            )
-
-        if self.min_trigger_interval <= 0:
-            raise ValueError(
-                f"min_trigger_interval must be positive, got: {self.min_trigger_interval}"
-            )
-
-        if self.radius <= 0:
-            raise ValueError(f"radius must be positive, got: {self.radius}")
-
-        if self.z_lim[0] >= self.z_lim[1]:
-            raise ValueError(f"z_lim[0] must be less than z_lim[1], got: {self.z_lim}")
-
-    def get_trigger_area_description(self) -> str:
-        """Get a human-readable description of the trigger area."""
-        radius_cm = self.radius * 100
-        z_min_cm = self.z_lim[0] * 100
-        z_max_cm = self.z_lim[1] * 100
-        height_cm = (self.z_lim[1] - self.z_lim[0]) * 100
-
-        return (
-            f"Cylindrical area with radius {radius_cm:.1f} cm, "
-            f"height {height_cm:.1f} cm, "
-            f"from Z={z_min_cm:.1f} to Z={z_max_cm:.1f} cm"
-        )
-
-    def __str__(self) -> str:
-        """Human-readable representation of configuration."""
-        return (
-            f"TriggerHandler Config:\n"
-            f"  Min Trajectory Time: {self.min_trajectory_time} seconds\n"
-            f"  Min Trigger Interval: {self.min_trigger_interval} seconds\n"
-            f"  Trigger Area: {self.get_trigger_area_description()}\n"
-            f"  Opto Trigger Active: {self.opto_trigger_active}\n"
-            f"  Liquid Lens Active: {self.liquid_lens_active}\n"
-            f"  ZMQ: Using shared ZMQ configuration"
-        )
-
-
-class OptoTriggerConfig(ConfigBase):
-    """Configuration for optical trigger hardware control."""
-
-    def __init__(self, config_path: str = "config.toml"):
-        """Initialize OptoTrigger configuration.
-
-        Args:
-            config_path: Path to the TOML configuration file
-        """
-        super().__init__(config_path, "opto_trigger")
-        config = self._load_config()
-
-        # Status flag
-        self.active: bool = config.get("active", True)
-
-        # Hardware configuration
-        self.port: str = config["port"]
-        self.baudrate: int = config["baudrate"]
-
-        # Stimulation parameters
-        self.duration: int = config["duration"]
-        self.intensity: int = config["intensity"]
-        self.frequency: int = config["frequency"]
-
-        # Experimental settings
-        self.sham_probability: float = config["sham_probability"]
-        self.sham: bool = config.get("sham", False)
-
-        # ZMQ configuration
-        self.zmq = ZMQConfig(config_path)
-
-    def get_trigger_command(self) -> str:
-        """Generate command string in the format expected by Arduino."""
-        return f"<{self.duration},{self.intensity},{self.frequency}>"
-
-    def __str__(self) -> str:
-        """Human-readable representation of configuration."""
-        return (
-            f"OptoTrigger Config:\n"
-            f"  Active: {self.active}\n"
-            f"  Port: {self.port}\n"
-            f"  Baudrate: {self.baudrate}\n"
-            f"  Duration: {self.duration}ms\n"
-            f"  Intensity: {self.intensity}/255\n"
-            f"  Frequency: {self.frequency}Hz\n"
-            f"  Sham Probability: {self.sham_probability}\n"
-            f"  ZMQ: Using shared ZMQ configuration"
-        )
-
-
-class BraidPublisherConfig(ConfigBase):
-    """Configuration for Braid server connection and ZMQ publishing."""
-
-    def __init__(self, config_path: str = "config.toml"):
-        """Initialize BraidPublisher configuration.
-
-        Args:
-            config_path: Path to the TOML configuration file
-        """
-        super().__init__(config_path, "braid_publisher")
-        config = self._load_config()
-
-        # Server connection
-        self.url: str = config["url"]
-
-        # Optional configurations with defaults
-        self.reconnect_delay: int = config.get("reconnect_delay", 5)
-        self.timeout: int = config.get("timeout", 30)
-
-        # ZMQ configuration
-        self.zmq = ZMQConfig(config_path)
-
-    def __str__(self) -> str:
-        """Human-readable representation of configuration."""
-        return (
-            f"Braid Publisher Config:\n"
-            f"  URL: {self.url}\n"
-            f"  Reconnect Delay: {self.reconnect_delay}s\n"
-            f"  Timeout: {self.timeout}s\n"
-            f"  ZMQ: Using shared ZMQ configuration"
-        )
-
-
-class CameraConfig(ConfigBase):
-    """Configuration for camera settings and field of view."""
-
-    def __init__(self, config_path: str = "config.toml"):
-        """Initialize Camera configuration.
-
-        Args:
-            config_path: Path to the TOML configuration file
-        """
-        super().__init__(config_path, "camera")
-        config = self._load_config()
-
-        # Camera hardware settings
-        self.resolution: Tuple[int, int] = tuple(config.get("resolution", [2016, 2016]))
-        self.fps: int = config.get("fps", 500)
-        self.exposure_time: int = config.get("exposure_time", 2000)  # in microseconds
-        
-        # Trigger settings
-        self.pre_trigger_time: float = config.get("pre_trigger_time", 0.5)  # in seconds
-        self.post_trigger_time: float = config.get("post_trigger_time", 1.5)  # in seconds
-        
-        # Calculate frames based on timing
-        self.pre_trigger_frames: int = int(self.pre_trigger_time * self.fps)
-        self.post_trigger_frames: int = int(self.post_trigger_time * self.fps)
-        
-        # Field of view boundaries (in meters)
-        if "FOV" in config:
-            fov = config["FOV"]
-            self.fov_x_min: float = fov.get("x_min", -0.1)
-            self.fov_x_max: float = fov.get("x_max", 0.1)
-            self.fov_y_min: float = fov.get("y_min", -0.1)
-            self.fov_y_max: float = fov.get("y_max", 0.1)
-        else:
-            # Default FOV if not specified
-            self.fov_x_min: float = -0.1
-            self.fov_x_max: float = 0.1
-            self.fov_y_min: float = -0.1
-            self.fov_y_max: float = 0.1
-            
-        # Validate configuration
-        self._validate_config()
-
-    def _validate_config(self) -> None:
-        """Validate configuration values."""
-        if len(self.resolution) != 2 or not all(isinstance(dim, int) for dim in self.resolution):
-            raise ValueError(f"Resolution must be a tuple of two integers, got: {self.resolution}")
-            
-        if self.fps <= 0:
-            raise ValueError(f"FPS must be positive, got: {self.fps}")
-            
-        if self.exposure_time <= 0:
-            raise ValueError(f"Exposure time must be positive, got: {self.exposure_time}")
-            
-        if self.pre_trigger_time < 0:
-            raise ValueError(f"Pre-trigger time cannot be negative, got: {self.pre_trigger_time}")
-            
-        if self.post_trigger_time < 0:
-            raise ValueError(f"Post-trigger time cannot be negative, got: {self.post_trigger_time}")
-            
-        if self.fov_x_min >= self.fov_x_max:
-            raise ValueError(f"FOV x_min must be less than x_max, got: [{self.fov_x_min}, {self.fov_x_max}]")
-            
-        if self.fov_y_min >= self.fov_y_max:
-            raise ValueError(f"FOV y_min must be less than y_max, got: [{self.fov_y_min}, {self.fov_y_max}]")
-
-    def get_fov_dimensions(self) -> Tuple[float, float]:
-        """Get the physical dimensions of the field of view.
-        
-        Returns:
-            Tuple of (width, height) in meters
-        """
-        width = self.fov_x_max - self.fov_x_min
-        height = self.fov_y_max - self.fov_y_min
-        return (width, height)
-    
-    def get_pixel_size(self) -> Tuple[float, float]:
-        """Calculate the physical size of each pixel in meters.
-        
-        Returns:
-            Tuple of (width, height) in meters per pixel
-        """
-        fov_width, fov_height = self.get_fov_dimensions()
-        width_per_pixel = fov_width / self.resolution[0]
-        height_per_pixel = fov_height / self.resolution[1]
-        return (width_per_pixel, height_per_pixel)
-
-    def __str__(self) -> str:
-        """Human-readable representation of configuration."""
-        # Calculate FOV size in mm for more readable output
+    def __str__(self):
+        """Return a string representation of the configuration."""
+        # Calculate FOV dimensions in mm for display
         fov_width_mm = (self.fov_x_max - self.fov_x_min) * 1000
         fov_height_mm = (self.fov_y_max - self.fov_y_min) * 1000
-        
+
         return (
-            f"Camera Config:\n"
-            f"  Resolution: {self.resolution[0]} x {self.resolution[1]}\n"
-            f"  FPS: {self.fps}\n"
-            f"  Exposure Time: {self.exposure_time} μs\n"
+            f"Trigger Configuration:\n"
+            f"  Speed Threshold: {self.min_speed} to {self.max_speed} m/s\n"
             f"  Pre-trigger Time: {self.pre_trigger_time}s ({self.pre_trigger_frames} frames)\n"
             f"  Post-trigger Time: {self.post_trigger_time}s ({self.post_trigger_frames} frames)\n"
             f"  FOV Dimensions: {fov_width_mm:.1f} x {fov_height_mm:.1f} mm\n"
@@ -398,61 +181,48 @@ class CameraConfig(ConfigBase):
         )
 
 
-class LiquidLensConfig(ConfigBase):
-    """Configuration for the Liquid Lens hardware control."""
+class CameraConfig(ConfigBase):
+    """Configuration for the camera and visual field."""
 
     def __init__(self, config_path: str = "config.toml"):
-        """Initialize LiquidLens configuration.
-
-        Args:
-            config_path: Path to the TOML configuration file
-        """
-        super().__init__(config_path, "liquid_lens")
+        """Initialize camera configuration."""
+        super().__init__(config_path, "camera")
         config = self._load_config()
 
-        # Status flag
-        self.active: bool = config.get("active", False)
+        # Camera properties
+        self.pixel_size: float = config["pixel_size"] / 1000.0  # Convert from μm to mm
+        self.sensor_width_px: int = config["sensor_width_px"]
+        self.sensor_height_px: int = config["sensor_height_px"]
 
-        # Hardware configuration
-        self.port: str = config["port"]
-        self.baudrate: int = config["baudrate"]
-        
-        # Control mode
-        self.mode: str = config.get("mode", "diopter")
-        
-        # Calibration and tracking settings
-        self.calibration_file: str = config.get("calibration_file", "calibrations/liquid_lens.csv")
-        self.tracking_timeout: float = config.get("tracking_timeout", 3.0)
-        
-        # For lens calibration
-        self.interp_file: str = config.get("calibration_file", "calibrations/liquid_lens.csv")
-        self.n_elements: int = config.get("n_elements", 1000)
-        
-        # Get camera FOV boundaries from CameraConfig
-        camera_config = CameraConfig(config_path)
-        self.fov_x_min = camera_config.fov_x_min
-        self.fov_x_max = camera_config.fov_x_max
-        self.fov_y_min = camera_config.fov_y_min
-        self.fov_y_max = camera_config.fov_y_max
+        # Calculate sensor dimensions in mm
+        self.sensor_width_mm: float = self.sensor_width_px * self.pixel_size
+        self.sensor_height_mm: float = self.sensor_height_px * self.pixel_size
 
-        # ZMQ configuration
-        self.zmq = ZMQConfig(config_path)
+        # Field of view dimensions at working distance
+        self.working_distance: float = config["working_distance"] / 1000.0  # Convert from mm to m
+        self.magnification: float = config["magnification"]
 
-    def __str__(self) -> str:
-        """Human-readable representation of configuration."""
-        fov_str = (
-            f"  FOV Boundaries: [{self.fov_x_min}, {self.fov_x_max}] x "
-            f"[{self.fov_y_min}, {self.fov_y_max}]\n"
-        )
-            
+        # Calculate field of view dimensions in meters
+        fov_width_m = (self.sensor_width_mm / self.magnification) / 1000.0  # Convert from mm to m
+        fov_height_m = (self.sensor_height_mm / self.magnification) / 1000.0
+
+        # Calculate field of view boundaries
+        self.fov_x_min: float = -fov_width_m / 2.0
+        self.fov_x_max: float = fov_width_m / 2.0
+        self.fov_y_min: float = -fov_height_m / 2.0
+        self.fov_y_max: float = fov_height_m / 2.0
+
+    def __str__(self):
+        """Return a string representation of the configuration."""
+        fov_width_mm = (self.fov_x_max - self.fov_x_min) * 1000
+        fov_height_mm = (self.fov_y_max - self.fov_y_min) * 1000
+
         return (
-            f"Liquid Lens Config:\n"
-            f"  Active: {self.active}\n"
-            f"  Port: {self.port}\n"
-            f"  Baudrate: {self.baudrate}\n"
-            f"  Mode: {self.mode}\n"
-            f"  Calibration File: {self.calibration_file}\n"
-            f"  Tracking Timeout: {self.tracking_timeout}s\n"
-            f"{fov_str}"
-            f"  ZMQ: Using shared ZMQ configuration"
+            f"Camera Configuration:\n"
+            f"  Sensor: {self.sensor_width_px} x {self.sensor_height_px} px "
+            f"({self.sensor_width_mm:.2f} x {self.sensor_height_mm:.2f} mm)\n"
+            f"  Pixel Size: {self.pixel_size*1000:.2f} μm\n"
+            f"  Working Distance: {self.working_distance*1000:.2f} mm\n"
+            f"  Magnification: {self.magnification}x\n"
+            f"  Field of View: {fov_width_mm:.2f} x {fov_height_mm:.2f} mm"
         )

@@ -525,7 +525,6 @@ class TriggerHandler(WorkerProcess):
                 try:
                     # Receive multipart message (topic, content)
                     topic, message = self.subscriber.recv_multipart()
-                    topic_str = topic.decode("utf-8")
                     message_str = message.decode("utf-8")
 
                     # Parse JSON message

@@ -9,9 +9,7 @@ import argparse
 import json
 import multiprocessing as mp
 import sys
-import threading
 import time
-from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -302,7 +300,6 @@ class BraidVisualizer(WorkerProcess):
         if not self.rr_initialized or not self.tracked_objects:
             return
 
-        current_time = time.time()
 
         # Log positions for the 2D overview
         for obj_id, obj_data in self.tracked_objects.items():
@@ -443,7 +440,7 @@ def run_as_script():
     try:
         visualizer.start()
         print(
-            f"Visualizer started. View at: http://localhost:9876 (default ReRun port)"
+            "Visualizer started. View at: http://localhost:9876 (default ReRun port)"
         )
         print("Press Ctrl+C to stop...")
 
@@ -473,7 +470,7 @@ def start_visualization(config_path="config.toml", log_level="INFO"):
     )
 
     visualizer.start()
-    print(f"Visualizer started. View at: http://localhost:9876 (default ReRun port)")
+    print("Visualizer started. View at: http://localhost:9876 (default ReRun port)")
     return visualizer, stop_event
 
 
