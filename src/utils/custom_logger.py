@@ -81,7 +81,7 @@ def get_logger(module_name, process_name=None, color=None, log_level=None):
 
 def init_class_logger(
     instance, log_level=None, process_name=None, log_color=None, init_message=None
-):
+) -> logging.Logger:
     """
     Initialize a logger for a class instance.
 
@@ -95,8 +95,6 @@ def init_class_logger(
     Returns:
         logging.Logger or None: The configured logger or None if log_level is None
     """
-    if log_level is None:
-        return None
 
     # If process_name is not provided, use the class name
     if process_name is None:

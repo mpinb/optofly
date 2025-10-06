@@ -62,7 +62,7 @@ class CSVWriter:
                 self.writer.writeheader()
                 self.has_header = True
 
-    def append(self, row_dict):
+    def append(self, row_dict: dict):
         """Append a single row to the CSV file.
 
         Args:
