@@ -90,8 +90,8 @@ def setup_lens_calibration(interp_file: str, n_elements=1000) -> LensCalibration
 class LiquidLens(WorkerProcess):
     def __init__(
         self,
+        event: mp.Event,
         config_path: str = "config.toml",
-        event: Optional[mp.Event] = None,
         process_name: str = "LiquidLens",
         log_level: str = "INFO",
         log_color: str = "GREEN",  # Use uppercase for consistency
@@ -101,11 +101,13 @@ class LiquidLens(WorkerProcess):
 
         Args:
             config_path: Path to the configuration file
-            event: Event to signal process termination (created if None)
+            event: Event to signal process termination
             log_level: Logging level to use
             log_color: Color for log messages
             process_name: Name to display in logs
         """
+        if event is None:
+            raise ValueError("LiquidLens requires an external stop event.")
         # Pass parameters to parent class
         super().__init__(
             event=event,
@@ -114,30 +116,25 @@ class LiquidLens(WorkerProcess):
             process_name=process_name,
         )
 
+        # Initialize logger before any log calls
+        self._initialize_logger()
+
         # Initialize our specific attributes
         self.lens_config = LiquidLensConfig(config_path)
         self.zmq_config = ZMQConfig(config_path)
         self.camera_config = CameraConfig(config_path)
-        self.stop_event = event if event is not None else mp.Event()
+        self.stop_event = event
+        self.is_running = False
+        self.is_tracking = False
+        self.current_tracked_obj = None
+        # Dictionary to store Kalman filters for each tracked object
+        self.kalman_filters = {}
 
         # Check if it's enabled
         self.is_enabled = self.lens_config.active
         if not self.is_enabled:
             self.logger.warning("Liquid Lens process is disabled. Exiting.")
             return
-        
-        self.is_running = False
-        self.is_tracking = False
-        self.current_tracked_obj = None
-
-        # Dictionary to store Kalman filters for each tracked object
-        self.kalman_filters = {}
-
-        # Initialize logger
-        self._initialize_logger()
-
-        # Initalize
-        self.initialize()
 
     def initialize(self):
         """
@@ -388,6 +385,12 @@ class LiquidLens(WorkerProcess):
         except Exception as e:
             self.logger.error(f"Error updating Kalman filter for object {obj_id}: {e}")
             
+    def _clear_kalman_filter(self, obj_id: str) -> None:
+        """Remove Kalman filter state for an object when it is no longer tracked."""
+        if obj_id in self.kalman_filters:
+            self.kalman_filters.pop(obj_id, None)
+            self.logger.debug(f"Removed Kalman filter for object {obj_id}")
+            
     def _predict_position(self, obj_id: str, prediction_time: float = None) -> Optional[Tuple[float, float, float]]:
         """
         Predict the future position of an object using its Kalman filter.
@@ -435,6 +438,12 @@ class LiquidLens(WorkerProcess):
             self.logger.warning("Liquid Lens process is disabled. Exiting.")
             return
 
+        try:
+            self.initialize()
+        except Exception as e:
+            self.logger.error(f"Liquid Lens failed to initialize: {e}")
+            return
+
         self.is_running = True
         self.logger.info("Liquid Lens process started.")
 
@@ -473,6 +482,8 @@ class LiquidLens(WorkerProcess):
                         # Check if we've waited too long for position data
                         if time.time() - self.last_position_time > position_timeout:
                             self.logger.warning(f"No position data received for {position_timeout}s, stopping tracking")
+                            if self.current_tracked_obj is not None:
+                                self._clear_kalman_filter(self.current_tracked_obj)
                             self.is_tracking = False
                             break
                         time.sleep(0.01)  # Short sleep to avoid busy waiting
@@ -481,6 +492,8 @@ class LiquidLens(WorkerProcess):
                     # Check for Death messages
                     if braid_data.get("event") == "Death" and braid_data.get("obj_id") == self.current_tracked_obj:
                         self.logger.info(f"Tracked object {self.current_tracked_obj} is no longer visible")
+                        if self.current_tracked_obj is not None:
+                            self._clear_kalman_filter(self.current_tracked_obj)
                         self.is_tracking = False
                         break
                     
@@ -506,6 +519,8 @@ class LiquidLens(WorkerProcess):
                     # Check if the object is in the camera's field of view
                     if not self._is_in_camera_FOV(x, y):
                         self.logger.info(f"Object {self.current_tracked_obj} is out of camera FOV at position ({x}, {y})")
+                        if self.current_tracked_obj is not None:
+                            self._clear_kalman_filter(self.current_tracked_obj)
                         self.is_tracking = False
                         break
 
@@ -543,6 +558,8 @@ class LiquidLens(WorkerProcess):
                 # Check if tracking timed out
                 if self.is_tracking and time.time() - self.tracking_start_time >= self.lens_config.tracking_timeout:
                     self.logger.info(f"Tracking timeout reached for object {self.current_tracked_obj}")
+                    if self.current_tracked_obj is not None:
+                        self._clear_kalman_filter(self.current_tracked_obj)
                     self.is_tracking = False
             
             except Exception as e:
