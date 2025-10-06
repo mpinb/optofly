@@ -27,3 +27,6 @@ dev = [
 
 [tool.uv.sources]
 optofly = { workspace = true }
+
+[tool.pyright]
+typeCheckingMode = "off"
