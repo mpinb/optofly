@@ -181,6 +181,47 @@ class TriggerConfig(ConfigBase):
         )
 
 
+class OptoTriggerConfig(ConfigBase):
+    """Configuration for the Arduino-based optical trigger controller."""
+
+    def __init__(self, config_path: str = "config.toml"):
+        """Initialize the opto trigger configuration."""
+        super().__init__(config_path, "opto_trigger")
+        config = self._load_config()
+
+        # Activation flag
+        self.active: bool = config.get("active", False)
+
+        # Serial connection details
+        self.port: str = config["port"]
+        self.baudrate: int = int(config.get("baudrate", 115200))
+
+        # Stimulation parameters
+        self.duration: int = int(config.get("duration", 0))
+        self.intensity: int = int(config.get("intensity", 0))
+        self.frequency: int = int(config.get("frequency", 0))
+
+        # Sham probability controls how often a stimulation is skipped
+        self.sham_probability: float = float(config.get("sham_probability", 0.0))
+
+    def get_trigger_command(self) -> str:
+        """Return the formatted command string expected by the Arduino firmware."""
+        return f"<{self.duration},{self.intensity},{self.frequency}>"
+
+    def __str__(self) -> str:
+        """Return a readable summary of the opto trigger configuration."""
+        return (
+            "OptoTrigger Configuration:\n"
+            f"  Active: {self.active}\n"
+            f"  Port: {self.port}\n"
+            f"  Baudrate: {self.baudrate}\n"
+            f"  Duration: {self.duration} ms\n"
+            f"  Intensity: {self.intensity}/255\n"
+            f"  Frequency: {self.frequency} Hz\n"
+            f"  Sham Probability: {self.sham_probability}"
+        )
+
+
 class CameraConfig(ConfigBase):
     """Configuration for the camera and visual field."""
 

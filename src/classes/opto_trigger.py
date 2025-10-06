@@ -25,8 +25,8 @@ class OptoTrigger:
 
     def __init__(
         self,
+        braid_folder: str,
         config_path: str = "config.toml",
-        braid_folder: str = None,
         process_name: str = "OptoTrigger",
         log_level: str = "INFO",
         log_color: str = "RED",
@@ -43,8 +43,8 @@ class OptoTrigger:
         self.is_initialized = False
 
         # Initialize CSV writer
-        if braid_folder is None:
-            raise ValueError("braid folder path must be provided")
+        if not os.path.exists(braid_folder):
+            raise ValueError(f"braid folder does not exist: {braid_folder}")
         self.csv_writer = CSVWriter(os.path.join(braid_folder, "opto.csv"))
 
         # Initialize logger
@@ -108,6 +108,7 @@ class OptoTrigger:
             "duration": self.config.duration,
             "intensity": self.config.intensity,
             "frequency": self.config.frequency,
+            "sham": False,  # Will be updated below
         }
 
         # Check if the trigger is initialized
@@ -121,7 +122,8 @@ class OptoTrigger:
 
         if sham:
             self.logger.info("Executing sham stimulation (no signal sent)")
-            self.csv_writer.append(row.update({"sham": True}))
+            row["sham"] = True
+            self.csv_writer.append(row)
             self.logger.debug(f"Sham stimulation row: {row}")
             return True
 
@@ -137,7 +139,9 @@ class OptoTrigger:
                 self.logger.error("Serial connection is not established.")
                 return False
 
-            self.csv_writer.append(row.update({"sham": False}))
+            # Log the command to CSV
+            row["sham"] = False
+            self.csv_writer.append(row)
             self.logger.debug(f"CSV row written: {row}")
 
             # Wait for response
@@ -247,9 +251,31 @@ if __name__ == "__main__":
     parser.add_argument(
         "--sham", "-s", action="store_true", help="Force sham stimulation"
     )
+    parser.add_argument(
+        "--obj-id",
+        type=int,
+        default=0,
+        help="Object identifier to associate with the trigger event",
+    )
+    parser.add_argument(
+        "--frame",
+        type=int,
+        default=0,
+        help="Frame index to associate with the trigger event",
+    )
+    parser.add_argument(
+        "--timestamp",
+        type=int,
+        help="Timestamp to log with the trigger (defaults to current time in ms)",
+    )
     args = parser.parse_args()
 
-    with OptoTrigger(args.config, braid_folder=".") as trigger:
+    with OptoTrigger(
+        braid_folder=".",
+        config_path=args.config,
+        log_level=args.log_level,
+        process_name="OptoTriggerCLI",
+    ) as trigger:
         # Apply any parameter overrides
         params_changed = False
         if (
@@ -269,4 +295,11 @@ if __name__ == "__main__":
             print(f"Using custom parameters: {trigger.config.get_trigger_command()}")
 
         # Trigger the stimulation
-        trigger.trigger(sham=args.sham if args.sham else None)
+        trigger.trigger(
+            obj_id=args.obj_id,
+            frame=args.frame,
+            timestamp=args.timestamp
+            if args.timestamp is not None
+            else int(time.time() * 1000),
+            sham=args.sham if args.sham else None,
+        )
