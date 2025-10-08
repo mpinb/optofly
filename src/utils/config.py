@@ -9,6 +9,7 @@ import tomllib
 
 # Setup custom logger for this module
 import logging
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,43 @@ class ConfigBase:
         except Exception as e:
             logger.error(f"Error opening config file: {e}")
             raise
+
+
+class TriggerHandlerConfig(ConfigBase):
+    """Configuration helper for the trigger handler process."""
+
+    def __init__(self, config_path: str = "config.toml"):
+        """Load trigger handler specific configuration."""
+        super().__init__(config_path, "trigger_handler")
+        config = self._load_config()
+
+        # Temporal gating parameters
+        self.min_trajectory_time: float = float(config.get("min_trajectory_time", 1.0))
+        self.min_trigger_interval: float = float(config.get("min_trigger_interval", 10.0))
+
+        # Spatial trigger zone settings
+        self.radius: float = float(config.get("radius", 0.025))
+        z_lim_config = config.get("z_lim", [0.0, 0.0])
+        try:
+            self.z_lim = (float(z_lim_config[0]), float(z_lim_config[1]))
+        except (TypeError, IndexError, ValueError):
+            raise ValueError("trigger_handler.z_lim must contain two numeric values") from None
+
+        # Heading cone configuration (degrees -> radians)
+        self.heading_cone_deg: float = float(config.get("heading_cone_deg", 45.0))
+        self.heading_threshold: float = math.radians(self.heading_cone_deg)
+
+        # Linked subsystem state
+        root_config = ConfigBase(config_path)._load_config()
+        self.liquid_lens_active: bool = bool(
+            root_config.get("liquid_lens", {}).get("active", False)
+        )
+        self.opto_trigger_active: bool = bool(
+            root_config.get("opto_trigger", {}).get("active", False)
+        )
+
+        # Communication settings reused across processes
+        self.zmq = ZMQConfig(config_path)
 
 
 class LiquidLensConfig(ConfigBase):

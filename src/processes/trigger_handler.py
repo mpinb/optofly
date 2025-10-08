@@ -22,9 +22,9 @@ from src.utils.worker_process import WorkerProcess
 
 # Constants
 HEADING_HISTORY_SIZE = 10  # Number of frames to keep for heading calculation
-HEADING_THRESHOLD = (
-    np.pi / 4
-)  # Maximum angle difference to consider "heading toward center"
+DEFAULT_HEADING_THRESHOLD = np.deg2rad(
+    45.0
+)  # Fallback cone half-angle if config fails to load
 MAX_OBJECT_AGE = 10.0  # Maximum time in seconds to keep an object without updates
 
 
@@ -123,7 +123,9 @@ class TrackedObject:
         # Use scipy.stats.circmean for proper circular mean calculation
         return stats.circmean(list(self.headings), high=np.pi, low=-np.pi)
 
-    def is_heading_toward_center(self) -> bool:
+    def is_heading_toward_center(
+        self, threshold: float = DEFAULT_HEADING_THRESHOLD
+    ) -> bool:
         """
         Determine if the object is moving toward the center (0,0).
 
@@ -143,7 +145,7 @@ class TrackedObject:
             diff = 2 * np.pi - diff
 
         # Object is heading toward center if difference is less than threshold
-        return diff < HEADING_THRESHOLD
+        return diff < threshold
 
 
 class TriggerHandler(WorkerProcess):
@@ -424,7 +426,7 @@ class TriggerHandler(WorkerProcess):
         x, y, z = tracked_obj.current_x, tracked_obj.current_y, tracked_obj.current_z
 
         # Check if object is heading toward center
-        if not tracked_obj.is_heading_toward_center():
+        if not tracked_obj.is_heading_toward_center(self.config.heading_threshold):
             return
 
         # Process LENS trigger (if liquid lens is active)

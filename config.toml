@@ -40,6 +40,7 @@ min_trajectory_time = 1.0
 min_trigger_interval = 10.0
 radius = 0.025
 z_lim = [0.15, 0.25]
+heading_cone_deg = 45.0
 
 [camera]
 resolution = [2016, 2016]
