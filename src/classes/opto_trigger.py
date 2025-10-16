@@ -147,46 +147,23 @@ class OptoTrigger:
             self.csv_writer.append(row)
             self.logger.debug(f"CSV row written: {row}")
 
-            # Wait for response
-            response = (
-                self.serial_conn.readline().decode("utf-8", errors="ignore").strip()
-            )
-            if response:
-                # Parse timing information if available
-                self.logger.debug(f"Arduino response: {response}")
-                if "Total processing time" in response:
-                    timing_lines = []
-                    for _ in range(4):  # Try to collect 4 lines of timing info
-                        line = (
-                            self.serial_conn.readline()
-                            .decode("utf-8", errors="ignore")
-                            .strip()
-                        )
-                        if line:
-                            timing_lines.append(line)
-                            self.logger.debug(line)
+            # Wait for Arduino output without blocking on readline timeouts
+            response_lines = self._collect_serial_output()
 
-                # Log the completion of stimulation
+            if response_lines:
+                primary = response_lines[0]
                 self.logger.info(
                     "Stimulation command processed "
                     f"({self.config.duration}ms, {self.config.intensity}/255, "
                     f"{self.config.frequency}Hz, color={self.config.color})"
                 )
+                self.logger.debug(f"Arduino response: {primary}")
+
+                if len(response_lines) > 1:
+                    diagnostics = "; ".join(response_lines[1:])
+                    self.logger.debug(f"Arduino diagnostics: {diagnostics}")
             else:
                 self.logger.warning("No response received from Arduino")
-
-            # Drain any remaining serial lines to keep buffer clean between triggers
-            drained = 0
-            while self.serial_conn and getattr(self.serial_conn, "in_waiting", 0):
-                extra_line = (
-                    self.serial_conn.readline().decode("utf-8", errors="ignore").strip()
-                )
-                if extra_line:
-                    self.logger.debug(f"Discarding extra Arduino line: {extra_line}")
-                drained += 1
-
-            if drained:
-                self.logger.debug(f"Serial buffer drain completed ({drained} line(s) discarded)")
 
             return True
         except Exception as e:
@@ -200,21 +177,59 @@ class OptoTrigger:
         Returns:
             True if closed successfully, False otherwise
         """
+        success = True
+
         if self.serial_conn and self.serial_conn.is_open:
             try:
                 self.serial_conn.close()
                 self.is_initialized = False
                 self.logger.info("OptoTrigger connection closed")
-                return True
-            except Exception as e:
-                self.logger.error(f"Error closing OptoTrigger connection: {e}")
-                return False
-        return True
+            except Exception as exc:
+                self.logger.error(f"Error closing OptoTrigger connection: {exc}")
+                success = False
+
+        try:
+            self.csv_writer.close()
+        except Exception as exc:
+            self.logger.error(f"Error closing OptoTrigger CSV writer: {exc}")
+            success = False
+
+        return success
 
     def __enter__(self):
         """Support for context manager usage with 'with' statement."""
         self.initialize()
         return self
+
+    def _collect_serial_output(self, timeout: float = 1.0, poll_interval: float = 0.05) -> list[str]:
+        """Return non-empty lines read from the serial buffer.
+
+        This drains available bytes without blocking on serial timeouts and
+        stops once no new data arrives within the poll interval or the timeout
+        is exceeded.
+        """
+
+        if not self.serial_conn:
+            return []
+
+        buffer = bytearray()
+        start = time.time()
+
+        while time.time() - start < timeout:
+            waiting = getattr(self.serial_conn, "in_waiting", 0)
+            if waiting:
+                chunk = self.serial_conn.read(waiting)
+                if chunk:
+                    buffer.extend(chunk)
+                    start = time.time()
+                    continue
+            time.sleep(poll_interval)
+
+        if not buffer:
+            return []
+
+        decoded = buffer.decode("utf-8", errors="ignore")
+        return [line.strip() for line in decoded.splitlines() if line.strip()]
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Ensure serial connection is closed when exiting context."""

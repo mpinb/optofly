@@ -214,10 +214,18 @@ def create_fly(
     end_pos[1] = -abs(end_pos[1]) if start_pos[1] > 0 else abs(end_pos[1])
 
     # Keep positions inside the field of view bounds.
-    start_pos[0] = clamp(start_pos[0], min(c[0] for c in corners), max(c[0] for c in corners))
-    start_pos[1] = clamp(start_pos[1], min(c[1] for c in corners), max(c[1] for c in corners))
-    end_pos[0] = clamp(end_pos[0], min(c[0] for c in corners), max(c[0] for c in corners))
-    end_pos[1] = clamp(end_pos[1], min(c[1] for c in corners), max(c[1] for c in corners))
+    start_pos[0] = clamp(
+        start_pos[0], min(c[0] for c in corners), max(c[0] for c in corners)
+    )
+    start_pos[1] = clamp(
+        start_pos[1], min(c[1] for c in corners), max(c[1] for c in corners)
+    )
+    end_pos[0] = clamp(
+        end_pos[0], min(c[0] for c in corners), max(c[0] for c in corners)
+    )
+    end_pos[1] = clamp(
+        end_pos[1], min(c[1] for c in corners), max(c[1] for c in corners)
+    )
 
     start_pos[2] = clamp(start_pos[2], *z_bounds)
     end_pos[2] = clamp(end_pos[2], *z_bounds)

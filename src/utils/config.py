@@ -59,7 +59,9 @@ class TriggerHandlerConfig(ConfigBase):
 
         # Temporal gating parameters
         self.min_trajectory_time: float = float(config.get("min_trajectory_time", 1.0))
-        self.min_trigger_interval: float = float(config.get("min_trigger_interval", 10.0))
+        self.min_trigger_interval: float = float(
+            config.get("min_trigger_interval", 10.0)
+        )
 
         # Spatial trigger zone settings
         self.radius: float = float(config.get("radius", 0.025))
@@ -67,7 +69,9 @@ class TriggerHandlerConfig(ConfigBase):
         try:
             self.z_lim = (float(z_lim_config[0]), float(z_lim_config[1]))
         except (TypeError, IndexError, ValueError):
-            raise ValueError("trigger_handler.z_lim must contain two numeric values") from None
+            raise ValueError(
+                "trigger_handler.z_lim must contain two numeric values"
+            ) from None
 
         # Heading cone configuration (degrees -> radians)
         self.heading_cone_deg: float = float(config.get("heading_cone_deg", 45.0))
@@ -103,19 +107,18 @@ class LiquidLensConfig(ConfigBase):
 
         # Hardware configuration
         self.port: str = config["port"]
-        self.baudrate: int = config["baudrate"]
 
         # Control mode
         self.mode: str = config.get("mode", "diopter")
-        
+
         # Calibration and tracking settings
-        self.calibration_file: str = config.get("calibration_file", "calibrations/liquid_lens.csv")
+        self.calibration_file: str = config.get(
+            "calibration_file", "calibrations/liquid_lens.csv"
+        )
         self.tracking_timeout: float = config.get("tracking_timeout", 3.0)
-        
-        # For lens calibration
-        self.interp_file: str = config.get("calibration_file", "calibrations/liquid_lens.csv")
+
         self.n_elements: int = config.get("n_elements", 1000)
-        
+
         # Get camera FOV boundaries from CameraConfig
         camera_config = CameraConfig(config_path)
         self.fov_x_min = camera_config.fov_x_min
@@ -174,6 +177,43 @@ class ZMQConfig(ConfigBase):
     def get_publisher_address(self, port: int):
         """Get the publisher address for a given port."""
         return f"tcp://*:{port}"
+
+
+class BraidPublisherConfig(ConfigBase):
+    """Configuration helper for the Braid publisher process."""
+
+    def __init__(self, config_path: str = "config.toml"):
+        """Load configuration for the Braid publisher."""
+        super().__init__(config_path, "braid_publisher")
+        config = self._load_config()
+
+        try:
+            self.url: str = config["url"].rstrip("/")
+        except KeyError as exc:
+            raise ValueError(
+                "braid_publisher.url is required in the configuration"
+            ) from exc
+
+        self.timeout: float = float(config.get("timeout", 30))
+        if self.timeout <= 0:
+            raise ValueError("braid_publisher.timeout must be positive")
+
+        self.reconnect_delay: float = float(config.get("reconnect_delay", 5))
+        if self.reconnect_delay <= 0:
+            raise ValueError("braid_publisher.reconnect_delay must be positive")
+
+        # Shared ZMQ configuration
+        self.zmq = ZMQConfig(config_path)
+
+    def __str__(self) -> str:
+        """Return a readable description of the Braid publisher configuration."""
+        return (
+            "BraidPublisher Configuration:\n"
+            f"  URL: {self.url}\n"
+            f"  Timeout: {self.timeout}s\n"
+            f"  Reconnect Delay: {self.reconnect_delay}s\n"
+            f"  ZMQ Braid Port: {self.zmq.braid_port}"
+        )
 
 
 class TriggerConfig(ConfigBase):
@@ -299,28 +339,36 @@ class CameraConfig(ConfigBase):
         super().__init__(config_path, "camera")
         config = self._load_config()
 
-        # Camera properties
-        self.pixel_size: float = config["pixel_size"] / 1000.0  # Convert from μm to mm
-        self.sensor_width_px: int = config["sensor_width_px"]
-        self.sensor_height_px: int = config["sensor_height_px"]
+        resolution = config.get("resolution")
+        if not isinstance(resolution, (list, tuple)) or len(resolution) != 2:
+            raise ValueError(
+                "camera.resolution must contain two numeric values: width and height"
+            )
 
-        # Calculate sensor dimensions in mm
-        self.sensor_width_mm: float = self.sensor_width_px * self.pixel_size
-        self.sensor_height_mm: float = self.sensor_height_px * self.pixel_size
+        self.sensor_width_px, self.sensor_height_px = (
+            int(resolution[0]),
+            int(resolution[1]),
+        )
+        self.resolution = (self.sensor_width_px, self.sensor_height_px)
 
-        # Field of view dimensions at working distance
-        self.working_distance: float = config["working_distance"] / 1000.0  # Convert from mm to m
-        self.magnification: float = config["magnification"]
+        if "fps" not in config:
+            raise ValueError("camera.fps is required in the configuration")
+        self.fps: float = float(config.get("fps"))
 
-        # Calculate field of view dimensions in meters
-        fov_width_m = (self.sensor_width_mm / self.magnification) / 1000.0  # Convert from mm to m
-        fov_height_m = (self.sensor_height_mm / self.magnification) / 1000.0
+        self.exposure_time: float = float(config.get("exposure_time", 0.0))
+        self.pre_trigger_time: float = float(config.get("pre_trigger_time", 0.0))
+        self.post_trigger_time: float = float(config.get("post_trigger_time", 0.0))
 
-        # Calculate field of view boundaries
-        self.fov_x_min: float = -fov_width_m / 2.0
-        self.fov_x_max: float = fov_width_m / 2.0
-        self.fov_y_min: float = -fov_height_m / 2.0
-        self.fov_y_max: float = fov_height_m / 2.0
+        fov_config = config.get("FOV", {})
+        self.fov_x_min: float = float(fov_config.get("x_min", -0.1))
+        self.fov_x_max: float = float(fov_config.get("x_max", 0.1))
+        self.fov_y_min: float = float(fov_config.get("y_min", -0.1))
+        self.fov_y_max: float = float(fov_config.get("y_max", 0.1))
+
+        if self.fov_x_min >= self.fov_x_max:
+            raise ValueError("camera.FOV.x_min must be less than x_max")
+        if self.fov_y_min >= self.fov_y_max:
+            raise ValueError("camera.FOV.y_min must be less than y_max")
 
     def __str__(self):
         """Return a string representation of the configuration."""
@@ -328,11 +376,11 @@ class CameraConfig(ConfigBase):
         fov_height_mm = (self.fov_y_max - self.fov_y_min) * 1000
 
         return (
-            f"Camera Configuration:\n"
-            f"  Sensor: {self.sensor_width_px} x {self.sensor_height_px} px "
-            f"({self.sensor_width_mm:.2f} x {self.sensor_height_mm:.2f} mm)\n"
-            f"  Pixel Size: {self.pixel_size*1000:.2f} μm\n"
-            f"  Working Distance: {self.working_distance*1000:.2f} mm\n"
-            f"  Magnification: {self.magnification}x\n"
-            f"  Field of View: {fov_width_mm:.2f} x {fov_height_mm:.2f} mm"
+            "Camera Configuration:\n"
+            f"  Resolution: {self.sensor_width_px} x {self.sensor_height_px} px\n"
+            f"  Frame Rate: {self.fps} fps\n"
+            f"  Exposure Time: {self.exposure_time} µs\n"
+            f"  Trigger Window: pre {self.pre_trigger_time}s / post {self.post_trigger_time}s\n"
+            f"  Field of View: {fov_width_mm:.2f} x {fov_height_mm:.2f} mm\n"
+            f"  FOV Boundaries: [{self.fov_x_min}, {self.fov_x_max}] x [{self.fov_y_min}, {self.fov_y_max}] m"
         )

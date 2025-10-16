@@ -127,6 +127,6 @@ dmypy.json
 # ruff
 .ruff_cache/
 
-# Claude-code
-.claude/
-CLAUDE.md
+# uv
+.uv-cache/
+.uv-tools/

@@ -1,6 +1,6 @@
-
 import struct
 import serial
+
 
 def crc_16(data):
     """
@@ -20,6 +20,7 @@ def crc_16(data):
 
     return crc
 
+
 class LensException(Exception):
     """Base exception for all LiquidLens errors."""
 
@@ -36,6 +37,7 @@ class LensCommandError(LensException):
     """Raised when a command to the lens fails."""
 
     pass
+
 
 class LensDriver:
     """

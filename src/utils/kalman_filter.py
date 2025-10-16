@@ -78,8 +78,12 @@ class KalmanFilter:
         # Initialize timestamp for tracking time between updates
         self.last_timestamp = None
 
-    def init(self, position: Tuple[float, float, float], velocity: Optional[Tuple[float, float, float]] = None,
-             timestamp: Optional[float] = None) -> None:
+    def init(
+        self,
+        position: Tuple[float, float, float],
+        velocity: Optional[Tuple[float, float, float]] = None,
+        timestamp: Optional[float] = None,
+    ) -> None:
         """
         Initialize the filter state with a position measurement.
 
@@ -102,8 +106,12 @@ class KalmanFilter:
         # Store timestamp
         self.last_timestamp = timestamp
 
-    def update(self, position: Tuple[float, float, float], velocity: Optional[Tuple[float, float, float]] = None,
-               timestamp: Optional[float] = None) -> None:
+    def update(
+        self,
+        position: Tuple[float, float, float],
+        velocity: Optional[Tuple[float, float, float]] = None,
+        timestamp: Optional[float] = None,
+    ) -> None:
         """
         Update the filter with a new measurement.
 
@@ -130,16 +138,18 @@ class KalmanFilter:
             # Update process noise covariance with dt
             # The process noise increases with time squared for position states
             # and linearly for velocity states
-            G = np.array([
-                [self.dt**2/2, 0, 0],
-                [0, self.dt**2/2, 0],
-                [0, 0, self.dt**2/2],
-                [self.dt, 0, 0],
-                [0, self.dt, 0],
-                [0, 0, self.dt]
-            ])
+            G = np.array(
+                [
+                    [self.dt**2 / 2, 0, 0],
+                    [0, self.dt**2 / 2, 0],
+                    [0, 0, self.dt**2 / 2],
+                    [self.dt, 0, 0],
+                    [0, self.dt, 0],
+                    [0, 0, self.dt],
+                ]
+            )
             self.Q = calculate_process_noise(G, np.eye(3), self.process_noise)
-        
+
         # Create measurement vector
         z = np.array([[position[0]], [position[1]], [position[2]]])
 
@@ -193,22 +203,25 @@ class KalmanFilter:
             "vx": float(self.x[3, 0]),
             "vy": float(self.x[4, 0]),
             "vz": float(self.x[5, 0]),
-            "covariance": self.P.copy()
+            "covariance": self.P.copy(),
         }
 
 
 # Numba-accelerated functions for the Kalman filter
 
+
 @nb.njit
-def calculate_process_noise(G: np.ndarray, eye3: np.ndarray, process_noise: float) -> np.ndarray:
+def calculate_process_noise(
+    G: np.ndarray, eye3: np.ndarray, process_noise: float
+) -> np.ndarray:
     """
     Calculate the process noise covariance matrix Q.
-    
+
     Args:
         G: Process noise coupling matrix
         eye3: 3x3 identity matrix
         process_noise: Process noise parameter
-        
+
     Returns:
         Process noise covariance matrix Q
     """
@@ -219,11 +232,11 @@ def calculate_process_noise(G: np.ndarray, eye3: np.ndarray, process_noise: floa
 def kalman_predict(x: np.ndarray, F: np.ndarray) -> np.ndarray:
     """
     Accelerated Kalman filter prediction step.
-    
+
     Args:
         x: Current state vector
         F: State transition matrix
-        
+
     Returns:
         Predicted state vector
     """
@@ -231,12 +244,19 @@ def kalman_predict(x: np.ndarray, F: np.ndarray) -> np.ndarray:
 
 
 @nb.njit
-def kalman_update(x: np.ndarray, P: np.ndarray, z: np.ndarray, 
-                 F: np.ndarray, H: np.ndarray, Q: np.ndarray, 
-                 R: np.ndarray, state_dim: int) -> Tuple[np.ndarray, np.ndarray]:
+def kalman_update(
+    x: np.ndarray,
+    P: np.ndarray,
+    z: np.ndarray,
+    F: np.ndarray,
+    H: np.ndarray,
+    Q: np.ndarray,
+    R: np.ndarray,
+    state_dim: int,
+) -> Tuple[np.ndarray, np.ndarray]:
     """
     Accelerated Kalman filter update step.
-    
+
     Args:
         x: Current state vector
         P: Current state covariance matrix
@@ -246,30 +266,30 @@ def kalman_update(x: np.ndarray, P: np.ndarray, z: np.ndarray,
         Q: Process noise covariance matrix
         R: Measurement noise covariance matrix
         state_dim: Dimension of the state vector
-        
+
     Returns:
         Updated state vector and state covariance matrix
     """
     # Prediction step
     x_pred = F @ x
     P_pred = F @ P @ F.T + Q
-    
+
     # Measurement update step
     S = H @ P_pred @ H.T + R
-    
+
     # Compute S inverse with Numba-compatible approach
     S_inv = np.linalg.inv(S)
-    
+
     K = P_pred @ H.T @ S_inv
-    
+
     # Update state
     y = z - H @ x_pred  # Measurement residual
     x_new = x_pred + K @ y
-    
+
     # Update covariance
     identity_matrix = np.eye(state_dim)
     P_new = (identity_matrix - K @ H) @ P_pred
-    
+
     return x_new, P_new
 
 
@@ -277,64 +297,73 @@ if __name__ == "__main__":
     import time
     import matplotlib.pyplot as plt
     from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 - required for 3D projection
-    
+
     print("Testing Kalman Filter implementation...")
-    
+
     # Create a synthetic 3D trajectory with some noise
     def generate_noisy_trajectory():
         # Time points
         t = np.linspace(0, 10, 100)
-        
+
         # True positions (circular motion in xy-plane with varying z)
         radius = 5
         x_true = radius * np.cos(t)
         y_true = radius * np.sin(t)
-        z_true = 2 * np.sin(t/2) + 10
-        
+        z_true = 2 * np.sin(t / 2) + 10
+
         # Add measurement noise
         noise_level = 0.3
         x_measured = x_true + np.random.normal(0, noise_level, len(t))
         y_measured = y_true + np.random.normal(0, noise_level, len(t))
         z_measured = z_true + np.random.normal(0, noise_level, len(t))
-        
+
         # Calculate velocities (with noise)
         dt = t[1] - t[0]
         vx = np.gradient(x_true, dt) + np.random.normal(0, 0.1, len(t))
         vy = np.gradient(y_true, dt) + np.random.normal(0, 0.1, len(t))
         vz = np.gradient(z_true, dt) + np.random.normal(0, 0.1, len(t))
-        
-        return t, (x_true, y_true, z_true), (x_measured, y_measured, z_measured), (vx, vy, vz)
-    
+
+        return (
+            t,
+            (x_true, y_true, z_true),
+            (x_measured, y_measured, z_measured),
+            (vx, vy, vz),
+        )
+
     # Generate test data
     times, true_positions, measured_positions, velocities = generate_noisy_trajectory()
-    
+
     # Initialize Kalman Filter with different process noise values
     kf = KalmanFilter(process_noise=0.1, measurement_noise=0.3)
-    
+
     # Store filtered positions and predictions
     filtered_positions = []
     predicted_positions = []
-    
+
     # Initialize timing variables
     update_times = []
     predict_times = []
-    
+
     # Process measurements one by one
     print("Processing 100 measurements with Kalman filter...")
     for i in range(len(times)):
-        pos = (measured_positions[0][i], measured_positions[1][i], measured_positions[2][i])
+        pos = (
+            measured_positions[0][i],
+            measured_positions[1][i],
+            measured_positions[2][i],
+        )
         vel = (velocities[0][i], velocities[1][i], velocities[2][i])
-        
+
         # Time the update operation
         t0 = time.time()
         kf.update(pos, vel, times[i])
         t1 = time.time()
         update_times.append(t1 - t0)
-        
+
         # Store filtered state
         state = kf.get_state()
         filtered_positions.append((state["x"], state["y"], state["z"]))
-        
+
         # Time the prediction operation
         if i < len(times) - 1:
             prediction_dt = 0.2
@@ -343,22 +372,24 @@ if __name__ == "__main__":
             t1 = time.time()
             predict_times.append(t1 - t0)
             predicted_positions.append(pred_pos)
-    
+
     # Convert lists to arrays for easier plotting
     filtered_positions = np.array(filtered_positions)
     predicted_positions = np.array(predicted_positions)
-    
+
     # Print timing statistics
     avg_update_time = np.mean(update_times) * 1000  # Convert to ms
     avg_predict_time = np.mean(predict_times) * 1000  # Convert to ms
-    
+
     print("\nPerformance Statistics:")
     print(f"Average update time: {avg_update_time:.3f} ms")
     print(f"Average predict time: {avg_predict_time:.3f} ms")
-    print(f"Total update time: {sum(update_times)*1000:.3f} ms")
-    print(f"Total predict time: {sum(predict_times)*1000:.3f} ms")
-    print(f"Total processing time: {(sum(update_times) + sum(predict_times))*1000:.3f} ms")
-    
+    print(f"Total update time: {sum(update_times) * 1000:.3f} ms")
+    print(f"Total predict time: {sum(predict_times) * 1000:.3f} ms")
+    print(
+        f"Total processing time: {(sum(update_times) + sum(predict_times)) * 1000:.3f} ms"
+    )
+
     # Also run a more demanding benchmark with many iterations
     print("\nRunning benchmark with 10,000 updates...")
     benchmark_times = []
@@ -366,55 +397,103 @@ if __name__ == "__main__":
         # Random position and velocity
         pos = tuple(np.random.randn(3))
         vel = tuple(np.random.randn(3))
-        
+
         t0 = time.time()
         kf.update(pos, vel, time.time())
         t1 = time.time()
         benchmark_times.append(t1 - t0)
-    
+
     avg_benchmark_time = np.mean(benchmark_times) * 1000  # Convert to ms
-    print(f"Benchmark average update time (10,000 iterations): {avg_benchmark_time:.3f} ms")
-    
+    print(
+        f"Benchmark average update time (10,000 iterations): {avg_benchmark_time:.3f} ms"
+    )
+
     # Create 3D plot
     fig = plt.figure(figsize=(12, 8))
-    ax = fig.add_subplot(111, projection='3d')
-    
+    ax = fig.add_subplot(111, projection="3d")
+
     # Plot true trajectory
-    ax.plot(true_positions[0], true_positions[1], true_positions[2], 'g-', linewidth=2, label='True Path')
-    
+    ax.plot(
+        true_positions[0],
+        true_positions[1],
+        true_positions[2],
+        "g-",
+        linewidth=2,
+        label="True Path",
+    )
+
     # Plot measured positions
-    ax.scatter(measured_positions[0], measured_positions[1], measured_positions[2], c='r', marker='o', s=10, label='Measurements')
-    
+    ax.scatter(
+        measured_positions[0],
+        measured_positions[1],
+        measured_positions[2],
+        c="r",
+        marker="o",
+        s=10,
+        label="Measurements",
+    )
+
     # Plot filtered positions
-    ax.plot(filtered_positions[:, 0], filtered_positions[:, 1], filtered_positions[:, 2], 'b-', linewidth=2, label='Filtered Path')
-    
+    ax.plot(
+        filtered_positions[:, 0],
+        filtered_positions[:, 1],
+        filtered_positions[:, 2],
+        "b-",
+        linewidth=2,
+        label="Filtered Path",
+    )
+
     # Plot some predicted positions (every 5th point)
     indices = range(0, len(predicted_positions), 5)
     for idx in indices:
-        ax.scatter(predicted_positions[idx, 0], predicted_positions[idx, 1], predicted_positions[idx, 2], 
-                  c='purple', marker='x', s=30)
-    
+        ax.scatter(
+            predicted_positions[idx, 0],
+            predicted_positions[idx, 1],
+            predicted_positions[idx, 2],
+            c="purple",
+            marker="x",
+            s=30,
+        )
+
     # Add a legend
     ax.legend()
-    
+
     # Set labels
-    ax.set_xlabel('X Position')
-    ax.set_ylabel('Y Position')
-    ax.set_zlabel('Z Position')
-    ax.set_title('Kalman Filter Performance on 3D Trajectory')
-    
+    ax.set_xlabel("X Position")
+    ax.set_ylabel("Y Position")
+    ax.set_zlabel("Z Position")
+    ax.set_title("Kalman Filter Performance on 3D Trajectory")
+
     # Set equal aspect ratio for 3D plot
     ax.set_box_aspect([1, 1, 1])
-    
+
     # Save the figure
-    plt.savefig('kalman_filter_test.png')
-    
+    plt.savefig("kalman_filter_test.png")
+
     print("Results saved to kalman_filter_test.png")
-    
+
     # Print some statistics
-    true_final = np.array([true_positions[0][-1], true_positions[1][-1], true_positions[2][-1]])
-    measured_final = np.array([measured_positions[0][-1], measured_positions[1][-1], measured_positions[2][-1]])
-    filtered_final = np.array([filtered_positions[-1, 0], filtered_positions[-1, 1], filtered_positions[-1, 2]])
-    
-    print(f"Final position error (measured): {np.linalg.norm(true_final - measured_final):.3f}")
-    print(f"Final position error (filtered): {np.linalg.norm(true_final - filtered_final):.3f}")
+    true_final = np.array(
+        [true_positions[0][-1], true_positions[1][-1], true_positions[2][-1]]
+    )
+    measured_final = np.array(
+        [
+            measured_positions[0][-1],
+            measured_positions[1][-1],
+            measured_positions[2][-1],
+        ]
+    )
+    filtered_final = np.array(
+        [
+            filtered_positions[-1, 0],
+            filtered_positions[-1, 1],
+            filtered_positions[-1, 2],
+        ]
+    )
+
+    print(
+        f"Final position error (measured): {np.linalg.norm(true_final - measured_final):.3f}"
+    )
+    print(
+        f"Final position error (filtered): {np.linalg.norm(true_final - filtered_final):.3f}"
+    )

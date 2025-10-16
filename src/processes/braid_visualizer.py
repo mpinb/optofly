@@ -300,7 +300,6 @@ class BraidVisualizer(WorkerProcess):
         if not self.rr_initialized or not self.tracked_objects:
             return
 
-
         # Log positions for the 2D overview
         for obj_id, obj_data in self.tracked_objects.items():
             if not obj_data.positions:
@@ -439,9 +438,7 @@ def run_as_script():
 
     try:
         visualizer.start()
-        print(
-            "Visualizer started. View at: http://localhost:9876 (default ReRun port)"
-        )
+        print("Visualizer started. View at: http://localhost:9876 (default ReRun port)")
         print("Press Ctrl+C to stop...")
 
         # Wait for process to complete
