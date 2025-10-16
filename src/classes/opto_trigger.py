@@ -108,6 +108,7 @@ class OptoTrigger:
             "duration": self.config.duration,
             "intensity": self.config.intensity,
             "frequency": self.config.frequency,
+            "color": self.config.color,
             "sham": False,  # Will be updated below
         }
 
@@ -121,7 +122,9 @@ class OptoTrigger:
             sham = random.random() < self.config.sham_probability
 
         if sham:
-            self.logger.info("Executing sham stimulation (no signal sent)")
+            self.logger.info(
+                f"Executing sham stimulation (no signal sent) for color {self.config.color}"
+            )
             row["sham"] = True
             self.csv_writer.append(row)
             self.logger.debug(f"Sham stimulation row: {row}")
@@ -165,10 +168,25 @@ class OptoTrigger:
 
                 # Log the completion of stimulation
                 self.logger.info(
-                    f"Stimulation command processed ({self.config.duration}ms, {self.config.intensity}/255, {self.config.frequency}Hz)"
+                    "Stimulation command processed "
+                    f"({self.config.duration}ms, {self.config.intensity}/255, "
+                    f"{self.config.frequency}Hz, color={self.config.color})"
                 )
             else:
                 self.logger.warning("No response received from Arduino")
+
+            # Drain any remaining serial lines to keep buffer clean between triggers
+            drained = 0
+            while self.serial_conn and getattr(self.serial_conn, "in_waiting", 0):
+                extra_line = (
+                    self.serial_conn.readline().decode("utf-8", errors="ignore").strip()
+                )
+                if extra_line:
+                    self.logger.debug(f"Discarding extra Arduino line: {extra_line}")
+                drained += 1
+
+            if drained:
+                self.logger.debug(f"Serial buffer drain completed ({drained} line(s) discarded)")
 
             return True
         except Exception as e:
@@ -202,7 +220,13 @@ class OptoTrigger:
         """Ensure serial connection is closed when exiting context."""
         self.close()
 
-    def set_parameters(self, duration=None, intensity=None, frequency=None) -> bool:
+    def set_parameters(
+        self,
+        duration: Optional[int] = None,
+        intensity: Optional[int] = None,
+        frequency: Optional[int] = None,
+        color: Optional[str] = None,
+    ) -> bool:
         """
         Update stimulation parameters.
 
@@ -210,21 +234,40 @@ class OptoTrigger:
             duration: Duration in milliseconds (0-3000)
             intensity: PWM intensity (0-255)
             frequency: Frequency in Hz (0 for continuous)
+            color: Color identifier for the RGB LED channels
 
         Returns:
             True if parameters were updated successfully
         """
+        updated = False
+
         if duration is not None:
             self.config.duration = max(0, min(3000, int(duration)))
+            updated = True
 
         if intensity is not None:
             self.config.intensity = max(0, min(255, int(intensity)))
+            updated = True
 
         if frequency is not None:
             self.config.frequency = max(0, int(frequency))
+            updated = True
 
-        self.logger.debug(f"Parameters updated: {self.config.get_trigger_command()}")
-        return True
+        if color is not None:
+            try:
+                self.config.set_color(color)
+                updated = True
+            except ValueError as exc:
+                self.logger.error(f"{exc}. Keeping color {self.config.color}.")
+
+        if updated:
+            self.logger.debug(
+                "Parameters updated "
+                f"({self.config.duration}ms, {self.config.intensity}/255, "
+                f"{self.config.frequency}Hz, color={self.config.color})"
+            )
+
+        return updated
 
 
 # Example usage when run directly
@@ -248,6 +291,15 @@ if __name__ == "__main__":
         "--intensity", "-i", type=int, help="Override intensity (0-255)"
     )
     parser.add_argument("--frequency", "-f", type=int, help="Override frequency (Hz)")
+    parser.add_argument(
+        "--color",
+        type=str,
+        help=(
+            "Override LED color (valid options: "
+            + ", ".join(OptoTriggerConfig.valid_colors())
+            + ")"
+        ),
+    )
     parser.add_argument(
         "--sham", "-s", action="store_true", help="Force sham stimulation"
     )
@@ -278,17 +330,14 @@ if __name__ == "__main__":
     ) as trigger:
         # Apply any parameter overrides
         params_changed = False
-        if (
-            args.duration is not None
-            or args.intensity is not None
-            or args.frequency is not None
-        ):
-            trigger.set_parameters(
-                duration=args.duration,
-                intensity=args.intensity,
-                frequency=args.frequency,
-            )
-            params_changed = True
+        overrides = {
+            "duration": args.duration,
+            "intensity": args.intensity,
+            "frequency": args.frequency,
+            "color": args.color,
+        }
+        if any(value is not None for value in overrides.values()):
+            params_changed = trigger.set_parameters(**overrides)
 
         # Log the parameters being used
         if params_changed:

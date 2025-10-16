@@ -13,6 +13,7 @@ baudrate = 115200
 duration = 300
 intensity = 255
 frequency = 0
+color = "white"
 sham_probability = 0.1
 
 [liquid_lens]

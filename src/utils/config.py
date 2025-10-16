@@ -10,6 +10,7 @@ import tomllib
 # Setup custom logger for this module
 import logging
 import math
+from typing import ClassVar, Iterable
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +223,8 @@ class TriggerConfig(ConfigBase):
 class OptoTriggerConfig(ConfigBase):
     """Configuration for the Arduino-based optical trigger controller."""
 
+    SUPPORTED_COLORS: ClassVar[tuple[str, ...]] = ("red", "green", "blue", "white")
+
     def __init__(self, config_path: str = "config.toml"):
         """Initialize the opto trigger configuration."""
         super().__init__(config_path, "opto_trigger")
@@ -238,13 +241,40 @@ class OptoTriggerConfig(ConfigBase):
         self.duration: int = int(config.get("duration", 0))
         self.intensity: int = int(config.get("intensity", 0))
         self.frequency: int = int(config.get("frequency", 0))
+        self.color: str = self._normalize_color(config.get("color", "white"))
 
         # Sham probability controls how often a stimulation is skipped
         self.sham_probability: float = float(config.get("sham_probability", 0.0))
 
     def get_trigger_command(self) -> str:
         """Return the formatted command string expected by the Arduino firmware."""
-        return f"<{self.duration},{self.intensity},{self.frequency}>"
+        return f"<{self.duration},{self.intensity},{self.frequency},{self.color}>"
+
+    @classmethod
+    def _normalize_color(cls, color: str | None) -> str:
+        """Return a validated, lower-case color token."""
+
+        if color is None:
+            return "white"
+
+        normalized = color.strip().lower()
+        if normalized not in cls.SUPPORTED_COLORS:
+            supported = ", ".join(cls.SUPPORTED_COLORS)
+            raise ValueError(
+                f"Invalid opto_trigger color '{color}'. Supported values: {supported}"
+            )
+        return normalized
+
+    @classmethod
+    def valid_colors(cls) -> Iterable[str]:
+        """Expose the supported color identifiers for CLI validation."""
+
+        return cls.SUPPORTED_COLORS
+
+    def set_color(self, color: str) -> None:
+        """Update the configured color with validation."""
+
+        self.color = self._normalize_color(color)
 
     def __str__(self) -> str:
         """Return a readable summary of the opto trigger configuration."""
@@ -256,6 +286,7 @@ class OptoTriggerConfig(ConfigBase):
             f"  Duration: {self.duration} ms\n"
             f"  Intensity: {self.intensity}/255\n"
             f"  Frequency: {self.frequency} Hz\n"
+            f"  Color: {self.color}\n"
             f"  Sham Probability: {self.sham_probability}"
         )
 
