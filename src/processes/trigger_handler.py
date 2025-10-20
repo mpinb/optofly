@@ -45,10 +45,12 @@ class TrackedObject:
     )
     headings: deque = field(default_factory=lambda: deque(maxlen=HEADING_HISTORY_SIZE))
 
-    # Most recent position
+    # Most recent position and frame
     current_x: float = 0.0
     current_y: float = 0.0
     current_z: float = 0.0
+    current_frame: int = 0
+    current_timestamp: float = 0.0
 
     # Track last time this object was checked
     last_check_time: float = field(default_factory=time.time)
@@ -62,6 +64,7 @@ class TrackedObject:
         yvel: float,
         zvel: float,
         timestamp: float,
+        frame: int,
     ) -> None:
         """
         Update the tracked object with new position and velocity data.
@@ -70,11 +73,14 @@ class TrackedObject:
             x, y, z: Position coordinates in meters
             xvel, yvel, zvel: Velocity components in meters/second
             timestamp: Message timestamp in seconds
+            frame: Frame number from camera
         """
-        # Update current position
+        # Update current position and frame
         self.current_x = x
         self.current_y = y
         self.current_z = z
+        self.current_frame = frame
+        self.current_timestamp = timestamp
 
         # Add to history
         self.positions.append((x, y, z))
@@ -334,6 +340,7 @@ class TriggerHandler(WorkerProcess):
         try:
             obj_id = data["obj_id"]
             timestamp = data["timestamp"]
+            frame = data["frame"]
 
             # Create new tracked object
             tracked_obj = TrackedObject(obj_id=obj_id, first_timestamp=timestamp)
@@ -347,6 +354,7 @@ class TriggerHandler(WorkerProcess):
                 yvel=data["yvel"],
                 zvel=data["zvel"],
                 timestamp=timestamp,
+                frame=frame,
             )
 
             # Add to tracked objects
@@ -370,6 +378,7 @@ class TriggerHandler(WorkerProcess):
         try:
             obj_id = data["obj_id"]
             timestamp = data["timestamp"]
+            frame = data["frame"]
 
             # Check if we're already tracking this object
             if obj_id not in self.tracked_objects:
@@ -389,6 +398,7 @@ class TriggerHandler(WorkerProcess):
                 yvel=data["yvel"],
                 zvel=data["zvel"],
                 timestamp=timestamp,
+                frame=frame,
             )
 
             # Evaluate triggers based on updated position and trajectory
@@ -446,28 +456,43 @@ class TriggerHandler(WorkerProcess):
         # Check if object is in trigger zone
         if self.is_in_trigger_zone(x, y, z):
             # Send trigger and update last trigger time
-            self._send_trigger(tracked_obj.obj_id)
+            self._send_trigger(tracked_obj)
             self.last_trigger_time = current_time
 
-    def _send_trigger(self, obj_id: int) -> None:
+    def _send_trigger(self, tracked_obj: TrackedObject) -> None:
         """
         Send a trigger message for optogenetic stimulation.
 
         Args:
-            obj_id: ID of the object that triggered the stimulation
+            tracked_obj: The TrackedObject that triggered the stimulation
         """
         if not self.config.opto_trigger_active:
             self.logger.debug(
-                f"Stimulation trigger skipped for object {obj_id} (opto_trigger not active)"
+                f"Stimulation trigger skipped for object {tracked_obj.obj_id} (opto_trigger not active)"
             )
             return
 
         try:
-            timestamp = time.time()
-            message = json.dumps({"timestamp": timestamp, "obj_id": obj_id})
+            # Get mean heading (may be None if not enough data)
+            mean_heading = tracked_obj.get_mean_heading()
 
+            # Create message with all relevant fields
+            message_data = {
+                "obj_id": tracked_obj.obj_id,
+                "frame": tracked_obj.current_frame,
+                "braid_timestamp": tracked_obj.current_timestamp,
+                "trigger_timestamp": time.time(),
+                "mean_heading": mean_heading,
+                # Keep old 'timestamp' field for backward compatibility
+                "timestamp": tracked_obj.current_timestamp,
+            }
+
+            message = json.dumps(message_data)
             self.publisher.send_string(f"{self.config.zmq.trigger_topic} {message}")
-            self.logger.info(f"Sent TRIGGER for object {obj_id} at {timestamp:.3f}")
+            self.logger.info(
+                f"Sent TRIGGER for object {tracked_obj.obj_id} "
+                f"(frame={tracked_obj.current_frame}, heading={mean_heading:.3f if mean_heading else None})"
+            )
         except Exception as e:
             self.logger.error(f"Error sending trigger: {e}")
 

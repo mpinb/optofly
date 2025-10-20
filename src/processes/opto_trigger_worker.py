@@ -167,7 +167,7 @@ class OptoTriggerWorker(WorkerProcess):
         Handle a trigger event by activating hardware and logging to CSV.
 
         Args:
-            trigger_data: Dictionary containing obj_id, frame, timestamp, etc.
+            trigger_data: Dictionary containing obj_id, frame, timestamps, mean_heading, etc.
 
         Returns:
             True if trigger was handled successfully
@@ -176,15 +176,28 @@ class OptoTriggerWorker(WorkerProcess):
             # Extract trigger information
             obj_id = trigger_data.get("obj_id")
             frame = trigger_data.get("frame")
-            timestamp = trigger_data.get("timestamp")
 
-            if obj_id is None or frame is None or timestamp is None:
+            # Get both timestamps (with backward compatibility fallback)
+            braid_timestamp = trigger_data.get("braid_timestamp")
+            trigger_timestamp = trigger_data.get("trigger_timestamp")
+            # Fallback to old 'timestamp' field if new fields not present
+            if braid_timestamp is None:
+                braid_timestamp = trigger_data.get("timestamp")
+            if trigger_timestamp is None:
+                trigger_timestamp = trigger_data.get("timestamp")
+
+            mean_heading = trigger_data.get("mean_heading")
+
+            if obj_id is None or frame is None:
                 self.logger.warning(
                     f"Incomplete trigger data received: {trigger_data}"
                 )
                 return False
 
-            self.logger.info(f"Received trigger for object {obj_id} on frame {frame}")
+            self.logger.info(
+                f"Received trigger for object {obj_id} on frame {frame} "
+                f"(heading={mean_heading:.3f if mean_heading else None})"
+            )
 
             # Trigger the hardware (it will determine sham based on probability)
             success, was_sham = self.opto_trigger.trigger(sham=None)
@@ -193,7 +206,9 @@ class OptoTriggerWorker(WorkerProcess):
             row = {
                 "obj_id": obj_id,
                 "frame": frame,
-                "timestamp": timestamp,
+                "braid_timestamp": braid_timestamp,
+                "trigger_timestamp": trigger_timestamp,
+                "mean_heading": mean_heading,
                 "duration": self.opto_config.duration,
                 "intensity": self.opto_config.intensity,
                 "frequency": self.opto_config.frequency,
