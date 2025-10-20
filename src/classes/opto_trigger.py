@@ -85,7 +85,7 @@ class OptoTrigger:
             self.logger.error(f"Failed to initialize OptoTrigger: {e}")
             return False
 
-    def trigger(self, sham: Optional[bool] = None) -> bool:
+    def trigger(self, sham: Optional[bool] = None) -> tuple[bool, bool]:
         """
         Send trigger command to the Arduino.
 
@@ -93,13 +93,15 @@ class OptoTrigger:
             sham: Override sham setting. If None, uses probability from config.
 
         Returns:
-            True if command was sent successfully, False otherwise
+            Tuple of (success, was_sham):
+                - success: True if command was sent/processed successfully
+                - was_sham: True if this was a sham stimulation (no signal sent)
         """
 
         # Check if the trigger is initialized
         if not self.is_initialized:
             self.logger.error("OptoTrigger not initialized. Call initialize() first.")
-            return False
+            return (False, False)
 
         # Determine if this should be a sham stimulation
         if sham is None:
@@ -109,7 +111,7 @@ class OptoTrigger:
             self.logger.info(
                 f"Executing sham stimulation (no signal sent) for color {self.config.color}"
             )
-            return True
+            return (True, True)
 
         try:
             # Get the command string from config
@@ -121,7 +123,7 @@ class OptoTrigger:
                 self.serial_conn.write(command.encode("utf-8"))
             else:
                 self.logger.error("Serial connection is not established.")
-                return False
+                return (False, False)
 
             # Wait for Arduino output without blocking on readline timeouts
             response_lines = self._collect_serial_output()
@@ -141,10 +143,10 @@ class OptoTrigger:
             else:
                 self.logger.warning("No response received from Arduino")
 
-            return True
+            return (True, False)
         except Exception as e:
             self.logger.error(f"Error triggering stimulation: {e}")
-            return False
+            return (False, False)
 
     def close(self) -> bool:
         """
@@ -309,4 +311,12 @@ if __name__ == "__main__":
             print(f"Using custom parameters: {trigger.config.get_trigger_command()}")
 
         # Trigger the stimulation
-        trigger.trigger(sham=args.sham if args.sham else None)
+        success, was_sham = trigger.trigger(sham=args.sham if args.sham else None)
+
+        if success:
+            if was_sham:
+                print("Sham stimulation executed successfully (no signal sent)")
+            else:
+                print("Stimulation executed successfully")
+        else:
+            print("Stimulation failed")
