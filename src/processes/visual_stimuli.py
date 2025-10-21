@@ -332,7 +332,18 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # TODO: Implement calibration modes in separate task
+    # Handle calibration modes
+    if args.calibrate:
+        from src.visual_stimuli.calibration import run_screen_identification
+        run_screen_identification()
+        exit(0)
+
+    if args.calibrate_mapping:
+        from src.visual_stimuli.calibration import run_heading_calibration
+        run_heading_calibration()
+        exit(0)
+
+    # TODO: Implement test mode
 
     # Normal operation
     stop_event = mp.Event()
