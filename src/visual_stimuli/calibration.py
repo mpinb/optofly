@@ -4,7 +4,7 @@ import json
 import numpy as np
 import pyglet
 import zmq
-from typing import List, Tuple
+from typing import List
 
 
 def run_screen_identification(
@@ -265,7 +265,6 @@ def save_calibration_data(
     """
     import os
     import pandas as pd
-    from scipy.interpolate import interp1d
 
     # Create calibrations directory if needed
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
