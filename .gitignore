@@ -130,3 +130,6 @@ dmypy.json
 # uv
 .uv-cache/
 .uv-tools/
+
+# Git worktrees
+.worktrees/
