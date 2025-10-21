@@ -3,7 +3,7 @@
 import time
 import numpy as np
 import pyglet.shapes
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from src.visual_stimuli.base_stimulus import BaseStimulus
 from src.visual_stimuli.geometry_utils import GeometryUtils
 

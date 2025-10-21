@@ -15,7 +15,6 @@ import zmq
 
 from src.classes.csv_writer import CSVWriter
 from src.utils.config import ConfigBase
-from src.utils.custom_logger import init_class_logger
 from src.utils.worker_process import WorkerProcess
 from src.visual_stimuli.display_manager import DisplayManager
 from src.visual_stimuli.geometry_utils import GeometryUtils
@@ -28,7 +27,7 @@ class VisualStimuliProcess(WorkerProcess):
     """Process for rendering visual stimuli at 240Hz.
 
     Subscribes to TRIGGER messages via ZMQ and renders registered stimuli
-    using pyglet on a 7680×1080 display spanning 4 screens.
+    using pyglet on a 7680Ã—1080 display spanning 4 screens.
     """
 
     def __init__(
@@ -170,7 +169,7 @@ class VisualStimuliProcess(WorkerProcess):
             self.batch.draw()
 
         self.logger.info(
-            f"Display window created: {self.config.get('window_width')}×"
+            f"Display window created: {self.config.get('window_width')}Ã—"
             f"{self.config.get('window_height')} at x={self.config.get('window_x_offset')}"
         )
 
