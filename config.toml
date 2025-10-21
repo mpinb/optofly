@@ -58,3 +58,47 @@ y_max = 0.1
 
 [logging]
 level = "INFO"
+
+[visual_stimuli]
+# Main settings
+active = true
+log_file = "visual_stimuli.csv"
+performance_log_file = "visual_stimuli_performance.csv"
+log_level = "INFO"
+log_color = "CYAN"
+
+# Display settings
+window_x_offset = 3840             # Start of experimental screens (DP-0.1)
+window_width = 7680                # Total width (4 × 1920)
+window_height = 1080
+target_fps = 240
+
+# Calibration
+use_empirical_calibration = false  # Set to true after running --calibrate-mapping
+calibration_mapping_file = "calibrations/heading_mapping_model.npz"
+heading_offset_deg = 0.0           # Fallback offset if empirical unavailable
+arena_center_to_screen_cm = 25.0   # Distance from arena center to screens
+
+# Screen identification (set after --calibrate)
+# Order: DP-0.1, DP-0.2, DP-2.1, DP-2.2
+screen_mapping = ["North", "East", "South", "West"]
+
+[visual_stimuli.static]
+enabled = true
+square_color = [0, 0, 0]           # RGB tuple or color name
+background_color = [255, 255, 255]
+average_square_size_px = 50
+square_size_std_px = 15
+num_squares = 500
+random_seed = null                 # null for random, int for reproducible
+
+[visual_stimuli.looming]
+enabled = true
+initial_size_deg = 5.0
+final_size_deg = 80.0
+expansion_duration_ms = 500
+hold_time_ms = 200
+expansion_type = "lv_ratio"        # "lv_ratio" or "exponential"
+lv_ratio_ms = 40.0
+circle_color = [0, 0, 0]
+positions_deg = [-90, 0, 90]       # Offsets from fly heading
