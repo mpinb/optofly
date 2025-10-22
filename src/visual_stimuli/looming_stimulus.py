@@ -68,9 +68,25 @@ class LoomingStimulusRenderer(BaseStimulus):
         self.circle = None
         self.wrapped_circle = None  # For edge wrapping
 
+        # Track batch and initialization
+        self._batch_ref = None
+        self._initialized = False
+
         # Trigger data (saved for logging)
         self.trigger_data = None
         self.selected_position_deg = None
+
+    def initialize_rendering(self, batch: pyglet.graphics.Batch) -> None:
+        """Store batch reference for later use.
+
+        Circles are created on-demand when triggered, not during initialization,
+        since looming is a closed-loop stimulus.
+
+        Args:
+            batch: Pyglet graphics batch
+        """
+        self._batch_ref = batch
+        self._initialized = True
 
     def on_trigger(self, trigger_data: Dict[str, Any]) -> None:
         """Handle TRIGGER message - start looming presentation.
@@ -145,33 +161,63 @@ class LoomingStimulusRenderer(BaseStimulus):
                 self.wrapped_circle = None
 
     def render(self, batch: pyglet.graphics.Batch) -> None:
-        """Draw circle at current position and radius.
+        """Update existing circles or create if needed.
 
         Args:
             batch: Pyglet graphics batch
         """
         if self.state == self.IDLE:
+            self._hide_circles()
             return
 
-        # Create main circle
-        self.circle = pyglet.shapes.Circle(
-            x=self.center_x,
-            y=self.center_y,
-            radius=self.current_radius_px,
-            color=self.circle_color,
-            batch=batch
-        )
-
-        # Handle edge wrapping
-        if self._needs_wrapping():
-            wrapped_x = self._get_wrapped_x()
-            self.wrapped_circle = pyglet.shapes.Circle(
-                x=wrapped_x,
+        # Create or update main circle
+        if self.circle is None:
+            self.circle = pyglet.shapes.Circle(
+                x=self.center_x,
                 y=self.center_y,
                 radius=self.current_radius_px,
                 color=self.circle_color,
                 batch=batch
             )
+        else:
+            # Update existing circle properties instead of recreating
+            self.circle.x = self.center_x
+            self.circle.y = self.center_y
+            self.circle.radius = self.current_radius_px
+
+        # Handle edge wrapping
+        if self._needs_wrapping():
+            wrapped_x = self._get_wrapped_x()
+            if self.wrapped_circle is None:
+                self.wrapped_circle = pyglet.shapes.Circle(
+                    x=wrapped_x,
+                    y=self.center_y,
+                    radius=self.current_radius_px,
+                    color=self.circle_color,
+                    batch=batch
+                )
+            else:
+                # Update wrapped circle properties
+                self.wrapped_circle.x = wrapped_x
+                self.wrapped_circle.y = self.center_y
+                self.wrapped_circle.radius = self.current_radius_px
+        else:
+            self._hide_wrapped_circle()
+
+    def _hide_circles(self) -> None:
+        """Remove circles from batch when stimulus is idle."""
+        if self.circle is not None:
+            self.circle.delete()
+            self.circle = None
+        if self.wrapped_circle is not None:
+            self.wrapped_circle.delete()
+            self.wrapped_circle = None
+
+    def _hide_wrapped_circle(self) -> None:
+        """Remove wrapped circle from batch when not needed."""
+        if self.wrapped_circle is not None:
+            self.wrapped_circle.delete()
+            self.wrapped_circle = None
 
     def is_active(self) -> bool:
         """Return True if stimulus should be rendered.
@@ -325,3 +371,9 @@ class LoomingStimulusRenderer(BaseStimulus):
             return color_map.get(color.lower(), (0, 0, 0))
         else:
             return tuple(color[:3])
+
+    def cleanup(self) -> None:
+        """Clean up circle resources."""
+        self._hide_circles()
+        self._batch_ref = None
+        self._initialized = False
