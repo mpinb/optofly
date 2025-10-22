@@ -311,6 +311,24 @@ class OptoTriggerConfig(ConfigBase):
 
         return cls.SUPPORTED_COLORS
 
+    def _parse_parameter(self, value, param_name: str):
+        """Parse parameter that can be either a single value or list of options.
+
+        Args:
+            value: Either a single number or a list of numbers
+            param_name: Name of parameter (for error messages)
+
+        Returns:
+            List of possible values (even if input is single value)
+        """
+        if isinstance(value, list):
+            if len(value) == 0:
+                raise ValueError(f"{param_name} cannot be an empty list")
+            return value
+        else:
+            # Single value - return as single-item list
+            return [value]
+
     def set_color(self, color: str) -> None:
         """Update the configured color with validation."""
 
