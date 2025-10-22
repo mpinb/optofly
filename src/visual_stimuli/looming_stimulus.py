@@ -43,10 +43,31 @@ class LoomingStimulusRenderer(BaseStimulus):
 
         # Parse configuration
         self.enabled = config.get("enabled", True)
-        self.initial_size_deg = config.get("initial_size_deg", 5.0)
-        self.final_size_deg = config.get("final_size_deg", 80.0)
-        self.expansion_duration_ms = config.get("expansion_duration_ms", 500)
-        self.hold_time_ms = config.get("hold_time_ms", 200)
+
+        # Parse parameters - can be single value or list of options
+        self.initial_size_deg_options = self._parse_parameter(
+            config.get("initial_size_deg", 5.0),
+            "initial_size_deg"
+        )
+        self.final_size_deg_options = self._parse_parameter(
+            config.get("final_size_deg", 80.0),
+            "final_size_deg"
+        )
+        self.expansion_duration_ms_options = self._parse_parameter(
+            config.get("expansion_duration_ms", 500),
+            "expansion_duration_ms"
+        )
+        self.hold_time_ms_options = self._parse_parameter(
+            config.get("hold_time_ms", 200),
+            "hold_time_ms"
+        )
+
+        # Currently selected values (set when triggered)
+        self.initial_size_deg = None
+        self.final_size_deg = None
+        self.expansion_duration_ms = None
+        self.hold_time_ms = None
+
         self.expansion_type = config.get("expansion_type", "lv_ratio")
         self.lv_ratio_ms = config.get("lv_ratio_ms", 40.0)
         self.circle_color = self._parse_color(config.get("circle_color", "black"))
