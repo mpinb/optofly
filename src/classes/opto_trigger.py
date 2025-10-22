@@ -10,6 +10,7 @@ import random
 import time
 from typing import Optional
 
+import numpy as np
 import serial
 
 from src.utils.config import OptoTriggerConfig
@@ -113,6 +114,14 @@ class OptoTrigger:
             )
             return (True, True)
 
+        # Randomly select parameters from options
+        params = self.select_random_parameters()
+        self.set_parameters(
+            duration=params["duration"],
+            intensity=params["intensity"],
+            frequency=params["frequency"]
+        )
+
         try:
             # Get the command string from config
             command = self.config.get_trigger_command()
@@ -147,6 +156,22 @@ class OptoTrigger:
         except Exception as e:
             self.logger.error(f"Error triggering stimulation: {e}")
             return (False, False)
+
+    def select_random_parameters(self) -> dict:
+        """Randomly select parameters from config options.
+
+        Returns:
+            Dictionary with selected parameter values
+        """
+        duration = int(np.random.choice(self.config.duration_options))
+        intensity = int(np.random.choice(self.config.intensity_options))
+        frequency = int(np.random.choice(self.config.frequency_options))
+
+        return {
+            "duration": duration,
+            "intensity": intensity,
+            "frequency": frequency
+        }
 
     def close(self) -> bool:
         """
