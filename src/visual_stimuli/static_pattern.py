@@ -34,6 +34,10 @@ class StaticPatternStimulus(BaseStimulus):
         self.screen_width = 7680
         self.screen_height = 1080
 
+        # Track initialization state
+        self._initialized = False
+        self._batch_ref = None
+
         # Generate pattern once
         self.rectangles = []
         if self.enabled:
@@ -64,18 +68,29 @@ class StaticPatternStimulus(BaseStimulus):
             )
             self.rectangles.append(rect)
 
-    def render(self, batch: pyglet.graphics.Batch) -> None:
-        """Add all squares to render batch.
+    def initialize_rendering(self, batch: pyglet.graphics.Batch) -> None:
+        """Add all rectangles to batch once (called during setup).
 
         Args:
             batch: Pyglet graphics batch
         """
-        if not self.is_active():
-            return
+        if not self._initialized and self.enabled:
+            for rect in self.rectangles:
+                rect.batch = batch
+            self._initialized = True
+            self._batch_ref = batch
 
-        # Add each rectangle to the batch
-        for rect in self.rectangles:
-            rect.batch = batch
+    def render(self, batch: pyglet.graphics.Batch) -> None:
+        """No-op for static pattern - shapes already in batch.
+
+        Static rectangles are added to batch during initialize_rendering()
+        and remain there throughout the application lifetime.
+
+        Args:
+            batch: Pyglet graphics batch (unused)
+        """
+        # Nothing to do - static shapes persist in batch
+        pass
 
     def is_active(self) -> bool:
         """Return True if stimulus should be rendered.
@@ -84,6 +99,14 @@ class StaticPatternStimulus(BaseStimulus):
             Always True if enabled
         """
         return self.enabled
+
+    def cleanup(self) -> None:
+        """Delete all rectangle shapes and free resources."""
+        for rect in self.rectangles:
+            rect.delete()
+        self.rectangles = []
+        self._initialized = False
+        self._batch_ref = None
 
     def _parse_color(self, color) -> tuple:
         """Convert string or RGB list to RGB tuple.
