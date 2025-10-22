@@ -277,10 +277,25 @@ class OptoTriggerConfig(ConfigBase):
         self.port: str = config["port"]
         self.baudrate: int = int(config.get("baudrate", 115200))
 
-        # Stimulation parameters
-        self.duration: int = int(config.get("duration", 0))
-        self.intensity: int = int(config.get("intensity", 0))
-        self.frequency: int = int(config.get("frequency", 0))
+        # Stimulation parameters - store as option lists
+        self.duration_options: list = self._parse_parameter(
+            config.get("duration", 0),
+            "duration"
+        )
+        self.intensity_options: list = self._parse_parameter(
+            config.get("intensity", 0),
+            "intensity"
+        )
+        self.frequency_options: list = self._parse_parameter(
+            config.get("frequency", 0),
+            "frequency"
+        )
+
+        # Currently selected values (set when triggered)
+        # Initialize with first option for backward compatibility
+        self.duration: int = int(self.duration_options[0])
+        self.intensity: int = int(self.intensity_options[0])
+        self.frequency: int = int(self.frequency_options[0])
         self.color: str = self._normalize_color(config.get("color", "white"))
 
         # Sham probability controls how often a stimulation is skipped
