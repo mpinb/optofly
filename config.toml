@@ -13,7 +13,7 @@ baudrate = 115200
 duration = 300
 intensity = 255
 frequency = 0
-color = "white"
+color = "red"
 sham_probability = 0.1
 
 [liquid_lens]
@@ -90,14 +90,28 @@ background_color = [255, 255, 255]
 average_square_size_px = 50
 square_size_std_px = 15
 num_squares = 500
-random_seed = null                 # null for random, int for reproducible
+random_seed = 42                 # null for random, int for reproducible
 
 [visual_stimuli.looming]
 enabled = true
+
+# Parameters can be single values OR lists of options
+# Single value example:
 initial_size_deg = 5.0
+
+# List of options example (randomly selected on each trigger):
+# initial_size_deg = [5.0, 10.0, 15.0]
+
 final_size_deg = 80.0
+# final_size_deg = [60.0, 70.0, 80.0, 90.0]
+
 expansion_duration_ms = 500
+# expansion_duration_ms = [300, 400, 500, 600]
+
 hold_time_ms = 200
+# hold_time_ms = [100, 200, 300]
+
+# Other parameters (unchanged)
 expansion_type = "lv_ratio"        # "lv_ratio" or "exponential"
 lv_ratio_ms = 40.0
 circle_color = [0, 0, 0]
