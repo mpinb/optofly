@@ -73,3 +73,22 @@ class BaseStimulus(ABC):
             bool: True to render, False to skip
         """
         pass
+
+    @abstractmethod
+    def cleanup(self) -> None:
+        """Clean up graphics resources (delete shapes, free memory).
+
+        Called when stimulus is no longer needed or process is shutting down.
+        """
+        pass
+
+    def initialize_rendering(self, batch: pyglet.graphics.Batch) -> None:
+        """Optional one-time rendering setup.
+
+        For static stimuli, add shapes to batch here instead of in render().
+        For dynamic stimuli, create reusable shape objects here.
+
+        Args:
+            batch: Pyglet graphics batch for rendering
+        """
+        pass
