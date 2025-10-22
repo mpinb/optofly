@@ -24,6 +24,29 @@ class OptoTrigger:
     This class handles communication with an Arduino that generates PWM signals
     for optical stimulation based on specified parameters for duration,
     intensity, and frequency.
+
+    **Randomized Parameters:**
+    The stimulation parameters (duration, intensity, frequency) support randomization.
+    Each parameter can be specified in config.toml as either:
+    - Single value: Used for every stimulation (e.g., duration = 300)
+    - List of options: Randomly selected on each trigger (e.g., duration = [100, 200, 300])
+
+    **Randomizable Parameters:**
+    - duration: Stimulation duration in milliseconds (0-3000)
+    - intensity: PWM intensity (0-255)
+    - frequency: Frequency in Hz (0 for continuous)
+
+    **Example Configuration:**
+    ```toml
+    [opto_trigger]
+    active = true
+    duration = [100, 200, 300]     # Randomly select from 3 options
+    intensity = 255                # Fixed value
+    frequency = [0, 10, 20]        # Randomly select from 3 options
+    ```
+
+    All selected parameter values are logged for each stimulation,
+    ensuring full reproducibility of experiments.
     """
 
     def __init__(
