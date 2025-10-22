@@ -20,6 +20,31 @@ Random QR-code-like background pattern. Open-loop, always displayed.
 ### LoomingStimulusRenderer
 Expanding circle with L/V ratio dynamics. Closed-loop, triggered by fly tracking.
 
+### Randomized Parameters
+
+The looming stimulus supports randomization of key parameters. Each parameter can be specified as either:
+- **Single value:** Used for every presentation (e.g., `initial_size_deg = 5.0`)
+- **List of options:** Randomly selected on each trigger (e.g., `initial_size_deg = [5.0, 10.0, 15.0]`)
+
+**Randomizable Parameters:**
+- `initial_size_deg` - Initial angular size of circle
+- `final_size_deg` - Final angular size after expansion
+- `expansion_duration_ms` - Duration of expansion phase
+- `hold_time_ms` - Duration to hold at final size
+
+**Example Configuration:**
+```toml
+[visual_stimuli.looming]
+enabled = true
+initial_size_deg = [5.0, 10.0, 15.0]      # Randomly select from 3 options
+final_size_deg = 80.0                      # Fixed value
+expansion_duration_ms = [300, 500, 700]    # Randomly select from 3 options
+hold_time_ms = 200                         # Fixed value
+```
+
+**Data Logging:**
+All selected parameter values are logged to CSV for each presentation, ensuring full reproducibility.
+
 ## Adding a New Stimulus
 
 1. **Create file:** `src/visual_stimuli/my_stimulus.py`
