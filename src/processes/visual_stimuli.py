@@ -194,6 +194,10 @@ class VisualStimuliProcess(WorkerProcess):
             self.registry.register("looming", looming_stimulus)
             self.logger.info("Looming stimulus registered")
 
+        # Initialize rendering after all stimuli registered
+        self.registry.initialize_all_rendering(self.batch)
+        self.logger.info("Stimulus rendering initialized")
+
     def _check_trigger_messages(self) -> None:
         """Poll ZMQ for TRIGGER messages (non-blocking)."""
         try:
@@ -228,8 +232,7 @@ class VisualStimuliProcess(WorkerProcess):
         # Update all stimuli
         self.registry.update_all(dt)
 
-        # Clear batch and render all active stimuli
-        self.batch = pyglet.graphics.Batch()
+        # Batch persists - stimuli update their shapes in place
         self.registry.render_all(self.batch)
 
         # Log performance every second
@@ -282,6 +285,10 @@ class VisualStimuliProcess(WorkerProcess):
     def _cleanup(self) -> None:
         """Clean up resources."""
         self.logger.info("Cleaning up VisualStimuliProcess")
+
+        # Clean up stimulus resources
+        if self.registry:
+            self.registry.cleanup_all()
 
         # Close CSV writer
         if self.csv_writer:
