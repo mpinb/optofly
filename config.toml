@@ -10,9 +10,20 @@ lens_topic = "LENS"
 active = true
 port = "/dev/ttyUSB0"
 baudrate = 115200
+
+# Parameters can be single values OR lists of options
+# Single value example:
 duration = 300
+
+# List of options example (randomly selected on each trigger):
+# duration = [100, 200, 300, 400]
+
 intensity = 255
+# intensity = [128, 192, 255]
+
 frequency = 0
+# frequency = [0, 10, 20, 50]
+
 color = "red"
 sham_probability = 0.1
 
