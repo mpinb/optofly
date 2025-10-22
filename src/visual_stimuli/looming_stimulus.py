@@ -143,6 +143,12 @@ class LoomingStimulusRenderer(BaseStimulus):
         # Select balanced position
         self.selected_position_deg = self._select_balanced_position()
 
+        # Randomly select parameters from options
+        self.initial_size_deg = np.random.choice(self.initial_size_deg_options)
+        self.final_size_deg = np.random.choice(self.final_size_deg_options)
+        self.expansion_duration_ms = np.random.choice(self.expansion_duration_ms_options)
+        self.hold_time_ms = np.random.choice(self.hold_time_ms_options)
+
         # Calculate screen position
         fly_heading_rad = trigger_data['mean_heading']
         self.center_x = self.geometry.heading_to_pixel_x(
