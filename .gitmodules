@@ -1,0 +1,3 @@
+[submodule "rust/ximea_camera"]
+	path = rust/ximea_camera
+	url = git@github.com:elhananby/ximea_camera.git
