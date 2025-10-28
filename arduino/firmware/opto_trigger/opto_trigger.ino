@@ -2,9 +2,9 @@
 #include <ctype.h>
 #include <string.h>
 
-const uint8_t PWM_RED_PIN = 9;
-const uint8_t PWM_GREEN_PIN = 10;
-const uint8_t PWM_BLUE_PIN = 11;
+const uint8_t PWM_RED_PIN = 3;
+const uint8_t PWM_GREEN_PIN = 9;
+const uint8_t PWM_BLUE_PIN = 10;
 
 struct ColorConfig {
   const char *name;
@@ -220,16 +220,14 @@ void loop() {
       const ColorConfig *colorConfig = nullptr;
 
       char *token = strtok(buffer, ",");
-      token = trimWhitespace(token);
-      if (!tryParseInt(token, &duration)) {
+      if (!tryParseInt(trimWhitespace(token), &duration)) {
         parseError = true;
         Serial.println("Error: invalid duration token.");
       }
 
       if (!parseError) {
         token = strtok(nullptr, ",");
-        token = trimWhitespace(token);
-        if (!tryParseInt(token, &intensity)) {
+        if (!tryParseInt(trimWhitespace(token), &intensity)) {
           parseError = true;
           Serial.println("Error: invalid intensity token.");
         }
@@ -237,8 +235,7 @@ void loop() {
 
       if (!parseError) {
         token = strtok(nullptr, ",");
-        token = trimWhitespace(token);
-        if (!tryParseInt(token, &frequency)) {
+        if (!tryParseInt(trimWhitespace(token), &frequency)) {
           parseError = true;
           Serial.println("Error: invalid frequency token.");
         }

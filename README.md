@@ -238,12 +238,15 @@ See [`src/visual_stimuli/README.md`](src/visual_stimuli/README.md) for detailed 
 
 ```
 Braid Server (100fps tracking)
-    ZMQ: BRAID
+    ↓
+ZMQ: BRAID
+    ↓
 Trigger Handler (spatial/temporal gating)
-    ZMQ: TRIGGER
-        Ximea Camera (records video)
-        Opto Trigger (activates LED)
-        Liquid Lens (adjusts focus)
+    ↓
+ZMQ: TRIGGER
+    ↳ Ximea Camera (records video)
+    ↳ Opto Trigger (activates LED)
+    ↳ Liquid Lens (adjusts focus)
 ```
 
 ## Testing
