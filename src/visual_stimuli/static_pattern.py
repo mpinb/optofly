@@ -52,29 +52,62 @@ class StaticPatternStimulus(BaseStimulus):
             self._generate_pattern()
 
     def _generate_pattern(self) -> None:
-        """Generate random square positions and sizes."""
+        """Generate random binary pattern as a single sprite."""
+        try:
+            from PIL import Image
+        except ImportError:
+            raise ImportError(
+                "Pillow is required for StaticPatternStimulus. "
+                "Install with: pip install Pillow"
+            )
+
+        # Calculate working resolution
+        working_width = self.screen_width // self.downscale_factor
+        working_height = self.screen_height // self.downscale_factor
+
         # Set random seed for reproducibility
         if self.random_seed is not None:
             np.random.seed(self.random_seed)
 
-        # Generate random positions (uniform across display)
-        positions_x = np.random.uniform(0, self.screen_width, self.num_squares)
-        positions_y = np.random.uniform(0, self.screen_height, self.num_squares)
+        # Generate binary matrix (0 or 1)
+        random_values = np.random.rand(working_height, working_width)
+        binary_matrix = (random_values < self.pattern_density).astype(np.uint8)
 
-        # Generate random sizes (Gaussian distribution)
-        sizes = np.abs(np.random.normal(self.avg_size, self.size_std, self.num_squares))
+        # Create PIL image and apply color mapping
+        pil_image = Image.new('RGB', (working_width, working_height))
+        pixels = pil_image.load()
 
-        # Create pyglet rectangles (but don't add to batch yet)
-        for x, y, size in zip(positions_x, positions_y, sizes):
-            # Note: Rectangles are created here but batch is set during render
-            rect = pyglet.shapes.Rectangle(
-                x=x,
-                y=y,
-                width=size,
-                height=size,
-                color=self.square_color
+        # Map binary values to colors
+        for y in range(working_height):
+            for x in range(working_width):
+                if binary_matrix[y, x] == 0:
+                    pixels[x, y] = self.background_color
+                else:
+                    pixels[x, y] = self.square_color
+
+        # Upscale to full resolution using nearest neighbor (blocky)
+        if self.downscale_factor > 1:
+            pil_image = pil_image.resize(
+                (self.screen_width, self.screen_height),
+                Image.NEAREST
             )
-            self.rectangles.append(rect)
+
+        # Convert PIL Image to pyglet ImageData
+        raw_image = pil_image.tobytes()
+        self.image_data = pyglet.image.ImageData(
+            width=self.screen_width,
+            height=self.screen_height,
+            fmt='RGB',
+            data=raw_image,
+            pitch=-self.screen_width * 3  # Negative pitch for top-to-bottom
+        )
+
+        # Create sprite (batch will be set during initialize_rendering)
+        self.sprite = pyglet.sprite.Sprite(
+            img=self.image_data,
+            x=0,
+            y=0
+        )
 
     def initialize_rendering(self, batch: pyglet.graphics.Batch) -> None:
         """Add all rectangles to batch once (called during setup).
