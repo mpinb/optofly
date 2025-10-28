@@ -110,27 +110,26 @@ class StaticPatternStimulus(BaseStimulus):
         )
 
     def initialize_rendering(self, batch: pyglet.graphics.Batch) -> None:
-        """Add all rectangles to batch once (called during setup).
+        """Add sprite to batch once (called during setup).
 
         Args:
             batch: Pyglet graphics batch
         """
-        if not self._initialized and self.enabled:
-            for rect in self.rectangles:
-                rect.batch = batch
+        if not self._initialized and self.enabled and self.sprite:
+            self.sprite.batch = batch
             self._initialized = True
             self._batch_ref = batch
 
     def render(self, batch: pyglet.graphics.Batch) -> None:
-        """No-op for static pattern - shapes already in batch.
+        """No-op for static pattern - sprite already in batch.
 
-        Static rectangles are added to batch during initialize_rendering()
-        and remain there throughout the application lifetime.
+        Static sprite is added to batch during initialize_rendering()
+        and remains there throughout the application lifetime.
 
         Args:
             batch: Pyglet graphics batch (unused)
         """
-        # Nothing to do - static shapes persist in batch
+        # Nothing to do - static sprite persists in batch
         pass
 
     def is_active(self) -> bool:
@@ -142,10 +141,11 @@ class StaticPatternStimulus(BaseStimulus):
         return self.enabled
 
     def cleanup(self) -> None:
-        """Delete all rectangle shapes and free resources."""
-        for rect in self.rectangles:
-            rect.delete()
-        self.rectangles = []
+        """Delete sprite and free resources."""
+        if self.sprite:
+            self.sprite.delete()
+            self.sprite = None
+        self.image_data = None
         self._initialized = False
         self._batch_ref = None
 
