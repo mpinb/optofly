@@ -25,10 +25,17 @@ class StaticPatternStimulus(BaseStimulus):
         self.enabled = config.get("enabled", True)
         self.square_color = self._parse_color(config.get("square_color", "black"))
         self.background_color = self._parse_color(config.get("background_color", "white"))
-        self.avg_size = config.get("average_square_size_px", 50)
-        self.size_std = config.get("square_size_std_px", 15)
-        self.num_squares = config.get("num_squares", 500)
+        self.pattern_density = max(0.0, min(1.0, config.get("pattern_density", 0.3)))
+        self.downscale_factor = max(1, config.get("downscale_factor", 2))
         self.random_seed = config.get("random_seed", None)
+
+        # Log warning if values were clamped
+        if config.get("pattern_density", 0.3) != self.pattern_density:
+            import logging
+            logging.warning(f"pattern_density clamped to valid range [0.0, 1.0]: {self.pattern_density}")
+        if config.get("downscale_factor", 2) != self.downscale_factor:
+            import logging
+            logging.warning(f"downscale_factor must be >=1, set to: {self.downscale_factor}")
 
         # Screen dimensions (full experimental display)
         self.screen_width = 7680
@@ -39,7 +46,8 @@ class StaticPatternStimulus(BaseStimulus):
         self._batch_ref = None
 
         # Generate pattern once
-        self.rectangles = []
+        self.sprite = None
+        self.image_data = None
         if self.enabled:
             self._generate_pattern()
 
