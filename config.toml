@@ -96,12 +96,16 @@ screen_mapping = ["North", "East", "South", "West"]
 
 [visual_stimuli.static]
 enabled = true
-square_color = [0, 0, 0]           # RGB tuple or color name
-background_color = [255, 255, 255]
-average_square_size_px = 50
-square_size_std_px = 15
-num_squares = 500
-random_seed = 42                 # null for random, int for reproducible
+square_color = "black"              # Color for 1s in binary matrix
+background_color = "white"          # Color for 0s in binary matrix
+pattern_density = 0.3               # Probability of pattern pixels (0.0-1.0)
+downscale_factor = 2                # Resolution divisor: 1=full, 2=half, 4=quarter
+random_seed = 42                    # Optional: for reproducible patterns
+
+# OLD parameters (no longer used):
+# num_squares = 500
+# average_square_size_px = 50
+# square_size_std_px = 15
 
 [visual_stimuli.looming]
 enabled = true
