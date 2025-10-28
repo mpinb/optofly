@@ -173,10 +173,11 @@ High-performance visual stimulus rendering system running at 240Hz on multi-scre
 **Available Stimulus Types:**
 
 1. **Static Pattern** (`StaticPatternStimulus`)
-   - Random QR-code-like background pattern
+   - Random QR-code-like background pattern generated from numpy binary matrix
    - Open-loop (always displayed)
-   - Generated once at startup for zero per-frame cost
-   - Configurable square density, size, and colors
+   - Single sprite with configurable density and resolution
+   - Reproducible patterns via random seed
+   - 1 draw call vs old 500 rectangles for optimal performance
 
 2. **Looming Stimulus** (`LoomingStimulusRenderer`)
    - Expanding circle simulating approaching threat
@@ -217,7 +218,10 @@ arena_center_to_screen_cm = 25.0
 [visual_stimuli.static]
 enabled = true
 square_color = "black"
-num_squares = 500
+background_color = "white"
+pattern_density = 0.3        # Probability of pattern pixels (0.0-1.0)
+downscale_factor = 2          # 1=full res, 2=half, 4=quarter
+random_seed = 42              # Optional: reproducible patterns
 
 [visual_stimuli.looming]
 enabled = true

@@ -101,7 +101,7 @@ Stimuli have two methods for working with graphics:
 
 **`initialize_rendering(batch)`** - Called ONCE during startup
 - Use for: Creating static shapes, storing batch reference
-- Example: Static pattern creates all 500 rectangles here
+- Example: Static pattern adds its sprite to batch here
 - Why: Avoids creating objects every frame
 
 **`render(batch)`** - Called 240 TIMES PER SECOND
@@ -183,29 +183,35 @@ The `update(dt)` method advances the state based on elapsed time.
 
 ### StaticPatternStimulus
 
-**Type:** Open-loop
-**Purpose:** Random QR-code-like background for visual texture
+Random binary pattern resembling a QR code, generated from numpy matrix.
 
-**Implementation highlights:**
-```python
-def __init__(self, config):
-    # Generate 500 random rectangles once
-    self._generate_pattern()
+**Features:**
+- Configurable pattern density (0.0 to 1.0)
+- Configurable downscaling for performance tuning
+- Reproducible patterns via random seed
+- Single sprite (1 draw call) for optimal performance
 
-def initialize_rendering(self, batch):
-    # Add all rectangles to batch during setup
-    for rect in self.rectangles:
-        rect.batch = batch
-
-def render(self, batch):
-    # Do nothing - shapes already in batch!
-    pass
-
-def is_active(self):
-    return self.enabled  # Always True
+**Configuration:**
+```toml
+[visual_stimuli.static]
+enabled = true
+square_color = "black"              # Pattern pixel color
+background_color = "white"          # Background color
+pattern_density = 0.3               # Probability of pattern pixels (0.0-1.0)
+downscale_factor = 2                # 1=full res, 2=half, 4=quarter
+random_seed = 42                    # Optional: reproducible patterns
 ```
 
-**Key insight:** Static stimuli create shapes once in `initialize_rendering()` and never touch them again. Zero per-frame cost!
+**Performance:**
+- Memory: ~24MB texture (all downscale factors upscale to full res)
+- Rendering: 1 sprite vs old 500 rectangles
+- FPS: ≥230 fps maintained or improved
+
+**Migration from old version:**
+- `num_squares` → replaced by `pattern_density`
+- `average_square_size_px` → no longer used
+- `square_size_std_px` → no longer used
+- Rule of thumb: `density ≈ (num_squares × size²) / (7680 × 1080)`
 
 ### LoomingStimulusRenderer
 
