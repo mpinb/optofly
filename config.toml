@@ -131,3 +131,10 @@ expansion_type = "lv_ratio"        # "lv_ratio" or "exponential"
 lv_ratio_ms = 40.0
 circle_color = [0, 0, 0]
 positions_deg = [-90, 0, 90]       # Offsets from fly heading
+
+[visual_stimuli.standalone]
+# Standalone testing mode settings (--standalone flag)
+window_width = 1280                # Small window width
+window_height = 720                # Small window height
+scale_factor = 6.0                 # Coordinate scaling factor (7680 / 1280 = 6)
+show_overlay = true                # Enable debug overlay

@@ -25,26 +25,37 @@ class GeometryUtils:
         screen_width_cm: float = 52.7 * 4,  # 4 screens × 52.7cm
         calibration_file: Optional[str] = None,
         use_empirical_calibration: bool = False,
-        heading_offset_deg: float = 0.0
+        heading_offset_deg: float = 0.0,
+        scale_factor: float = 1.0
     ):
         """Initialize geometry utilities.
 
         Args:
-            screen_width: Total display width in pixels
-            screen_height: Display height in pixels
+            screen_width: Total display width in pixels (full resolution)
+            screen_height: Display height in pixels (full resolution)
             viewing_distance_cm: Distance from arena center to screens
             screen_width_cm: Physical width of display in cm
             calibration_file: Path to empirical calibration model (.npz)
             use_empirical_calibration: Use calibration model vs simple mapping
             heading_offset_deg: Fallback angular offset if no calibration
+            scale_factor: Factor to scale down coordinates (e.g., 6 for standalone mode)
         """
-        self.screen_width = screen_width
-        self.screen_height = screen_height
+        # Store original (full-resolution) dimensions
+        self.original_screen_width = screen_width
+        self.original_screen_height = screen_height
+
+        # Store scale factor
+        self.scale_factor = scale_factor
+
+        # Scaled dimensions (for display)
+        self.screen_width = int(screen_width / scale_factor)
+        self.screen_height = int(screen_height / scale_factor)
+
         self.viewing_distance_cm = viewing_distance_cm
         self.screen_width_cm = screen_width_cm
         self.heading_offset_deg = heading_offset_deg
 
-        # Calculate pixels per cm
+        # Calculate pixels per cm (based on original resolution)
         self.pixels_per_cm = screen_width / screen_width_cm
 
         # Load calibration if available
@@ -120,29 +131,30 @@ class GeometryUtils:
             stimulus_offset_deg: Angular offset from heading (degrees)
 
         Returns:
-            Pixel x-coordinate (0 to screen_width-1)
+            Pixel x-coordinate (0 to screen_width-1), scaled for display
         """
         # Convert offset to radians
         offset_rad = np.deg2rad(stimulus_offset_deg)
 
         # Calculate total heading
         if self.interpolator:
-            # Use empirical calibration
+            # Use empirical calibration (calibration is at full resolution)
             total_heading_rad = braid_heading_rad + offset_rad
             pixel_x = self.interpolator(total_heading_rad)
         else:
-            # Fallback: simple linear mapping
+            # Fallback: simple linear mapping (use original width for calculation)
             heading_offset_rad = np.deg2rad(self.heading_offset_deg)
             total_heading_rad = braid_heading_rad + offset_rad + heading_offset_rad
 
             # Normalize to [0, 2π)
             total_heading_rad = total_heading_rad % (2 * np.pi)
 
-            # Convert to pixel x
-            pixel_x = (total_heading_rad / (2 * np.pi)) * self.screen_width
+            # Convert to pixel x (at full resolution)
+            pixel_x = (total_heading_rad / (2 * np.pi)) * self.original_screen_width
 
-        # Wrap to valid range
-        return int(pixel_x % self.screen_width)
+        # Scale down and wrap to valid range
+        pixel_x_scaled = pixel_x / self.scale_factor
+        return int(pixel_x_scaled % self.screen_width)
 
     def degrees_to_pixels(self, angular_size_deg: float) -> int:
         """Convert angular size to pixel radius.
@@ -153,17 +165,18 @@ class GeometryUtils:
             angular_size_deg: Angular size in degrees
 
         Returns:
-            Radius in pixels
+            Radius in pixels (scaled for display)
         """
         angular_size_rad = np.deg2rad(angular_size_deg)
 
         # Calculate physical size at viewing distance
         physical_size_cm = np.tan(angular_size_rad) * self.viewing_distance_cm
 
-        # Convert to pixels
+        # Convert to pixels (at full resolution)
         radius_px = physical_size_cm * self.pixels_per_cm
 
-        return int(radius_px)
+        # Scale down for display
+        return int(radius_px / self.scale_factor)
 
     def get_vertical_center(self) -> int:
         """Get vertical center pixel coordinate.

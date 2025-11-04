@@ -36,7 +36,8 @@ class VisualStimuliProcess(WorkerProcess):
         event: Optional[mp.Event] = None,
         process_name: str = "VisualStimuli",
         log_level: str = "INFO",
-        log_color: str = "CYAN"
+        log_color: str = "CYAN",
+        standalone: bool = False
     ):
         """Initialize VisualStimuliProcess.
 
@@ -46,6 +47,7 @@ class VisualStimuliProcess(WorkerProcess):
             process_name: Name for logging
             log_level: Logging level
             log_color: Color for log messages
+            standalone: If True, run in standalone testing mode (no ZMQ, small window)
         """
         # Initialize parent WorkerProcess
         super().__init__(
@@ -60,7 +62,10 @@ class VisualStimuliProcess(WorkerProcess):
         self.config = self.config_base.get("visual_stimuli", {})
         self.stop_event = event if event is not None else mp.Event()
 
-        # ZMQ connections
+        # Standalone mode flag
+        self.standalone = standalone
+
+        # ZMQ connections (None if standalone)
         self.context = None
         self.subscriber = None
 
@@ -82,9 +87,13 @@ class VisualStimuliProcess(WorkerProcess):
         self.frame_times = []
         self.last_performance_log = time.time()
 
+        # Standalone controller (only in standalone mode)
+        self.controller = None
+
         # Initialize logger
         self._initialize_logger()
-        self.logger.info(f"Initializing VisualStimuliProcess with config: {config_path}")
+        mode_str = " (STANDALONE MODE)" if standalone else ""
+        self.logger.info(f"Initializing VisualStimuliProcess{mode_str} with config: {config_path}")
 
     def initialize(self) -> bool:
         """Initialize all components.
@@ -93,8 +102,11 @@ class VisualStimuliProcess(WorkerProcess):
             True if initialization successful
         """
         try:
-            # Initialize ZMQ
-            self._initialize_zmq()
+            # Initialize ZMQ (skip in standalone mode)
+            if not self.standalone:
+                self._initialize_zmq()
+            else:
+                self.logger.info("Standalone mode: skipping ZMQ initialization")
 
             # Initialize geometry utilities
             self._initialize_geometry()
@@ -107,6 +119,10 @@ class VisualStimuliProcess(WorkerProcess):
 
             # Initialize stimuli
             self._initialize_stimuli()
+
+            # Initialize standalone controller if needed
+            if self.standalone:
+                self._initialize_standalone_controller()
 
             self.logger.info("VisualStimuliProcess initialized successfully")
             return True
@@ -134,15 +150,20 @@ class VisualStimuliProcess(WorkerProcess):
 
     def _initialize_geometry(self) -> None:
         """Initialize geometry utilities for coordinate conversion."""
+        # Get scale factor for standalone mode
+        standalone_config = self.config.get("standalone", {})
+        scale_factor = standalone_config.get("scale_factor", 6.0) if self.standalone else 1.0
+
         self.geometry = GeometryUtils(
             screen_width=self.config.get("window_width", 7680),
             screen_height=self.config.get("window_height", 1080),
             viewing_distance_cm=self.config.get("arena_center_to_screen_cm", 25.0),
             calibration_file=self.config.get("calibration_mapping_file"),
             use_empirical_calibration=self.config.get("use_empirical_calibration", False),
-            heading_offset_deg=self.config.get("heading_offset_deg", 0.0)
+            heading_offset_deg=self.config.get("heading_offset_deg", 0.0),
+            scale_factor=scale_factor
         )
-        self.logger.info("Geometry utilities initialized")
+        self.logger.info(f"Geometry utilities initialized (scale_factor={scale_factor})")
 
     def _initialize_csv(self) -> None:
         """Initialize CSV writer for stimulus event logging."""
@@ -152,11 +173,17 @@ class VisualStimuliProcess(WorkerProcess):
 
     def _initialize_display(self) -> None:
         """Initialize pyglet display window."""
+        # Get standalone settings
+        standalone_config = self.config.get("standalone", {})
+
         self.display_manager = DisplayManager(
             window_x_offset=self.config.get("window_x_offset", 3840),
             window_width=self.config.get("window_width", 7680),
             window_height=self.config.get("window_height", 1080),
-            background_color=(255, 255, 255, 255)  # White background
+            background_color=(255, 255, 255, 255),  # White background
+            standalone=self.standalone,
+            standalone_width=standalone_config.get("window_width", 1280),
+            standalone_height=standalone_config.get("window_height", 720)
         )
 
         self.window = self.display_manager.create_window()
@@ -168,10 +195,17 @@ class VisualStimuliProcess(WorkerProcess):
             self.window.clear()
             self.batch.draw()
 
-        self.logger.info(
-            f"Display window created: {self.config.get('window_width')}×"
-            f"{self.config.get('window_height')} at x={self.config.get('window_x_offset')}"
-        )
+        if self.standalone:
+            self.logger.info(
+                f"Display window created (standalone): "
+                f"{standalone_config.get('window_width', 1280)}×"
+                f"{standalone_config.get('window_height', 720)}"
+            )
+        else:
+            self.logger.info(
+                f"Display window created: {self.config.get('window_width')}×"
+                f"{self.config.get('window_height')} at x={self.config.get('window_x_offset')}"
+            )
 
     def _initialize_stimuli(self) -> None:
         """Initialize and register enabled stimuli."""
@@ -197,6 +231,18 @@ class VisualStimuliProcess(WorkerProcess):
         # Initialize rendering after all stimuli registered
         self.registry.initialize_all_rendering(self.batch)
         self.logger.info("Stimulus rendering initialized")
+
+    def _initialize_standalone_controller(self) -> None:
+        """Initialize standalone controller for manual testing."""
+        from src.visual_stimuli.standalone_controller import StandaloneController
+
+        self.controller = StandaloneController(
+            window=self.window,
+            registry=self.registry,
+            geometry=self.geometry,
+            logger=self.logger
+        )
+        self.logger.info("Standalone controller initialized")
 
     def _check_trigger_messages(self) -> None:
         """Poll ZMQ for TRIGGER messages (non-blocking)."""
@@ -226,14 +272,19 @@ class VisualStimuliProcess(WorkerProcess):
         # Record frame time for performance monitoring
         self.frame_times.append(dt)
 
-        # Check for TRIGGER messages
-        self._check_trigger_messages()
+        # Check for TRIGGER messages (skip in standalone mode)
+        if not self.standalone:
+            self._check_trigger_messages()
 
         # Update all stimuli
         self.registry.update_all(dt)
 
         # Batch persists - stimuli update their shapes in place
         self.registry.render_all(self.batch)
+
+        # Render overlay in standalone mode
+        if self.standalone and self.controller:
+            self.controller.render_overlay()
 
         # Log performance every second
         if time.time() - self.last_performance_log >= 1.0:
@@ -332,6 +383,11 @@ if __name__ == "__main__":
         help="Run heading-to-pixel calibration mode"
     )
     parser.add_argument(
+        "--standalone",
+        action="store_true",
+        help="Standalone testing mode with manual triggers (no ZMQ, small window)"
+    )
+    parser.add_argument(
         "--test",
         action="store_true",
         help="Test mode (simulate triggers)"
@@ -352,12 +408,13 @@ if __name__ == "__main__":
 
     # TODO: Implement test mode
 
-    # Normal operation
+    # Normal operation or standalone mode
     stop_event = mp.Event()
     process = VisualStimuliProcess(
         config_path=args.config,
         event=stop_event,
-        log_level=args.log_level
+        log_level=args.log_level,
+        standalone=args.standalone
     )
 
     try:
