@@ -133,3 +133,15 @@ dmypy.json
 
 # Git worktrees
 .worktrees/
+docs/double-buffer-design.md
+docs/IMPLEMENTATION_PROGRESS.md
+docs/plans/2025-10-22-randomized-looming-parameters.md
+docs/plans/2025-10-22-randomized-opto-trigger-parameters.md
+docs/plans/2025-10-22-visual-stimuli-performance-optimization.md
+docs/plans/2025-10-23-double-buffer-safe-redesign.md
+docs/plans/2025-10-28-static-pattern-simplification-implementation.md
+docs/plans/2025-10-28-static-pattern-simplification.md
+docs/plans/2025-10-29-cylindrical-projection-design.md
+
+# Web UI (WIP - lives on webui branch)
+web/
