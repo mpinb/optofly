@@ -15,24 +15,37 @@ class DisplayManager:
         window_x_offset: int = 3840,
         window_width: int = 7680,
         window_height: int = 1080,
-        background_color: tuple = (255, 255, 255, 255)
+        background_color: tuple = (255, 255, 255, 255),
+        standalone: bool = False,
+        standalone_width: int = 1280,
+        standalone_height: int = 720
     ):
         """Initialize display manager.
 
         Args:
             window_x_offset: X position of window (start of experimental screens)
-            window_width: Total width in pixels
-            window_height: Height in pixels
+            window_width: Total width in pixels (production mode)
+            window_height: Height in pixels (production mode)
             background_color: RGBA background color
+            standalone: If True, create small testing window instead of fullscreen
+            standalone_width: Width for standalone testing window
+            standalone_height: Height for standalone testing window
         """
         self.window_x_offset = window_x_offset
         self.window_width = window_width
         self.window_height = window_height
         self.background_color = background_color
+        self.standalone = standalone
+        self.standalone_width = standalone_width
+        self.standalone_height = standalone_height
         self.window = None
 
     def create_window(self, caption: str = "OptoFly Visual Stimuli") -> pyglet.window.Window:
-        """Create fullscreen window on experimental screens.
+        """Create window for visual stimuli display.
+
+        Creates either:
+        - Production mode: Fullscreen window on experimental screens
+        - Standalone mode: Small testing window on main screen
 
         Args:
             caption: Window title
@@ -40,22 +53,34 @@ class DisplayManager:
         Returns:
             Pyglet window instance
         """
-        # Create window at specified position
-        self.window = pyglet.window.Window(
-            width=self.window_width,
-            height=self.window_height,
-            caption=caption,
-            resizable=False,
-            vsync=True  # Enable VSync for 240Hz
-        )
+        if self.standalone:
+            # Standalone testing mode: small window on main screen
+            self.window = pyglet.window.Window(
+                width=self.standalone_width,
+                height=self.standalone_height,
+                caption=f"{caption} - Standalone Testing",
+                resizable=False,
+                vsync=True
+            )
+            # Center on main screen (don't move to experimental screens)
+            # Window will open at default position
+        else:
+            # Production mode: fullscreen on experimental screens
+            self.window = pyglet.window.Window(
+                width=self.window_width,
+                height=self.window_height,
+                caption=caption,
+                resizable=False,
+                vsync=True  # Enable VSync for 240Hz
+            )
 
-        # Set window position (move to experimental screens)
-        self.window.set_location(self.window_x_offset, 0)
+            # Set window position (move to experimental screens)
+            self.window.set_location(self.window_x_offset, 0)
 
-        # Set fullscreen on experimental displays
-        # Note: This may need adjustment based on window manager
-        # For now, we'll use borderless window at correct position
-        self.window.set_fullscreen(False)  # Windowed mode
+            # Set fullscreen on experimental displays
+            # Note: This may need adjustment based on window manager
+            # For now, we'll use borderless window at correct position
+            self.window.set_fullscreen(False)  # Windowed mode
 
         # Set background clear color
         r, g, b, a = self.background_color

@@ -117,7 +117,7 @@ initial_size_deg = 5.0
 # List of options example (randomly selected on each trigger):
 # initial_size_deg = [5.0, 10.0, 15.0]
 
-final_size_deg = 80.0
+final_size_deg = 64.0
 # final_size_deg = [60.0, 70.0, 80.0, 90.0]
 
 expansion_duration_ms = 500
@@ -126,8 +126,17 @@ expansion_duration_ms = 500
 hold_time_ms = 200
 # hold_time_ms = [100, 200, 300]
 
-# Other parameters (unchanged)
+# Expansion type and parameters
 expansion_type = "lv_ratio"        # "lv_ratio" or "exponential"
-lv_ratio_ms = 40.0
+lv_ratio_ms = 25.0
+
+# color and positions
 circle_color = [0, 0, 0]
 positions_deg = [-90, 0, 90]       # Offsets from fly heading
+
+[visual_stimuli.standalone]
+# Standalone testing mode settings (--standalone flag)
+window_width = 1280                # Small window width
+window_height = 720                # Small window height
+scale_factor = 6.0                 # Coordinate scaling factor (7680 / 1280 = 6)
+show_overlay = true                # Enable debug overlay

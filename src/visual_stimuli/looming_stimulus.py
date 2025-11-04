@@ -289,26 +289,27 @@ class LoomingStimulusRenderer(BaseStimulus):
 
     def _calculate_lv_radius(self, t: float) -> int:
         """Calculate radius using L/V ratio equation.
-
-        Standard equation: θ(t) = 2 * arctan(l / (v*t))
-        Where l/v is the L/V ratio in seconds.
-
+        
+        Standard equation: θ(t) = 2 * arctan(l / (2v*t))
+        Where t is time UNTIL collision (not elapsed time).
+        
         Args:
             t: Time since expansion started (seconds)
-
+        
         Returns:
             Radius in pixels
         """
-        if t < 0.001:  # Avoid division by zero
-            angular_size_rad = np.deg2rad(self.initial_size_deg)
+        # Time remaining until "collision" 
+        time_to_collision = (self.expansion_duration_ms / 1000.0) - t
+        
+        if time_to_collision < 0.001:  # Avoid division by zero near collision
+            angular_size_deg = self.final_size_deg
         else:
-            # lv_ratio in ms, convert to seconds
             lv_seconds = self.lv_ratio_ms / 1000.0
-            # Calculate angular size using L/V equation
-            angular_size_rad = 2 * np.arctan(lv_seconds / (2 * t))
-
-        # Convert to degrees and then to pixels
-        angular_size_deg = np.rad2deg(angular_size_rad)
+            # t here is time-to-collision
+            angular_size_rad = 2 * np.arctan(lv_seconds / (2 * time_to_collision))
+            angular_size_deg = np.rad2deg(angular_size_rad)
+        
         return self.geometry.degrees_to_pixels(angular_size_deg)
 
     def _calculate_exponential_radius(self, t: float) -> int:
