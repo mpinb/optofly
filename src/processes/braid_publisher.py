@@ -331,7 +331,7 @@ if __name__ == "__main__":
     logger = init_class_logger(
         "BraidSubscriber",
         log_level=args.log_level,
-        color="green",
+        log_color="green",
         process_name="BraidSubscriber",
     )
     logger.info("Starting BraidSubscriber...")
