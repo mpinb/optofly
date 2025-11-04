@@ -127,3 +127,111 @@ expansion_type = "lv_ratio"        # "lv_ratio" or "exponential"
 lv_ratio_ms = 40.0
 circle_color = [0, 0, 0]
 positions_deg = [-90, 0, 90]       # Offsets from fly heading
+
+[visual_stimuli.vertical_bar]
+
+# ========================================
+# BASIC SETTINGS
+# ========================================
+
+# Enable/disable this stimulus
+enabled = true
+
+# ========================================
+# BAR APPEARANCE
+# ========================================
+
+# Bar width in visual degrees (angular size as seen by fly)
+# Can be single value or list for randomization
+# Examples:
+#   bar_width_deg = 20.0           # Always 20 degrees
+#   bar_width_deg = [15.0, 20.0, 25.0]  # Random selection
+bar_width_deg = 20.0
+
+# Bar color
+# Can be color name: "black", "white", "red", "green", "blue", "gray"
+# Or RGB list: [255, 0, 0] for red
+bar_color = "black"
+
+# Bar height as fraction of screen height
+# 1.0 = full height (floor to ceiling)
+# 0.5 = half height
+bar_height_fraction = 1.0
+
+# ========================================
+# TIMING PARAMETERS
+# ========================================
+
+# How long to display the bar (milliseconds)
+# Can be single value or list for randomization
+# Examples:
+#   presentation_duration_ms = 2000        # Always 2 seconds
+#   presentation_duration_ms = [1000, 2000, 3000]  # Random 1-3 seconds
+presentation_duration_ms = 2000
+
+# Cooldown period after presentation (milliseconds)
+# Prevents immediate re-triggering
+# Can be single value or list for randomization
+cooldown_duration_ms = 3000
+
+# ========================================
+# POSITION CONFIGURATION
+# ========================================
+
+# Possible positions for bar presentation (degrees relative to fly heading)
+# The system will balance presentations across these positions
+# 
+# Position meanings:
+#   0° = directly ahead of fly
+#   90° = to fly's right (lateral/attractive test)
+#   -90° = to fly's left (lateral/attractive test)
+#   180° = directly behind fly (control)
+#   45° = front-right diagonal
+#   -45° = front-left diagonal
+#
+# Examples:
+#   positions_deg = [90]              # Only right side
+#   positions_deg = [90, 0, 180]      # Right, ahead, behind
+#   positions_deg = [90, -90]         # Both sides
+#   positions_deg = [0, 45, 90, 135, 180, -135, -90, -45]  # All around
+positions_deg = [90, 0, 180]
+
+# ========================================
+# EXAMPLE CONFIGURATIONS FOR DIFFERENT EXPERIMENTS
+# ========================================
+
+# Configuration 1: Test lateral attraction (right side only)
+# enabled = true
+# bar_width_deg = 20.0
+# bar_color = "black"
+# presentation_duration_ms = 2000
+# positions_deg = [90]
+
+# Configuration 2: Test attraction vs control (right and behind)
+# enabled = true
+# bar_width_deg = 20.0
+# bar_color = "black"
+# presentation_duration_ms = 2000
+# positions_deg = [90, 180]
+
+# Configuration 3: Full spatial test (all cardinal directions)
+# enabled = true
+# bar_width_deg = 20.0
+# bar_color = "black"
+# presentation_duration_ms = 2000
+# positions_deg = [0, 90, 180, -90]
+
+# Configuration 4: Randomized parameters
+# enabled = true
+# bar_width_deg = [15.0, 20.0, 25.0]
+# bar_color = "black"
+# presentation_duration_ms = [1000, 2000, 3000]
+# cooldown_duration_ms = [2000, 3000, 4000]
+# positions_deg = [90, 0, 180]
+
+# Configuration 5: Colored bars for different conditions
+# enabled = true
+# bar_width_deg = 20.0
+# bar_color = [0, 128, 255]  # Custom blue color
+# presentation_duration_ms = 2000
+# positions_deg = [90, -90]
