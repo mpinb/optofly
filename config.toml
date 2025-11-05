@@ -108,7 +108,7 @@ random_seed = 42                    # Optional: for reproducible patterns
 # square_size_std_px = 15
 
 [visual_stimuli.looming]
-enabled = true
+enabled = false
 
 # Parameters can be single values OR lists of options
 # Single value example:
@@ -134,25 +134,11 @@ lv_ratio_ms = 25.0
 circle_color = [0, 0, 0]
 positions_deg = [-90, 0, 90]       # Offsets from fly heading
 
-[visual_stimuli.standalone]
-# Standalone testing mode settings (--standalone flag)
-window_width = 1280                # Small window width
-window_height = 720                # Small window height
-scale_factor = 6.0                 # Coordinate scaling factor (7680 / 1280 = 6)
-show_overlay = true                # Enable debug overlay
 
 [visual_stimuli.vertical_bar]
 
-# ========================================
-# BASIC SETTINGS
-# ========================================
-
 # Enable/disable this stimulus
 enabled = true
-
-# ========================================
-# BAR APPEARANCE
-# ========================================
 
 # Bar width in visual degrees (angular size as seen by fly)
 # Can be single value or list for randomization
@@ -248,3 +234,11 @@ positions_deg = [90, 0, 180]
 # bar_color = [0, 128, 255]  # Custom blue color
 # presentation_duration_ms = 2000
 # positions_deg = [90, -90]
+
+
+[visual_stimuli.standalone]
+# Standalone testing mode settings (--standalone flag)
+window_width = 1280                # Small window width
+window_height = 720                # Small window height
+scale_factor = 6.0                 # Coordinate scaling factor (7680 / 1280 = 6)
+show_overlay = true                # Enable debug overlay
