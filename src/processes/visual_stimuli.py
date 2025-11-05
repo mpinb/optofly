@@ -20,6 +20,7 @@ from src.visual_stimuli.display_manager import DisplayManager
 from src.visual_stimuli.geometry_utils import GeometryUtils
 from src.visual_stimuli.static_pattern import StaticPatternStimulus
 from src.visual_stimuli.looming_stimulus import LoomingStimulusRenderer
+from src.visual_stimuli.vertical_bar_stimulus import VerticalBarStimulus
 from src.visual_stimuli.stimulus_registry import StimulusRegistry
 
 
@@ -209,6 +210,15 @@ class VisualStimuliProcess(WorkerProcess):
 
     def _initialize_stimuli(self) -> None:
         """Initialize and register enabled stimuli."""
+        # Determine actual window height for rendering
+        # In standalone mode, use the smaller standalone window height
+        # In normal mode, use the full window height
+        standalone_config = self.config.get("standalone", {})
+        if self.standalone:
+            window_height = standalone_config.get("window_height", 720)
+        else:
+            window_height = self.config.get("window_height", 1080)
+
         # Register static pattern if enabled
         static_config = self.config.get("static", {})
         if static_config.get("enabled", False):
@@ -228,9 +238,24 @@ class VisualStimuliProcess(WorkerProcess):
             self.registry.register("looming", looming_stimulus)
             self.logger.info("Looming stimulus registered")
 
+        # Register vertical bar stimulus if enabled
+        vertical_bar_config = self.config.get("vertical_bar", {})
+        if vertical_bar_config.get("enabled", False):
+            vertical_bar_stimulus = VerticalBarStimulus(
+                config=vertical_bar_config,
+                geometry_utils=self.geometry,
+                logger=self.logger,
+                csv_writer=self.csv_writer,
+                window_height=window_height
+            )
+            self.registry.register("vertical_bar", vertical_bar_stimulus)
+            self.logger.info("Vertical bar stimulus registered")
+
         # Initialize rendering after all stimuli registered
         self.registry.initialize_all_rendering(self.batch)
         self.logger.info("Stimulus rendering initialized")
+
+        
 
     def _initialize_standalone_controller(self) -> None:
         """Initialize standalone controller for manual testing."""

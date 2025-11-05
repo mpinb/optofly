@@ -34,39 +34,47 @@ class VerticalBarStimulus(BaseStimulus):
         config: Dict[str, Any],
         geometry_utils: GeometryUtils,
         logger,
-        csv_writer
+        csv_writer,
+        window_height: int = None
     ):
         """Initialize vertical bar stimulus.
-        
+
         Args:
             config: Configuration dictionary from [visual_stimuli.vertical_bar] section
             geometry_utils: GeometryUtils instance for coordinate conversion
             logger: Logger instance for console output
             csv_writer: CSVWriter instance for event logging
+            window_height: Actual window height in pixels (for rendering)
         """
         # Call parent constructor (BaseStimulus.__init__)
         super().__init__(config)
-        
+
         # Store dependencies
         self.geometry = geometry_utils  # For heading→pixel conversion
         self.logger = logger            # For logging messages
         self.csv_writer = csv_writer    # For recording events to CSV
-        
+
+        # Store actual window dimensions for rendering
+        # Use window_height if provided, otherwise fall back to geometry.screen_height
+        self.window_height = window_height if window_height is not None else geometry_utils.screen_height
+
         # ============================================================
         # PARSE CONFIGURATION PARAMETERS
         # ============================================================
-        
+
         # Basic enable/disable
         self.enabled = config.get("enabled", True)
-        
+
         # Bar appearance
         # -------------------------------------------------------------
-        # Bar width in pixels (horizontal dimension)
-        self.bar_width_px = config.get("bar_width_px", 100)
-        
-        # Bar height in pixels (vertical dimension)
-        # None means full screen height
-        self.bar_height_px = config.get("bar_height_px", None)
+        # Bar width in degrees (angular size as seen by fly)
+        bar_width_deg = config.get("bar_width_deg", 20.0)
+        # Convert to pixels using geometry utils (handles scaling automatically)
+        self.bar_width_px = self.geometry.degrees_to_pixels(bar_width_deg)
+
+        # Bar height as fraction of screen height (0.0 to 1.0)
+        # 1.0 means full screen height, 0.5 means half height, etc.
+        self.bar_height_fraction = config.get("bar_height_fraction", 1.0)
         
         # Bar color (can be string name or RGB tuple)
         self.bar_color = self._parse_color(config.get("bar_color", "black"))
@@ -212,22 +220,19 @@ class VerticalBarStimulus(BaseStimulus):
     
     def initialize_rendering(self, batch: pyglet.graphics.Batch) -> None:
         """Store batch reference for later use.
-        
+
         Rectangles are created on-demand when triggered, not during
         initialization, since this is a closed-loop stimulus.
-        
+
         Args:
             batch: Pyglet graphics batch for rendering
         """
         self._batch_ref = batch
         self._initialized = True
-        
-        # Calculate actual bar height
-        # If not specified in config, use full screen height
-        if self.bar_height_px is None:
-            self.actual_bar_height = self.geometry.screen_height
-        else:
-            self.actual_bar_height = self.bar_height_px
+
+        # Calculate actual bar height from fraction
+        # bar_height_fraction = 1.0 means full screen height
+        self.actual_bar_height = int(self.bar_height_fraction * self.window_height)
     
     def on_trigger(self, trigger_data: Dict[str, Any]) -> None:
         """Handle TRIGGER message - start bar presentation.
@@ -297,9 +302,9 @@ class VerticalBarStimulus(BaseStimulus):
             fly_heading_rad,
             self.selected_position_deg
         )
-        
+
         # Center bar vertically on screen
-        self.bar_y = (self.geometry.screen_height - self.actual_bar_height) // 2
+        self.bar_y = (self.window_height - self.actual_bar_height) // 2
         
         # ============================================================
         # ACTIVATE STIMULUS

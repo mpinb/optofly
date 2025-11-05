@@ -145,3 +145,8 @@ docs/plans/2025-10-29-cylindrical-projection-design.md
 
 # Web UI (WIP - lives on webui branch)
 web/
+
+# Data files / output logs
+visual_stimuli.csv
+visual_stimuli.csv.*.bak
+visual_stimuli_performance.csv
