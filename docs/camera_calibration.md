@@ -428,7 +428,7 @@ Click **SAVE** to save the raw calibration data. This creates a file called `cal
 
 4. **Copy to Strand-cam config directory:**
    ```bash
-   mkdir -p ~/.config/strand-cam/camera_info
+   mkdir -p ~/.config/strand-cam/camera_info # Should already exist after installing Braid
    cp ost.yaml ~/.config/strand-cam/camera_info/Basler-40080153.yaml
    ```
    
