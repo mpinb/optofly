@@ -152,8 +152,14 @@ class VisualStimuliProcess(WorkerProcess):
     def _initialize_geometry(self) -> None:
         """Initialize geometry utilities for coordinate conversion."""
         # Get scale factor for standalone mode
+        # Only use scale factor if in standalone mode AND not using experimental display
         standalone_config = self.config.get("standalone", {})
-        scale_factor = standalone_config.get("scale_factor", 6.0) if self.standalone else 1.0
+        use_experimental_display = standalone_config.get("use_experimental_display", False)
+
+        if self.standalone and not use_experimental_display:
+            scale_factor = standalone_config.get("scale_factor", 6.0)
+        else:
+            scale_factor = 1.0
 
         self.geometry = GeometryUtils(
             screen_width=self.config.get("window_width", 7680),
@@ -176,6 +182,7 @@ class VisualStimuliProcess(WorkerProcess):
         """Initialize pyglet display window."""
         # Get standalone settings
         standalone_config = self.config.get("standalone", {})
+        use_experimental_display = standalone_config.get("use_experimental_display", False)
 
         self.display_manager = DisplayManager(
             window_x_offset=self.config.get("window_x_offset", 3840),
@@ -184,7 +191,8 @@ class VisualStimuliProcess(WorkerProcess):
             background_color=(255, 255, 255, 255),  # White background
             standalone=self.standalone,
             standalone_width=standalone_config.get("window_width", 1280),
-            standalone_height=standalone_config.get("window_height", 720)
+            standalone_height=standalone_config.get("window_height", 720),
+            use_experimental_display=use_experimental_display
         )
 
         self.window = self.display_manager.create_window()
@@ -196,7 +204,13 @@ class VisualStimuliProcess(WorkerProcess):
             self.window.clear()
             self.batch.draw()
 
-        if self.standalone:
+        if self.standalone and use_experimental_display:
+            self.logger.info(
+                f"Display window created (standalone on experimental display): "
+                f"{self.config.get('window_width')}×"
+                f"{self.config.get('window_height')} at x={self.config.get('window_x_offset')}"
+            )
+        elif self.standalone:
             self.logger.info(
                 f"Display window created (standalone): "
                 f"{standalone_config.get('window_width', 1280)}×"
@@ -211,10 +225,12 @@ class VisualStimuliProcess(WorkerProcess):
     def _initialize_stimuli(self) -> None:
         """Initialize and register enabled stimuli."""
         # Determine actual window height for rendering
-        # In standalone mode, use the smaller standalone window height
-        # In normal mode, use the full window height
+        # In standalone mode with small window, use the smaller standalone window height
+        # In standalone mode with experimental display OR normal mode, use the full window height
         standalone_config = self.config.get("standalone", {})
-        if self.standalone:
+        use_experimental_display = standalone_config.get("use_experimental_display", False)
+
+        if self.standalone and not use_experimental_display:
             window_height = standalone_config.get("window_height", 720)
         else:
             window_height = self.config.get("window_height", 1080)

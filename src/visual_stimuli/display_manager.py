@@ -18,7 +18,8 @@ class DisplayManager:
         background_color: tuple = (255, 255, 255, 255),
         standalone: bool = False,
         standalone_width: int = 1280,
-        standalone_height: int = 720
+        standalone_height: int = 720,
+        use_experimental_display: bool = False
     ):
         """Initialize display manager.
 
@@ -30,6 +31,7 @@ class DisplayManager:
             standalone: If True, create small testing window instead of fullscreen
             standalone_width: Width for standalone testing window
             standalone_height: Height for standalone testing window
+            use_experimental_display: If True in standalone mode, render on experimental display
         """
         self.window_x_offset = window_x_offset
         self.window_width = window_width
@@ -38,6 +40,7 @@ class DisplayManager:
         self.standalone = standalone
         self.standalone_width = standalone_width
         self.standalone_height = standalone_height
+        self.use_experimental_display = use_experimental_display
         self.window = None
 
     def create_window(self, caption: str = "OptoFly Visual Stimuli") -> pyglet.window.Window:
@@ -45,7 +48,8 @@ class DisplayManager:
 
         Creates either:
         - Production mode: Fullscreen window on experimental screens
-        - Standalone mode: Small testing window on main screen
+        - Standalone mode (experimental display): Full window on experimental screens with overlay
+        - Standalone mode (main screen): Small testing window on main screen
 
         Args:
             caption: Window title
@@ -53,7 +57,20 @@ class DisplayManager:
         Returns:
             Pyglet window instance
         """
-        if self.standalone:
+        if self.standalone and self.use_experimental_display:
+            # Standalone testing mode on experimental display
+            # Use full experimental display dimensions
+            self.window = pyglet.window.Window(
+                width=self.window_width,
+                height=self.window_height,
+                caption=f"{caption} - Standalone (Experimental Display)",
+                resizable=False,
+                vsync=True
+            )
+            # Set window position (move to experimental screens)
+            self.window.set_location(self.window_x_offset, 0)
+
+        elif self.standalone:
             # Standalone testing mode: small window on main screen
             self.window = pyglet.window.Window(
                 width=self.standalone_width,

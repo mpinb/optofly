@@ -1,4 +1,15 @@
+# ==============================================================================
+# OPTOFLY CONFIGURATION
+# ==============================================================================
+# Main configuration file for the OptoFly closed-loop optogenetics system
+# Documentation: https://github.com/elhananby/OptoFly
+
+# ==============================================================================
+# SYSTEM CONFIGURATION
+# ==============================================================================
+
 [zmq]
+# ZMQ messaging ports and topics
 braid_port = 5555
 trigger_port = 5556
 
@@ -6,239 +17,201 @@ braid_topic = "BRAID"
 trigger_topic = "TRIGGER"
 lens_topic = "LENS"
 
-[opto_trigger]
-active = true
-port = "/dev/ttyUSB0"
-baudrate = 115200
+[logging]
+# Global logging level
+level = "INFO"
 
-# Parameters can be single values OR lists of options
-# Single value example:
-duration = 300
-
-# List of options example (randomly selected on each trigger):
-# duration = [100, 200, 300, 400]
-
-intensity = 255
-# intensity = [128, 192, 255]
-
-frequency = 0
-# frequency = [0, 10, 20, 50]
-
-color = "red"
-sham_probability = 0.1
-
-[liquid_lens]
-active = true
-port = "/dev/ttyUSB1"
-mode = "diopter"
-calibration_file = "calibrations/liquid_lens.csv"
-tracking_timeout = 3.0
-
-[liquid_lens.kalman]
-enabled = true
-process_noise = 0.01  # Process noise covariance (how quickly velocity can change)
-measurement_noise = 0.1  # Measurement noise covariance (accuracy of position measurements)
-initial_covariance = 1.0  # Initial state covariance (uncertainty in initial state)
-system_latency = 0.05  # System latency in seconds (message processing + lens adjustment time)
-prediction_horizon = 0.1  # How far in the future to predict (in seconds)
+# ==============================================================================
+# TRACKING & DATA INPUT
+# ==============================================================================
 
 [braid_publisher]
+# Braid tracking system connection
 url = "http://10.40.80.6:8397"
 timeout = 30
 reconnect_delay = 5
 
 [trigger_handler]
-min_trajectory_time = 1.0
-min_trigger_interval = 10.0
-radius = 0.025
-z_lim = [0.15, 0.25]
-heading_cone_deg = 45.0
+# Trigger detection criteria
+min_trajectory_time = 1.0        # Minimum tracking time before triggering (seconds)
+min_trigger_interval = 10.0      # Minimum time between triggers (seconds)
+radius = 0.025                   # Trigger zone radius (meters)
+z_lim = [0.15, 0.25]            # Vertical trigger zone limits (meters)
+heading_cone_deg = 45.0          # Angular tolerance for heading alignment (degrees)
 
 [camera]
+# High-speed camera settings
 resolution = [2016, 2016]
 fps = 500
-exposure_time = 2000
-pre_trigger_time = 0.5
-post_trigger_time = 1.5
+exposure_time = 2000             # Microseconds
+pre_trigger_time = 0.5           # Recording before trigger (seconds)
+post_trigger_time = 1.5          # Recording after trigger (seconds)
 
 [camera.FOV]
+# Camera field of view in tracking coordinates (meters)
 x_min = -0.1
 x_max = 0.1
 y_min = -0.1
 y_max = 0.1
 
-[logging]
-level = "INFO"
+# ==============================================================================
+# HARDWARE CONTROL
+# ==============================================================================
+
+[opto_trigger]
+# LED optogenetic stimulation
+active = true
+port = "/dev/ttyUSB0"
+baudrate = 115200
+
+# Stimulus parameters (single values or lists for randomization)
+duration = 300                   # Pulse duration (ms)
+# duration = [100, 200, 300, 400]  # Example: random selection
+
+intensity = 255                  # LED brightness (0-255)
+# intensity = [128, 192, 255]    # Example: random intensity
+
+frequency = 0                    # Pulse frequency (Hz, 0=continuous)
+# frequency = [0, 10, 20, 50]    # Example: random frequency
+
+color = "red"                    # LED color
+sham_probability = 0.1           # Probability of sham trials (0.0-1.0)
+
+[liquid_lens]
+# Liquid lens auto-focus system
+active = true
+port = "/dev/ttyUSB1"
+mode = "diopter"
+calibration_file = "calibrations/liquid_lens.csv"
+tracking_timeout = 3.0           # Stop adjusting if no tracking data (seconds)
+
+[liquid_lens.kalman]
+# Kalman filter for predictive focus
+enabled = true
+process_noise = 0.01             # How quickly velocity can change
+measurement_noise = 0.1          # Accuracy of position measurements
+initial_covariance = 1.0         # Uncertainty in initial state
+system_latency = 0.05            # Message processing + lens adjustment time (seconds)
+prediction_horizon = 0.1         # Prediction lookahead time (seconds)
+
+# ==============================================================================
+# VISUAL STIMULI
+# ==============================================================================
 
 [visual_stimuli]
-# Main settings
+# Main visual stimuli settings
 active = true
 log_file = "visual_stimuli.csv"
 performance_log_file = "visual_stimuli_performance.csv"
 log_level = "INFO"
 log_color = "CYAN"
 
-# Display settings
-window_x_offset = 3840             # Start of experimental screens (DP-0.1)
-window_width = 7680                # Total width (4 × 1920)
+# ------------------------------------------------------------------------------
+# Display Configuration
+# ------------------------------------------------------------------------------
+
+window_x_offset = 3840           # Start of experimental screens (DP-0.1)
+window_width = 7680              # Total width: 4 screens × 1920 pixels
 window_height = 1080
 target_fps = 240
 
-# Calibration
-use_empirical_calibration = false  # Set to true after running --calibrate-mapping
+# Screen identification (set after running --calibrate)
+# Order corresponds to: DP-0.1, DP-0.2, DP-2.1, DP-2.2
+screen_mapping = ["South", "West", "North", "East"]
+
+# ------------------------------------------------------------------------------
+# Calibration Settings
+# ------------------------------------------------------------------------------
+
+use_empirical_calibration = false  # Enable after running --calibrate-mapping
 calibration_mapping_file = "calibrations/heading_mapping_model.npz"
 heading_offset_deg = 0.0           # Fallback offset if empirical unavailable
 arena_center_to_screen_cm = 25.0   # Distance from arena center to screens
 
-# Screen identification (set after --calibrate)
-# Order: DP-0.1, DP-0.2, DP-2.1, DP-2.2
-screen_mapping = ["North", "East", "South", "West"]
+# ------------------------------------------------------------------------------
+# Stimulus: Static Pattern
+# ------------------------------------------------------------------------------
 
 [visual_stimuli.static]
 enabled = true
-square_color = "black"              # Color for 1s in binary matrix
-background_color = "white"          # Color for 0s in binary matrix
-pattern_density = 0.3               # Probability of pattern pixels (0.0-1.0)
-downscale_factor = 2                # Resolution divisor: 1=full, 2=half, 4=quarter
-random_seed = 42                    # Optional: for reproducible patterns
+square_color = "black"           # Pattern color
+background_color = "white"       # Background color
+pattern_density = 0.3            # Pattern density (0.0-1.0)
+downscale_factor = 2             # Resolution divisor: 1=full, 2=half, 4=quarter
+random_seed = 42                 # For reproducible patterns
 
-# OLD parameters (no longer used):
-# num_squares = 500
-# average_square_size_px = 50
-# square_size_std_px = 15
+# ------------------------------------------------------------------------------
+# Stimulus: Looming Circles
+# ------------------------------------------------------------------------------
 
 [visual_stimuli.looming]
-enabled = false
+enabled = true
 
-# Parameters can be single values OR lists of options
-# Single value example:
+# Size parameters (degrees visual angle)
 initial_size_deg = 5.0
-
-# List of options example (randomly selected on each trigger):
-# initial_size_deg = [5.0, 10.0, 15.0]
+# initial_size_deg = [5.0, 10.0, 15.0]  # Example: randomization
 
 final_size_deg = 64.0
 # final_size_deg = [60.0, 70.0, 80.0, 90.0]
 
+# Timing parameters (milliseconds)
 expansion_duration_ms = 500
 # expansion_duration_ms = [300, 400, 500, 600]
 
 hold_time_ms = 200
 # hold_time_ms = [100, 200, 300]
 
-# Expansion type and parameters
-expansion_type = "lv_ratio"        # "lv_ratio" or "exponential"
-lv_ratio_ms = 25.0
+# Expansion dynamics
+expansion_type = "exponential"   # "lv_ratio" or "exponential"
+lv_ratio_ms = 25.0               # Only used if expansion_type = "lv_ratio"
 
-# color and positions
-circle_color = [0, 0, 0]
-positions_deg = [-90, 0, 90]       # Offsets from fly heading
+# Appearance
+circle_color = [0, 0, 0]         # RGB color (black)
 
+# Position offsets (degrees from fly heading)
+# 0° = ahead, 90° = right, -90° = left, 180° = behind
+positions_deg = [-90, 0, 90]
+
+# ------------------------------------------------------------------------------
+# Stimulus: Vertical Bar
+# ------------------------------------------------------------------------------
 
 [visual_stimuli.vertical_bar]
+enabled = false
 
-# Enable/disable this stimulus
-enabled = true
+# Bar appearance
+bar_width_deg = 20.0             # Width in visual degrees
+# bar_width_deg = [15.0, 20.0, 25.0]  # Example: randomization
 
-# Bar width in visual degrees (angular size as seen by fly)
-# Can be single value or list for randomization
-# Examples:
-#   bar_width_deg = 20.0           # Always 20 degrees
-#   bar_width_deg = [15.0, 20.0, 25.0]  # Random selection
-bar_width_deg = 20.0
+bar_color = "black"              # Color name or RGB list [R, G, B]
+bar_height_fraction = 1.0        # Height as fraction of screen (1.0 = full height)
 
-# Bar color
-# Can be color name: "black", "white", "red", "green", "blue", "gray"
-# Or RGB list: [255, 0, 0] for red
-bar_color = "black"
-
-# Bar height as fraction of screen height
-# 1.0 = full height (floor to ceiling)
-# 0.5 = half height
-bar_height_fraction = 1.0
-
-# ========================================
-# TIMING PARAMETERS
-# ========================================
-
-# How long to display the bar (milliseconds)
-# Can be single value or list for randomization
-# Examples:
-#   presentation_duration_ms = 2000        # Always 2 seconds
-#   presentation_duration_ms = [1000, 2000, 3000]  # Random 1-3 seconds
+# Timing parameters (milliseconds)
 presentation_duration_ms = 2000
+# presentation_duration_ms = [1000, 2000, 3000]
 
-# Cooldown period after presentation (milliseconds)
-# Prevents immediate re-triggering
-# Can be single value or list for randomization
 cooldown_duration_ms = 3000
+# cooldown_duration_ms = [2000, 3000, 4000]
 
-# ========================================
-# POSITION CONFIGURATION
-# ========================================
-
-# Possible positions for bar presentation (degrees relative to fly heading)
-# The system will balance presentations across these positions
-#
-# Position meanings:
-#   0° = directly ahead of fly
-#   90° = to fly's right (lateral/attractive test)
-#   -90° = to fly's left (lateral/attractive test)
-#   180° = directly behind fly (control)
-#   45° = front-right diagonal
-#   -45° = front-left diagonal
-#
-# Examples:
-#   positions_deg = [90]              # Only right side
-#   positions_deg = [90, 0, 180]      # Right, ahead, behind
-#   positions_deg = [90, -90]         # Both sides
-#   positions_deg = [0, 45, 90, 135, 180, -135, -90, -45]  # All around
+# Position offsets (degrees from fly heading)
+# System automatically balances presentations across positions
+# 0° = ahead, 90° = right, -90° = left, 180° = behind
 positions_deg = [90, 0, 180]
 
-# ========================================
-# EXAMPLE CONFIGURATIONS FOR DIFFERENT EXPERIMENTS
-# ========================================
+# Example configurations:
+# Lateral attraction test:     positions_deg = [90]
+# Attraction vs control:        positions_deg = [90, 180]
+# Full spatial test:            positions_deg = [0, 90, 180, -90]
+# All directions:               positions_deg = [0, 45, 90, 135, 180, -135, -90, -45]
 
-# Configuration 1: Test lateral attraction (right side only)
-# enabled = true
-# bar_width_deg = 20.0
-# bar_color = "black"
-# presentation_duration_ms = 2000
-# positions_deg = [90]
-
-# Configuration 2: Test attraction vs control (right and behind)
-# enabled = true
-# bar_width_deg = 20.0
-# bar_color = "black"
-# presentation_duration_ms = 2000
-# positions_deg = [90, 180]
-
-# Configuration 3: Full spatial test (all cardinal directions)
-# enabled = true
-# bar_width_deg = 20.0
-# bar_color = "black"
-# presentation_duration_ms = 2000
-# positions_deg = [0, 90, 180, -90]
-
-# Configuration 4: Randomized parameters
-# enabled = true
-# bar_width_deg = [15.0, 20.0, 25.0]
-# bar_color = "black"
-# presentation_duration_ms = [1000, 2000, 3000]
-# cooldown_duration_ms = [2000, 3000, 4000]
-# positions_deg = [90, 0, 180]
-
-# Configuration 5: Colored bars for different conditions
-# enabled = true
-# bar_width_deg = 20.0
-# bar_color = [0, 128, 255]  # Custom blue color
-# presentation_duration_ms = 2000
-# positions_deg = [90, -90]
-
+# ------------------------------------------------------------------------------
+# Standalone Testing Mode
+# ------------------------------------------------------------------------------
 
 [visual_stimuli.standalone]
-# Standalone testing mode settings (--standalone flag)
-window_width = 1280                # Small window width
-window_height = 720                # Small window height
-scale_factor = 6.0                 # Coordinate scaling factor (7680 / 1280 = 6)
-show_overlay = true                # Enable debug overlay
+# Settings for manual testing mode (--standalone flag)
+use_experimental_display = true  # Render on experimental display vs small test window
+window_width = 1280              # Small window width (only if use_experimental_display = false)
+window_height = 720              # Small window height (only if use_experimental_display = false)
+scale_factor = 6.0               # Coordinate scaling (7680/1280 = 6, only if use_experimental_display = false)
+show_overlay = true              # Enable debug overlay with heading info

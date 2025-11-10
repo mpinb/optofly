@@ -40,7 +40,7 @@ def run_screen_identification(
     screen_names = ["DP-0.1", "DP-0.2", "DP-2.1", "DP-2.2"]
 
     for i, name in enumerate(screen_names):
-        x_center = (i * 1920) + 960  # Center of each 1920px screen
+        x_center = (i * 1920) + 1920  # Center of each 1920px screen
         y_center = window_height // 2
 
         label = pyglet.text.Label(
