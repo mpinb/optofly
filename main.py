@@ -1,0 +1,246 @@
+"""
+OptoFly Main Experiment Launcher
+
+Config-driven experiment launcher that starts processes based on config.toml settings.
+Automatically enables/disables processes based on their 'active' flags.
+"""
+
+import multiprocessing as mp
+import sys
+import time
+import tomllib
+from datetime import datetime
+from pathlib import Path
+
+from src.processes.braid_publisher import BraidPublisher
+from src.processes.trigger_handler import TriggerHandler
+from src.processes.visual_stimuli import VisualStimuliProcess
+from src.processes.opto_trigger_worker import OptoTriggerWorker
+from src.processes.ximea_camera import CameraProcess
+from src.processes.liquid_lens import LiquidLens
+from src.utils.braid import check_braid_folder_exists
+
+
+def load_config(config_path: str) -> dict:
+    """Load configuration from TOML file.
+
+    Args:
+        config_path: Path to the configuration file
+
+    Returns:
+        Dictionary containing the full configuration
+    """
+    try:
+        with open(config_path, "rb") as f:
+            return tomllib.load(f)
+    except FileNotFoundError:
+        print(f"ERROR: Config file not found: {config_path}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"ERROR: Failed to load config: {e}")
+        sys.exit(1)
+
+
+
+
+def print_experiment_config(config: dict, active_processes: list):
+    """Print experiment configuration summary.
+
+    Args:
+        config: Loaded configuration dictionary
+        active_processes: List of active process names
+    """
+    print("\n" + "="*70)
+    print("OptoFly Experiment Configuration")
+    print("="*70)
+
+    print("\nActive Processes:")
+    for process_name in active_processes:
+        print(f"  ✓ {process_name}")
+
+    # Visual stimuli details
+    if "VisualStimuliProcess" in active_processes:
+        print("\nVisual Stimuli:")
+        visual_config = config.get("visual_stimuli", {})
+        if visual_config.get("static", {}).get("enabled", False):
+            print("  ✓ Static pattern")
+        if visual_config.get("looming", {}).get("enabled", False):
+            print("  ✓ Looming circles")
+        if visual_config.get("vertical_bar", {}).get("enabled", False):
+            print("  ✓ Vertical bar")
+        if visual_config.get("sweeping_bar", {}).get("enabled", False):
+            print("  ✓ Sweeping bar")
+
+    # Opto trigger details
+    if "OptoTriggerWorker" in active_processes:
+        opto_config = config.get("opto_trigger", {})
+        color = opto_config.get("color", "unknown")
+        intensity = opto_config.get("intensity", "unknown")
+        duration = opto_config.get("duration", "unknown")
+        print(f"\nOpto Trigger:")
+        print(f"  Color: {color}")
+        print(f"  Intensity: {intensity}")
+        print(f"  Duration: {duration} ms")
+
+    # Camera details
+    if "CameraProcess" in active_processes:
+        camera_config = config.get("camera", {})
+        fps = camera_config.get("fps", "unknown")
+        resolution = camera_config.get("resolution", "unknown")
+        print(f"\nCamera:")
+        print(f"  Resolution: {resolution}")
+        print(f"  FPS: {fps}")
+
+    print("\nPress Ctrl+C to stop the experiment")
+    print("="*70 + "\n")
+
+
+def main():
+    """Launch OptoFly experiment with config-driven process selection."""
+
+    # Configuration file path
+    config_path = "config.toml"
+
+    # Load configuration
+    print(f"Loading configuration from {config_path}...")
+    config = load_config(config_path)
+
+    # Check for Braid recording folder (exits if not found)
+    experiments_path = config.get("braid_publisher", {}).get("experiments_path", "/mnt/data/experiments/")
+    braid_folder = check_braid_folder_exists(experiments_path)
+    print(f"Experiment data will be saved to: {braid_folder}")
+
+    # Create shared stop event for coordinated shutdown
+    stop_event = mp.Event()
+
+    # Track which processes to start based on config
+    processes = []
+    active_process_names = []
+
+    try:
+        # Core processes (always started)
+        print("\nStarting core processes...")
+
+        # 1. BraidPublisher - connects to Braid tracking and publishes to ZMQ
+        print("  - BraidPublisher")
+        braid_publisher = BraidPublisher(
+            config_path=config_path,
+            event=stop_event
+        )
+        braid_publisher.start()
+        processes.append(("BraidPublisher", braid_publisher))
+        active_process_names.append("BraidPublisher")
+        time.sleep(0.5)  # Allow ZMQ publisher to bind
+
+        # 2. TriggerHandler - applies spatial/temporal gating
+        print("  - TriggerHandler")
+        trigger_handler = TriggerHandler(
+            config_path=config_path,
+            event=stop_event
+        )
+        trigger_handler.start()
+        processes.append(("TriggerHandler", trigger_handler))
+        active_process_names.append("TriggerHandler")
+        time.sleep(0.5)  # Allow ZMQ publisher to bind
+
+        # Optional processes (based on config)
+        print("\nStarting optional processes (based on config)...")
+
+        # 3. VisualStimuliProcess - displays visual patterns
+        if config.get("visual_stimuli", {}).get("active", False):
+            print("  - VisualStimuliProcess")
+            visual_stimuli = VisualStimuliProcess(
+                config_path=config_path,
+                event=stop_event
+            )
+            visual_stimuli.start()
+            processes.append(("VisualStimuliProcess", visual_stimuli))
+            active_process_names.append("VisualStimuliProcess")
+        else:
+            print("  - VisualStimuliProcess (disabled in config)")
+
+        # 4. CameraProcess - high-speed video recording
+        if config.get("camera", {}).get("active", False):
+            print("  - CameraProcess")
+            camera = CameraProcess(
+                config_path=config_path,
+                event=stop_event
+            )
+            camera.start()
+            processes.append(("CameraProcess", camera))
+            active_process_names.append("CameraProcess")
+        else:
+            print("  - CameraProcess (disabled in config)")
+
+        # 5. OptoTriggerWorker - optogenetic LED activation
+        if config.get("opto_trigger", {}).get("active", False):
+            print("  - OptoTriggerWorker")
+            opto_trigger = OptoTriggerWorker(
+                event=stop_event,
+                braid_folder=braid_folder,
+                config_path=config_path
+            )
+            opto_trigger.start()
+            processes.append(("OptoTriggerWorker", opto_trigger))
+            active_process_names.append("OptoTriggerWorker")
+        else:
+            print("  - OptoTriggerWorker (disabled in config)")
+
+        # 6. LiquidLens - auto-focus system
+        if config.get("liquid_lens", {}).get("active", False):
+            print("  - LiquidLens")
+            liquid_lens = LiquidLens(
+                event=stop_event,
+                config_path=config_path
+            )
+            liquid_lens.start()
+            processes.append(("LiquidLens", liquid_lens))
+            active_process_names.append("LiquidLens")
+        else:
+            print("  - LiquidLens (disabled in config)")
+
+        # Print experiment summary
+        print_experiment_config(config, active_process_names)
+
+        # Wait for keyboard interrupt
+        while not stop_event.is_set():
+            time.sleep(0.1)
+
+    except KeyboardInterrupt:
+        print("\n\nReceived keyboard interrupt, shutting down...")
+        stop_event.set()
+
+    except Exception as e:
+        print(f"\n\nERROR during experiment: {e}")
+        import traceback
+        traceback.print_exc()
+        stop_event.set()
+        raise
+
+    finally:
+        # Graceful shutdown
+        print("\nShutting down processes...")
+        stop_event.set()
+
+        # Give processes time to cleanup
+        time.sleep(1)
+
+        # Join all processes
+        for name, process in processes:
+            if process.is_alive():
+                print(f"  Waiting for {name} to terminate...")
+                process.join(timeout=5)
+                if process.is_alive():
+                    print(f"  Force terminating {name}...")
+                    process.terminate()
+                    process.join(timeout=2)
+
+        print("\n" + "="*70)
+        print(f"Experiment ended. Data saved to: {braid_folder}")
+        print("="*70)
+
+
+if __name__ == "__main__":
+    # Enable multiprocessing support on macOS/Windows
+    # mp.set_start_method('spawn', force=True)
+    main()

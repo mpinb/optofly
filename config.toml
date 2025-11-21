@@ -27,20 +27,23 @@ level = "INFO"
 
 [braid_publisher]
 # Braid tracking system connection
-url = "http://10.40.80.6:8397"
+url = "http://127.0.0.1:8397"
 timeout = 30
 reconnect_delay = 5
+experiments_path = "/mnt/data/experiments/"  # Root path where Braid saves .braid folders
 
 [trigger_handler]
 # Trigger detection criteria
 min_trajectory_time = 1.0        # Minimum tracking time before triggering (seconds)
 min_trigger_interval = 10.0      # Minimum time between triggers (seconds)
-radius = 0.025                   # Trigger zone radius (meters)
+radius = 0.05                   # Trigger zone radius (meters)
 z_lim = [0.15, 0.25]            # Vertical trigger zone limits (meters)
 heading_cone_deg = 45.0          # Angular tolerance for heading alignment (degrees)
+min_velocity = 0.01              # Minimum velocity to consider object "moving" (m/s)
 
 [camera]
 # High-speed camera settings
+active = false
 resolution = [2016, 2016]
 fps = 500
 exposure_time = 2000             # Microseconds
@@ -49,10 +52,10 @@ post_trigger_time = 1.5          # Recording after trigger (seconds)
 
 [camera.FOV]
 # Camera field of view in tracking coordinates (meters)
-x_min = -0.1
-x_max = 0.1
-y_min = -0.1
-y_max = 0.1
+x_min = -0.07
+x_max = 0.07
+y_min = -0.045
+y_max = 0.06
 
 # ==============================================================================
 # HARDWARE CONTROL
@@ -61,14 +64,14 @@ y_max = 0.1
 [opto_trigger]
 # LED optogenetic stimulation
 active = true
-port = "/dev/ttyUSB0"
+port = "/dev/opto_trigger"
 baudrate = 115200
 
 # Stimulus parameters (single values or lists for randomization)
-duration = 300                   # Pulse duration (ms)
+duration = [100, 200, 300]   # Pulse duration (ms)
 # duration = [100, 200, 300, 400]  # Example: random selection
 
-intensity = 255                  # LED brightness (0-255)
+intensity = [  0,  51, 102, 153, 204, 255] # LED brightness (0-255)
 # intensity = [128, 192, 255]    # Example: random intensity
 
 frequency = 0                    # Pulse frequency (Hz, 0=continuous)
@@ -79,7 +82,7 @@ sham_probability = 0.1           # Probability of sham trials (0.0-1.0)
 
 [liquid_lens]
 # Liquid lens auto-focus system
-active = true
+active = false
 port = "/dev/ttyUSB1"
 mode = "diopter"
 calibration_file = "calibrations/liquid_lens.csv"
@@ -87,7 +90,7 @@ tracking_timeout = 3.0           # Stop adjusting if no tracking data (seconds)
 
 [liquid_lens.kalman]
 # Kalman filter for predictive focus
-enabled = true
+enabled = false
 process_noise = 0.01             # How quickly velocity can change
 measurement_noise = 0.1          # Accuracy of position measurements
 initial_covariance = 1.0         # Uncertainty in initial state
@@ -100,7 +103,7 @@ prediction_horizon = 0.1         # Prediction lookahead time (seconds)
 
 [visual_stimuli]
 # Main visual stimuli settings
-active = true
+active = false
 log_file = "visual_stimuli.csv"
 performance_log_file = "visual_stimuli_performance.csv"
 log_level = "INFO"
@@ -145,7 +148,7 @@ random_seed = 42                 # For reproducible patterns
 # ------------------------------------------------------------------------------
 
 [visual_stimuli.looming]
-enabled = true
+enabled = false
 
 # Size parameters (degrees visual angle)
 initial_size_deg = 5.0
@@ -198,11 +201,50 @@ cooldown_duration_ms = 3000
 # 0° = ahead, 90° = right, -90° = left, 180° = behind
 positions_deg = [90, 0, 180]
 
-# Example configurations:
-# Lateral attraction test:     positions_deg = [90]
-# Attraction vs control:        positions_deg = [90, 180]
-# Full spatial test:            positions_deg = [0, 90, 180, -90]
-# All directions:               positions_deg = [0, 45, 90, 135, 180, -135, -90, -45]
+# ------------------------------------------------------------------------------
+# Stimulus: Sweeping Bar
+# ------------------------------------------------------------------------------
+
+[visual_stimuli.sweeping_bar]
+enabled = false
+
+# Sweep mode: "basic_sweep", "front_hemisphere", "lateral_sweep", or "custom"
+sweep_mode = "basic_sweep"
+
+# Bar appearance
+bar_width_deg = 20.0             # Width in visual degrees
+bar_color = "black"
+bar_height_fraction = 1.0
+
+# Motion parameters
+sweep_speed_deg_per_sec = 15.0   # Angular velocity (degrees/second)
+# sweep_speed_deg_per_sec = [10, 15, 22.5, 30]  # Example: randomization
+
+sweep_directions = ["forward"]   # ["forward"], ["reverse"], or ["forward", "reverse"]
+
+# Timing
+pause_at_start_ms = 500          # Pause before sweeping (0 to start immediately)
+pause_at_end_ms = 500            # Pause after sweeping
+cooldown_duration_ms = 3000
+
+# Sweep mode parameters
+basic_sweep_start_deg = 45.0     # Used with sweep_mode = "basic_sweep"
+basic_sweep_end_deg = 90.0
+
+front_hemisphere_start_deg = 0.0     # Used with sweep_mode = "front_hemisphere"
+front_hemisphere_end_deg = 90.0
+
+lateral_sweep_start_deg = 45.0   # Used with sweep_mode = "lateral_sweep"
+lateral_sweep_end_deg = 135.0
+
+custom_start_deg = 0.0           # Used with sweep_mode = "custom"
+custom_end_deg = 180.0
+
+# Optional: Define multiple angular sectors (overrides sweep_mode)
+# angular_sectors = [[45, 90], [0, 45], [-90, -45]]  # Balanced presentation
+
+# Advanced
+log_every_frame = false          # Frame-by-frame logging (WARNING: large files!)
 
 # ------------------------------------------------------------------------------
 # Standalone Testing Mode

@@ -180,6 +180,7 @@ class OptoTriggerWorker(WorkerProcess):
             # Get both timestamps (with backward compatibility fallback)
             braid_timestamp = trigger_data.get("braid_timestamp")
             trigger_timestamp = trigger_data.get("trigger_timestamp")
+            
             # Fallback to old 'timestamp' field if new fields not present
             if braid_timestamp is None:
                 braid_timestamp = trigger_data.get("timestamp")
@@ -196,7 +197,7 @@ class OptoTriggerWorker(WorkerProcess):
 
             self.logger.info(
                 f"Received trigger for object {obj_id} on frame {frame} "
-                f"(heading={mean_heading:.3f if mean_heading else None})"
+                f"(heading={mean_heading})"
             )
 
             # Trigger the hardware (it will determine sham based on probability)

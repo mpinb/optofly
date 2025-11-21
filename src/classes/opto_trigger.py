@@ -152,7 +152,9 @@ class OptoTrigger:
 
             # Send the command
             if self.serial_conn:
-                self.serial_conn.write(command.encode("utf-8"))
+                # Use \r\n line ending to match Arduino IDE serial monitor behavior
+                self.serial_conn.write((command + "\r\n").encode("utf-8"))
+                self.serial_conn.flush()  # Ensure data is sent immediately
             else:
                 self.logger.error("Serial connection is not established.")
                 return (False, False)

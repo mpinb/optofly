@@ -77,6 +77,9 @@ class TriggerHandlerConfig(ConfigBase):
         self.heading_cone_deg: float = float(config.get("heading_cone_deg", 45.0))
         self.heading_threshold: float = math.radians(self.heading_cone_deg)
 
+        # Minimum velocity to consider object as "moving" (m/s)
+        self.min_velocity: float = float(config.get("min_velocity", 0.01))
+
         # Linked subsystem state
         root_config = ConfigBase(config_path)._load_config()
         self.liquid_lens_active: bool = bool(

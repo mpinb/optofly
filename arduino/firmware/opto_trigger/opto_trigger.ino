@@ -3,8 +3,8 @@
 #include <string.h>
 
 const uint8_t PWM_RED_PIN = 3;
-const uint8_t PWM_GREEN_PIN = 9;
-const uint8_t PWM_BLUE_PIN = 10;
+const uint8_t PWM_GREEN_PIN = 5;
+const uint8_t PWM_BLUE_PIN = 6;
 
 struct ColorConfig {
   const char *name;

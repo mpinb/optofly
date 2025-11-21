@@ -65,6 +65,7 @@ class TrackedObject:
         zvel: float,
         timestamp: float,
         frame: int,
+        min_velocity: float = 0.01,
     ) -> None:
         """
         Update the tracked object with new position and velocity data.
@@ -74,6 +75,7 @@ class TrackedObject:
             xvel, yvel, zvel: Velocity components in meters/second
             timestamp: Message timestamp in seconds
             frame: Frame number from camera
+            min_velocity: Minimum velocity (m/s) to consider object moving
         """
         # Update current position and frame
         self.current_x = x
@@ -87,17 +89,16 @@ class TrackedObject:
         self.velocities.append((xvel, yvel, zvel))
         self.timestamps.append(timestamp)
 
-        # Calculate heading (angle of velocity vector in xy plane)
-        # Only calculate if velocity is non-zero to avoid division by zero
-        if abs(xvel) > 1e-6 or abs(yvel) > 1e-6:
+        # Calculate velocity magnitude in xy plane
+        velocity_magnitude = np.sqrt(xvel**2 + yvel**2)
+
+        # Only calculate and store heading if object is actually moving
+        # This prevents noise from stationary objects triggering false positives
+        if velocity_magnitude >= min_velocity:
             heading = np.arctan2(yvel, xvel)
             self.headings.append(heading)
-        elif len(self.headings) > 0:
-            # If velocity is too small, use previous heading
-            self.headings.append(self.headings[-1])
-        else:
-            # If no previous heading, use a default (facing along x-axis)
-            self.headings.append(0.0)
+        # If velocity is below threshold, don't add to heading history
+        # This ensures stationary objects don't accumulate noisy headings
 
         # Update last check time
         self.last_check_time = time.time()
@@ -339,8 +340,8 @@ class TriggerHandler(WorkerProcess):
         """
         try:
             obj_id = data["obj_id"]
-            timestamp = data["timestamp"]
             frame = data["frame"]
+            timestamp = time.time()  # Use local timestamp (Braid messages don't include timestamp)
 
             # Create new tracked object
             tracked_obj = TrackedObject(obj_id=obj_id, first_timestamp=timestamp)
@@ -355,6 +356,7 @@ class TriggerHandler(WorkerProcess):
                 zvel=data["zvel"],
                 timestamp=timestamp,
                 frame=frame,
+                min_velocity=self.config.min_velocity,
             )
 
             # Add to tracked objects
@@ -377,8 +379,8 @@ class TriggerHandler(WorkerProcess):
         """
         try:
             obj_id = data["obj_id"]
-            timestamp = data["timestamp"]
             frame = data["frame"]
+            timestamp = time.time()  # Use local timestamp (Braid messages don't include timestamp)
 
             # Check if we're already tracking this object
             if obj_id not in self.tracked_objects:
@@ -399,6 +401,7 @@ class TriggerHandler(WorkerProcess):
                 zvel=data["zvel"],
                 timestamp=timestamp,
                 frame=frame,
+                min_velocity=self.config.min_velocity,
             )
 
             # Evaluate triggers based on updated position and trajectory
@@ -491,7 +494,7 @@ class TriggerHandler(WorkerProcess):
             self.publisher.send_string(f"{self.config.zmq.trigger_topic} {message}")
             self.logger.info(
                 f"Sent TRIGGER for object {tracked_obj.obj_id} "
-                f"(frame={tracked_obj.current_frame}, heading={mean_heading:.3f if mean_heading else None})"
+                f"(frame={tracked_obj.current_frame}, heading={mean_heading})"
             )
         except Exception as e:
             self.logger.error(f"Error sending trigger: {e}")
@@ -551,11 +554,11 @@ class TriggerHandler(WorkerProcess):
                 # Process incoming message
                 try:
                     # Receive multipart message (topic, content)
-                    topic, message = self.subscriber.recv_multipart()
-                    message_str = message.decode("utf-8")
+                    message = self.subscriber.recv_string()
+                    topic, json_str = message.split(" ", 1)
 
                     # Parse JSON message
-                    message_data = json.loads(message_str)
+                    message_data = json.loads(json_str)
 
                     # Process the message
                     self.process_message(message_data)
