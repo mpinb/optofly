@@ -17,15 +17,30 @@ OptoFly integrates multiple components for automated behavioral experiments:
 
 ### Prerequisites
 
+**Option 1: uv (recommended - faster)**
 ```bash
-# Python environment
-uv sync
+# Install uv
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Rust toolchain (for camera)
+# Install dependencies
+uv sync
+```
+
+**Option 2: conda/mamba**
+```bash
+# Create environment
+mamba env create -f environment.yml  # or 'conda' instead of 'mamba'
+conda activate optofly
+```
+
+**Rust toolchain (for camera)**
+```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
+```
 
-# System dependencies
+**System dependencies**
+```bash
 sudo apt-get install -y \
     build-essential \
     libclang-dev \
@@ -48,67 +63,111 @@ cd ../..
 
 ### Configuration
 
-Edit `config.toml` to configure system parameters:
+OptoFly uses two configuration files:
+
+- **`config.toml`**: System configuration (hardware, tracking, processes)
+- **`visual_stimuli.toml`**: Visual stimuli settings (separate for easy experiment presets)
+
+Edit `config.toml` to enable/disable components:
 
 ```toml
+[braid_publisher]
+url = "http://10.40.80.6:8397"
+experiments_path = "/mnt/data/experiments/"  # Where Braid saves .braid folders
+
 [trigger_handler]
-active = true
-radius = 0.025              # Trigger zone radius (meters)
-z_lim = [-0.05, 0.05]       # Z-axis limits (meters)
 min_trajectory_time = 1.0   # Minimum tracking duration (seconds)
+min_trigger_interval = 10.0 # Cooldown between triggers (seconds)
+radius = 0.025              # Trigger zone radius (meters)
+z_lim = [0.15, 0.25]       # Vertical trigger zone (meters)
 heading_cone_deg = 45.0     # Heading threshold (degrees)
+min_velocity = 0.01         # Min velocity to consider as "moving" (m/s)
 
 [camera]
+active = true               # Enable/disable camera
 resolution = [2016, 2016]
 fps = 500
-exposure_time = 2000
-pre_trigger_time = 0.5      # Seconds to record before trigger
-post_trigger_time = 1.5     # Seconds to record after trigger
-save_folder = "camera_videos"
+pre_trigger_time = 0.5
+post_trigger_time = 1.5
 
 [opto_trigger]
-active = true
+active = true               # Enable/disable LED
+port = "/dev/trig1"
+color = "red"
+intensity = 255             # 0-255
+duration = 300              # milliseconds
 
 [liquid_lens]
-active = false
+active = false              # Enable/disable liquid lens
 
 [visual_stimuli]
-active = true
+active = true               # Enable/disable visual stimuli
+config_file = "visual_stimuli.toml"  # Path to stimuli config
 ```
 
-### Run System
+Edit `visual_stimuli.toml` for stimulus parameters (see file for full options).
 
-```python
-from src.processes.trigger_handler import TriggerHandler
-from src.processes.ximea_camera import CameraProcess
-from src.processes.opto_trigger_worker import OptoTriggerWorker
-import multiprocessing as mp
+### Run Experiment
 
-# Create stop event
-stop_event = mp.Event()
+**Important:** Start Braid recording BEFORE running OptoFly (creates the `.braid` folder for data logging).
 
-# Initialize processes
-trigger = TriggerHandler(config_path="config.toml", event=stop_event)
-camera = CameraProcess(config_path="config.toml", event=stop_event)
-opto = OptoTriggerWorker(config_path="config.toml", event=stop_event)
+```bash
+# Simple: run with uv
+uv run python main.py
 
-# Start all processes
-trigger.start()
-camera.start()
-opto.start()
+# Or with conda environment
+python main.py
+```
 
-# ... experiment runs ...
+The launcher will:
+1. Check for today's Braid recording folder
+2. Load configuration from `config.toml` and `visual_stimuli.toml`
+3. Start enabled processes (BraidPublisher, TriggerHandler, Camera, LED, Lens, Visual)
+4. Display experiment summary
+5. Run until Ctrl+C
 
-# Shutdown
-stop_event.set()
-trigger.join()
-camera.join()
-opto.join()
+**Example output:**
+```
+Loading configuration from config.toml...
+Checking for braid folder with date 20251121 in /mnt/data/experiments/...
+✓ Found braid folder: /mnt/data/experiments/20251121_143022.braid
+
+Starting core processes...
+  - BraidPublisher
+  - TriggerHandler
+
+Starting optional processes (based on config)...
+  - VisualStimuliProcess
+  - CameraProcess
+  - OptoTriggerWorker
+  - LiquidLens (disabled in config)
+
+======================================================================
+OptoFly Experiment Configuration
+======================================================================
+
+Active Processes:
+  ✓ BraidPublisher
+  ✓ TriggerHandler
+  ✓ VisualStimuliProcess
+  ✓ CameraProcess
+  ✓ OptoTriggerWorker
+
+Visual Stimuli:
+  ✓ Static pattern
+
+Opto Trigger:
+  Color: red
+  Intensity: 255
+  Duration: 300 ms
+
+Press Ctrl+C to stop the experiment
+======================================================================
 ```
 
 ## Components
 
-### Trigger Handler (`src/processes/trigger_handler.py`)
+### Trigger Handler (`src/processes/tracking.py`)
 
 Processes Braid tracking data and generates trigger signals based on:
 - Spatial criteria (cylindrical trigger zone)
@@ -146,15 +205,15 @@ if camera.initialize():
     camera.start()
 ```
 
-### Opto Trigger (`src/processes/opto_trigger_worker.py`)
+### Opto Trigger (`src/processes/led.py`)
 
 Controls optogenetic stimulation hardware in response to TRIGGER messages.
 
-### Liquid Lens (`src/processes/liquid_lens.py`)
+### Liquid Lens (`src/processes/lens.py`)
 
 Dynamic focus adjustment to track flies at different depths.
 
-### Visual Stimuli (`src/visual_stimuli/`)
+### Visual Stimuli (`src/stimuli/`)
 
 High-performance visual stimulus rendering system running at 240Hz on multi-screen displays.
 
@@ -232,7 +291,7 @@ hold_time_ms = 200
 positions_deg = [-90, 0, 90]  # Balanced presentation
 ```
 
-See [`src/visual_stimuli/README.md`](src/visual_stimuli/README.md) for detailed documentation on creating custom stimuli.
+See [`src/stimuli/README.md`](src/stimuli/README.md) for detailed documentation on creating custom stimuli.
 
 ## Data Flow
 
@@ -351,23 +410,37 @@ ffmpeg -encoders | grep nvenc  # Verify
 
 ```
 OptoFly/
-    config.toml              # Main configuration
-    main.py                  # System entry point
+    config.toml             # System configuration
+    visual_stimuli.toml     # Visual stimuli configuration
+    environment.yml         # Conda/mamba environment
+    main.py                 # Experiment launcher
     src/
+        hardware/           # Hardware device controllers
+            led.py          # Optogenetic LED (Arduino)
+            lens.py         # Liquid lens (Optotune)
         processes/          # Multi-process workers
-            trigger_handler.py
-            ximea_camera.py
-            opto_trigger_worker.py
-            visual_stimuli.py
+            braid.py        # Braid tracking publisher
+            tracking.py     # Trigger handler
+            camera.py       # Camera process wrapper
+            led.py          # LED process wrapper
+            lens.py         # Lens process wrapper
+            visual.py       # Visual stimuli process
+        stimuli/            # Visual stimulus generators
+            static.py       # Static pattern
+            looming.py      # Looming circles
+            vertical_bar.py # Vertical bar
+            ...
         utils/              # Shared utilities
-            config.py       # Config loading
-            worker_process.py
-            custom_logger.py
-        visual_stimuli/     # Stimulus generators
+            config.py       # Configuration loading
+            worker.py       # Base process class
+            logger.py       # Logging utilities
+            csv_writer.py   # CSV data logging
+        tools/              # Development tools
+            braid_simulator.py
+            braid_visualizer.py
     rust/
         ximea_camera/       # High-speed camera (Rust)
     tests/                  # Integration tests
-    docs/                   # Additional documentation
 ```
 
 ### Adding New Features
