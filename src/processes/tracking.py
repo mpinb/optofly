@@ -17,8 +17,8 @@ from scipy import stats
 import zmq
 
 from src.utils.config import ConfigBase, TriggerHandlerConfig
-from src.utils.custom_logger import init_class_logger
-from src.utils.worker_process import WorkerProcess
+from src.utils.logger import init_class_logger
+from src.utils.worker import WorkerProcess
 
 # Constants
 HEADING_HISTORY_SIZE = 10  # Number of frames to keep for heading calculation

@@ -24,7 +24,7 @@ import zmq
 try:
     # First try the normal import
     from src.utils.config import ZMQConfig
-    from src.utils.worker_process import WorkerProcess
+    from src.utils.worker import WorkerProcess
 except ImportError:
     # If that fails, try to adjust the path and import again
     script_dir = Path(__file__).resolve().parent
@@ -41,7 +41,7 @@ except ImportError:
 
         # Now try the import again
         from src.utils.config import ZMQConfig
-        from src.utils.worker_process import WorkerProcess
+        from src.utils.worker import WorkerProcess
 
 
 @dataclass

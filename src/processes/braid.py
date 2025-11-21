@@ -13,8 +13,8 @@ import requests
 import zmq
 
 from src.utils.config import BraidPublisherConfig
-from src.utils.custom_logger import init_class_logger
-from src.utils.worker_process import WorkerProcess
+from src.utils.logger import init_class_logger
+from src.utils.worker import WorkerProcess
 
 # Constants
 DATA_PREFIX = "data: "

@@ -2,7 +2,7 @@
 
 from typing import Dict, Any
 import pyglet
-from src.visual_stimuli.base_stimulus import BaseStimulus
+from src.stimuli.base import BaseStimulus
 
 
 class StimulusRegistry:

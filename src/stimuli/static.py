@@ -3,7 +3,7 @@
 import numpy as np
 import pyglet.shapes
 from typing import Dict, Any
-from src.visual_stimuli.base_stimulus import BaseStimulus
+from src.stimuli.base import BaseStimulus
 
 
 class StaticPatternStimulus(BaseStimulus):

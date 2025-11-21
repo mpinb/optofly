@@ -150,3 +150,10 @@ web/
 visual_stimuli.csv
 visual_stimuli.csv.*.bak
 visual_stimuli_performance.csv
+
+# Experiment-specific visual stimuli configs (keep default visual_stimuli.toml tracked)
+visual_stimuli_*.toml
+
+# claude
+.claude/
+docs/

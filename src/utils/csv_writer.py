@@ -1,7 +1,7 @@
 import csv
 import os
 
-from src.utils.custom_logger import init_class_logger
+from src.utils.logger import init_class_logger
 
 
 class CSVWriter:

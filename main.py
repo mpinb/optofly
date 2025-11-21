@@ -12,12 +12,12 @@ import tomllib
 from datetime import datetime
 from pathlib import Path
 
-from src.processes.braid_publisher import BraidPublisher
-from src.processes.trigger_handler import TriggerHandler
-from src.processes.visual_stimuli import VisualStimuliProcess
-from src.processes.opto_trigger_worker import OptoTriggerWorker
-from src.processes.ximea_camera import CameraProcess
-from src.processes.liquid_lens import LiquidLens
+from src.processes.braid import BraidPublisher
+from src.processes.tracking import TriggerHandler
+from src.processes.visual import VisualStimuliProcess
+from src.processes.led import OptoTriggerWorker
+from src.processes.camera import CameraProcess
+from src.processes.lens import LiquidLens
 from src.utils.braid import check_braid_folder_exists
 
 

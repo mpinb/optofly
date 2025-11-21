@@ -14,9 +14,9 @@ from typing import Dict, Optional
 import zmq
 
 from src.utils.config import OptoTriggerConfig, ZMQConfig
-from src.utils.worker_process import WorkerProcess
-from src.classes.opto_trigger import OptoTrigger
-from src.classes.csv_writer import CSVWriter
+from src.utils.worker import WorkerProcess
+from src.hardware.led import OptoTrigger
+from src.utils.csv_writer import CSVWriter
 
 
 class OptoTriggerWorker(WorkerProcess):

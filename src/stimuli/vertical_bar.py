@@ -9,8 +9,8 @@ import time
 import numpy as np
 import pyglet.shapes
 from typing import Dict, Any, List
-from src.visual_stimuli.base_stimulus import BaseStimulus
-from src.visual_stimuli.geometry_utils import GeometryUtils
+from src.stimuli.base import BaseStimulus
+from src.stimuli.geometry import GeometryUtils
 
 
 class VerticalBarStimulus(BaseStimulus):

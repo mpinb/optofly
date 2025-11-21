@@ -8,20 +8,22 @@ import argparse
 import json
 import multiprocessing as mp
 import time
+import tomllib
+from pathlib import Path
 from typing import Optional
 
 import pyglet
 import zmq
 
-from src.classes.csv_writer import CSVWriter
+from src.utils.csv_writer import CSVWriter
 from src.utils.config import ConfigBase
-from src.utils.worker_process import WorkerProcess
-from src.visual_stimuli.display_manager import DisplayManager
-from src.visual_stimuli.geometry_utils import GeometryUtils
-from src.visual_stimuli.static_pattern import StaticPatternStimulus
-from src.visual_stimuli.looming_stimulus import LoomingStimulusRenderer
-from src.visual_stimuli.vertical_bar_stimulus import VerticalBarStimulus
-from src.visual_stimuli.stimulus_registry import StimulusRegistry
+from src.utils.worker import WorkerProcess
+from src.stimuli.display import DisplayManager
+from src.stimuli.geometry import GeometryUtils
+from src.stimuli.static import StaticPatternStimulus
+from src.stimuli.looming import LoomingStimulusRenderer
+from src.stimuli.vertical_bar import VerticalBarStimulus
+from src.stimuli.registry import StimulusRegistry
 
 
 class VisualStimuliProcess(WorkerProcess):
@@ -60,7 +62,10 @@ class VisualStimuliProcess(WorkerProcess):
 
         # Load configuration
         self.config_base = ConfigBase(config_path)._load_config()
-        self.config = self.config_base.get("visual_stimuli", {})
+
+        # Load visual stimuli config from separate file or fall back to main config
+        visual_stimuli_config = self._load_visual_stimuli_config(config_path)
+        self.config = visual_stimuli_config.get("visual_stimuli", {})
         self.stop_event = event if event is not None else mp.Event()
 
         # Standalone mode flag
@@ -95,6 +100,42 @@ class VisualStimuliProcess(WorkerProcess):
         self._initialize_logger()
         mode_str = " (STANDALONE MODE)" if standalone else ""
         self.logger.info(f"Initializing VisualStimuliProcess{mode_str} with config: {config_path}")
+
+    def _load_visual_stimuli_config(self, main_config_path: str) -> dict:
+        """Load visual stimuli configuration from separate file or fall back to main config.
+
+        Args:
+            main_config_path: Path to main config.toml file
+
+        Returns:
+            Dictionary containing visual_stimuli configuration
+        """
+        # Get the directory of the main config
+        config_dir = Path(main_config_path).parent
+
+        # Check if visual_stimuli section in main config specifies a config_file
+        visual_stimuli_section = self.config_base.get("visual_stimuli", {})
+        visual_config_file = visual_stimuli_section.get("config_file", "visual_stimuli.toml")
+
+        # Construct full path to visual stimuli config
+        visual_config_path = config_dir / visual_config_file
+
+        # Try to load from separate file first
+        if visual_config_path.exists():
+            try:
+                with open(visual_config_path, "rb") as f:
+                    config = tomllib.load(f)
+                    self.logger.info(f"Loaded visual stimuli config from: {visual_config_path}")
+                    return config
+            except Exception as e:
+                self.logger.warning(
+                    f"Failed to load {visual_config_path}: {e}. "
+                    f"Falling back to main config file."
+                )
+
+        # Fall back to main config file
+        self.logger.info(f"Loading visual stimuli config from main config: {main_config_path}")
+        return self.config_base
 
     def initialize(self) -> bool:
         """Initialize all components.
@@ -275,7 +316,7 @@ class VisualStimuliProcess(WorkerProcess):
 
     def _initialize_standalone_controller(self) -> None:
         """Initialize standalone controller for manual testing."""
-        from src.visual_stimuli.standalone_controller import StandaloneController
+        from src.stimuli.standalone_controller import StandaloneController
 
         self.controller = StandaloneController(
             window=self.window,
@@ -438,12 +479,12 @@ if __name__ == "__main__":
 
     # Handle calibration modes
     if args.calibrate:
-        from src.visual_stimuli.calibration import run_screen_identification
+        from src.stimuli.calibration import run_screen_identification
         run_screen_identification()
         exit(0)
 
     if args.calibrate_mapping:
-        from src.visual_stimuli.calibration import run_heading_calibration
+        from src.stimuli.calibration import run_heading_calibration
         run_heading_calibration()
         exit(0)
 

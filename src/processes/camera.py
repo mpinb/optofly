@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Optional
 
 from src.utils.config import CameraConfig
-from src.utils.worker_process import WorkerProcess
+from src.utils.worker import WorkerProcess
 
 
 def check_camera_prerequisites(config_path: str = "config.toml") -> dict:

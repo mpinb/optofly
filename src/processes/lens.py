@@ -11,9 +11,9 @@ from sklearn.preprocessing import PolynomialFeatures
 import json
 
 from src.utils.config import LiquidLensConfig, ZMQConfig, CameraConfig
-from src.utils.worker_process import WorkerProcess
+from src.utils.worker import WorkerProcess
 from src.utils.kalman_filter import KalmanFilter
-from src.classes.optotune_py import LensDriver
+from src.hardware.lens import LensDriver
 
 
 class LensCalibration:

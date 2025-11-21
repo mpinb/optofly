@@ -14,7 +14,7 @@ import numpy as np
 import serial
 
 from src.utils.config import OptoTriggerConfig
-from src.utils.custom_logger import init_class_logger
+from src.utils.logger import init_class_logger
 
 
 class OptoTrigger:
