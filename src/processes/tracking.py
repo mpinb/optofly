@@ -326,6 +326,9 @@ class TriggerHandler(WorkerProcess):
                 self._process_update(message_data["Update"])
             elif "Death" in message_data:
                 self._process_death(message_data["Death"])
+            elif "CalibrationFlydraXml" in message_data:
+                # TODO: Ignore these types of messages
+                pass
             else:
                 self.logger.warning(f"Unknown message type: {message_data.keys()}")
         except Exception as e:

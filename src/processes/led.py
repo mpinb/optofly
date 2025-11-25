@@ -204,16 +204,17 @@ class OptoTriggerWorker(WorkerProcess):
             success, was_sham = self.opto_trigger.trigger(sham=None)
 
             # Prepare CSV row
+            # Use values from the hardware controller (which has the randomly selected parameters)
             row = {
                 "obj_id": obj_id,
                 "frame": frame,
                 "braid_timestamp": braid_timestamp,
                 "trigger_timestamp": trigger_timestamp,
                 "mean_heading": mean_heading,
-                "duration": self.opto_config.duration,
-                "intensity": self.opto_config.intensity,
-                "frequency": self.opto_config.frequency,
-                "color": self.opto_config.color,
+                "duration": self.opto_trigger.config.duration,
+                "intensity": self.opto_trigger.config.intensity,
+                "frequency": self.opto_trigger.config.frequency,
+                "color": self.opto_trigger.config.color,
                 "sham": was_sham,
             }
 

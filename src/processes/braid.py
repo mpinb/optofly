@@ -152,7 +152,7 @@ class BraidPublisher(WorkerProcess):
                 break
             except requests.RequestException as e:
                 if attempt < MAX_RETRIES - 1:
-                    self.logger.warning(
+                    self.logger.debug(
                         f"Connection attempt {attempt + 1}/{MAX_RETRIES} failed: {e}"
                     )
                     time.sleep(RETRY_DELAY)
