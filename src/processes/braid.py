@@ -270,8 +270,11 @@ class BraidPublisher(WorkerProcess):
         self.stream_thread.start()
 
         # Wait for stop event
-        while not self.stop_event.is_set():
-            time.sleep(0.1)
+        try:
+            while not self.stop_event.is_set():
+                time.sleep(0.1)
+        except KeyboardInterrupt:
+            pass  # Graceful shutdown via stop_event
 
         self.logger.debug("Stop event received, cleaning up...")
         self.close()

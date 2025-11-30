@@ -60,6 +60,11 @@ class VisualStimuliProcess(WorkerProcess):
             process_name=process_name
         )
 
+        # Initialize logger
+        self._initialize_logger()
+        mode_str = " (STANDALONE MODE)" if standalone else ""
+        self.logger.info(f"Initializing VisualStimuliProcess{mode_str} with config: {config_path}")
+
         # Load configuration
         self.config_base = ConfigBase(config_path)._load_config()
 
@@ -95,11 +100,6 @@ class VisualStimuliProcess(WorkerProcess):
 
         # Standalone controller (only in standalone mode)
         self.controller = None
-
-        # Initialize logger
-        self._initialize_logger()
-        mode_str = " (STANDALONE MODE)" if standalone else ""
-        self.logger.info(f"Initializing VisualStimuliProcess{mode_str} with config: {config_path}")
 
     def _load_visual_stimuli_config(self, main_config_path: str) -> dict:
         """Load visual stimuli configuration from separate file or fall back to main config.
@@ -385,11 +385,15 @@ class VisualStimuliProcess(WorkerProcess):
 
         avg_fps = 1.0 / avg_frame_time if avg_frame_time > 0 else 0
 
-        # Warn if performance degraded
-        if avg_frame_time > 0.0045:  # > 4.5ms = below 222Hz
+        # Warn if performance degraded below 92.5% of target FPS
+        target_fps = self.config.get("target_fps", 240)
+        threshold_frame_time = 1.0 / (target_fps * 0.925)
+
+        if avg_frame_time > threshold_frame_time:
             self.logger.warning(
                 f"Performance: {avg_fps:.1f} fps "
-                f"(avg: {avg_frame_time*1000:.2f}ms, max: {max_frame_time*1000:.2f}ms)"
+                f"(avg: {avg_frame_time*1000:.2f}ms, max: {max_frame_time*1000:.2f}ms) "
+                f"[target: {target_fps} fps]"
             )
         else:
             self.logger.debug(
@@ -410,7 +414,10 @@ class VisualStimuliProcess(WorkerProcess):
         pyglet.clock.schedule_interval(self._render_loop, 1.0 / target_fps)
 
         # Run pyglet event loop
-        pyglet.app.run()
+        try:
+            pyglet.app.run()
+        except KeyboardInterrupt:
+            pass  # Graceful shutdown via stop_event
 
         # Cleanup
         self._cleanup()

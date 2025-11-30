@@ -248,20 +248,23 @@ class OptoTriggerWorker(WorkerProcess):
         self.is_running = True
         self.logger.info("OptoTriggerWorker process started.")
 
-        while self.is_running and not self.stop_event.is_set():
-            try:
-                # Check for TRIGGER messages
-                trigger_data = self._receive_message()
+        try:
+            while self.is_running and not self.stop_event.is_set():
+                try:
+                    # Check for TRIGGER messages
+                    trigger_data = self._receive_message()
 
-                if trigger_data is not None:
-                    self._handle_trigger(trigger_data)
+                    if trigger_data is not None:
+                        self._handle_trigger(trigger_data)
 
-                # Small sleep to avoid busy waiting
-                time.sleep(0.001)
+                    # Small sleep to avoid busy waiting
+                    time.sleep(0.001)
 
-            except Exception as e:
-                self.logger.error(f"Error in OptoTriggerWorker main loop: {e}")
-                # Continue running despite errors
+                except Exception as e:
+                    self.logger.error(f"Error in OptoTriggerWorker main loop: {e}")
+                    # Continue running despite errors
+        except KeyboardInterrupt:
+            pass  # Graceful shutdown via stop_event
 
         self.logger.info("OptoTriggerWorker process stopped.")
 

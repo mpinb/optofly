@@ -549,33 +549,37 @@ class TriggerHandler(WorkerProcess):
 
         cleanup_timer = time.time()
 
-        while not self.stop_event.is_set():
-            # Poll for messages with timeout (100ms)
-            socks = dict(poller.poll(100))
+        try:
+            while not self.stop_event.is_set():
+                # Poll for messages with timeout (100ms)
+                socks = dict(poller.poll(100))
 
-            if self.subscriber in socks and socks[self.subscriber] == zmq.POLLIN:
-                # Process incoming message
-                try:
-                    # Receive multipart message (topic, content)
-                    message = self.subscriber.recv_string()
-                    topic, json_str = message.split(" ", 1)
+                if self.subscriber in socks and socks[self.subscriber] == zmq.POLLIN:
+                    # Process incoming message
+                    try:
+                        # Receive multipart message (topic, content)
+                        message = self.subscriber.recv_string()
+                        topic, json_str = message.split(" ", 1)
 
-                    # Parse JSON message
-                    message_data = json.loads(json_str)
+                        # Parse JSON message
+                        message_data = json.loads(json_str)
 
-                    # Process the message
-                    self.process_message(message_data)
+                        # Process the message
+                        self.process_message(message_data)
 
-                except json.JSONDecodeError as e:
-                    self.logger.error(f"Error decoding JSON message: {e}")
-                except Exception as e:
-                    self.logger.error(f"Error processing message: {e}")
+                    except json.JSONDecodeError as e:
+                        self.logger.error(f"Error decoding JSON message: {e}")
+                    except Exception as e:
+                        self.logger.error(f"Error processing message: {e}")
 
-            # Periodically clean up stale objects
-            current_time = time.time()
-            if current_time - cleanup_timer > 5.0:  # Clean up every 5 seconds
-                self._cleanup_stale_objects()
-                cleanup_timer = current_time
+                # Periodically clean up stale objects
+                current_time = time.time()
+                if current_time - cleanup_timer > 5.0:  # Clean up every 5 seconds
+                    self._cleanup_stale_objects()
+                    cleanup_timer = current_time
+
+        except KeyboardInterrupt:
+            pass  # Graceful shutdown via stop_event
 
         # Clean up
         self.logger.info("Stopping TriggerHandler")

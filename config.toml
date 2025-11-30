@@ -5,9 +5,21 @@
 # Documentation: https://github.com/elhananby/OptoFly
 
 # ==============================================================================
+# EXPERIMENT METADATA
+# ==============================================================================
+[metadata]
+experimenter = "Your Name"
+cross = "Genotype or Cross Info"
+cross_date = "2023-12-31"
+f1_date = "2023-11-30"
+atr_date = "2024-01-01"
+experiment_date = "2024-02-15"
+n_flies = 10
+notes = "Additional notes about the experiment."
+
+# ==============================================================================
 # SYSTEM CONFIGURATION
 # ==============================================================================
-
 [zmq]
 # ZMQ messaging ports and topics
 braid_port = 5555
@@ -105,7 +117,7 @@ prediction_horizon = 0.1         # Prediction lookahead time (seconds)
 
 [visual_stimuli]
 # Enable/disable visual stimuli system
-active = false
+active = true
 
 # Path to visual stimuli configuration file
 config_file = "visual_stimuli.toml"

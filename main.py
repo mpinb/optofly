@@ -41,8 +41,6 @@ def load_config(config_path: str) -> dict:
         sys.exit(1)
 
 
-
-
 def print_experiment_config(config: dict, active_processes: list):
     """Print experiment configuration summary.
 
@@ -50,9 +48,9 @@ def print_experiment_config(config: dict, active_processes: list):
         config: Loaded configuration dictionary
         active_processes: List of active process names
     """
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("OptoFly Experiment Configuration")
-    print("="*70)
+    print("=" * 70)
 
     print("\nActive Processes:")
     for process_name in active_processes:
@@ -92,7 +90,24 @@ def print_experiment_config(config: dict, active_processes: list):
         print(f"  FPS: {fps}")
 
     print("\nPress Ctrl+C to stop the experiment")
-    print("="*70 + "\n")
+    print("=" * 70 + "\n")
+
+
+def copy_config_to_braid_folder(config_path: str, braid_folder: str):
+    """Copy config.toml to braid folder for record-keeping.
+
+    Args:
+        config_path: Path to the configuration file
+        braid_folder: Path to the braid experiment folder
+    """
+    try:
+        config_dest = Path(braid_folder) / "config.toml"
+        with open(config_path, "rb") as src_file:
+            with open(config_dest, "wb") as dest_file:
+                dest_file.write(src_file.read())
+        print(f"Copied config.toml to {config_dest}")
+    except Exception as e:
+        print(f"WARNING: Failed to copy config.toml to braid folder: {e}")
 
 
 def main():
@@ -106,9 +121,21 @@ def main():
     config = load_config(config_path)
 
     # Check for Braid recording folder (exits if not found)
-    experiments_path = config.get("braid_publisher", {}).get("experiments_path", "/mnt/data/experiments/")
+    experiments_path = config.get("braid_publisher", {}).get(
+        "experiments_path", "/mnt/data/experiments/"
+    )
     braid_folder = check_braid_folder_exists(experiments_path)
     print(f"Experiment data will be saved to: {braid_folder}")
+
+    # Copy config.toml
+    copy_config_to_braid_folder(config_path, braid_folder)
+
+    if config.get("visual_stimuli", {}).get("active", False):
+        # Copy visual stimuli config if visual stimuli are active
+        copy_config_to_braid_folder(
+            config.get("visual_stimuli", {}).get("config_file", "visual_stimuli.toml"),
+            braid_folder,
+        )
 
     # Create shared stop event for coordinated shutdown
     stop_event = mp.Event()
@@ -123,10 +150,7 @@ def main():
 
         # 1. BraidPublisher - connects to Braid tracking and publishes to ZMQ
         print("  - BraidPublisher")
-        braid_publisher = BraidPublisher(
-            config_path=config_path,
-            event=stop_event
-        )
+        braid_publisher = BraidPublisher(config_path=config_path, event=stop_event)
         braid_publisher.start()
         processes.append(("BraidPublisher", braid_publisher))
         active_process_names.append("BraidPublisher")
@@ -134,10 +158,7 @@ def main():
 
         # 2. TriggerHandler - applies spatial/temporal gating
         print("  - TriggerHandler")
-        trigger_handler = TriggerHandler(
-            config_path=config_path,
-            event=stop_event
-        )
+        trigger_handler = TriggerHandler(config_path=config_path, event=stop_event)
         trigger_handler.start()
         processes.append(("TriggerHandler", trigger_handler))
         active_process_names.append("TriggerHandler")
@@ -150,8 +171,7 @@ def main():
         if config.get("visual_stimuli", {}).get("active", False):
             print("  - VisualStimuliProcess")
             visual_stimuli = VisualStimuliProcess(
-                config_path=config_path,
-                event=stop_event
+                config_path=config_path, event=stop_event
             )
             visual_stimuli.start()
             processes.append(("VisualStimuliProcess", visual_stimuli))
@@ -162,10 +182,7 @@ def main():
         # 4. CameraProcess - high-speed video recording
         if config.get("camera", {}).get("active", False):
             print("  - CameraProcess")
-            camera = CameraProcess(
-                config_path=config_path,
-                event=stop_event
-            )
+            camera = CameraProcess(config_path=config_path, event=stop_event)
             camera.start()
             processes.append(("CameraProcess", camera))
             active_process_names.append("CameraProcess")
@@ -176,9 +193,7 @@ def main():
         if config.get("opto_trigger", {}).get("active", False):
             print("  - OptoTriggerWorker")
             opto_trigger = OptoTriggerWorker(
-                event=stop_event,
-                braid_folder=braid_folder,
-                config_path=config_path
+                event=stop_event, braid_folder=braid_folder, config_path=config_path
             )
             opto_trigger.start()
             processes.append(("OptoTriggerWorker", opto_trigger))
@@ -189,10 +204,7 @@ def main():
         # 6. LiquidLens - auto-focus system
         if config.get("liquid_lens", {}).get("active", False):
             print("  - LiquidLens")
-            liquid_lens = LiquidLens(
-                event=stop_event,
-                config_path=config_path
-            )
+            liquid_lens = LiquidLens(event=stop_event, config_path=config_path)
             liquid_lens.start()
             processes.append(("LiquidLens", liquid_lens))
             active_process_names.append("LiquidLens")
@@ -213,6 +225,7 @@ def main():
     except Exception as e:
         print(f"\n\nERROR during experiment: {e}")
         import traceback
+
         traceback.print_exc()
         stop_event.set()
         raise
@@ -235,12 +248,14 @@ def main():
                     process.terminate()
                     process.join(timeout=2)
 
-        print("\n" + "="*70)
+        print("\n" + "=" * 70)
         print(f"Experiment ended. Data saved to: {braid_folder}")
-        print("="*70)
+        print("=" * 70)
 
 
 if __name__ == "__main__":
-    # Enable multiprocessing support on macOS/Windows
-    # mp.set_start_method('spawn', force=True)
+    # Enable multiprocessing support for OpenGL/GUI processes
+    # 'spawn' creates fresh Python interpreter instead of fork()
+    # Required for pyglet/OpenGL contexts to work in child processes
+    mp.set_start_method("spawn", force=True)
     main()

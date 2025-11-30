@@ -6,7 +6,7 @@
 
 [visual_stimuli]
 # Main visual stimuli settings
-active = false
+active = true
 log_file = "visual_stimuli.csv"
 performance_log_file = "visual_stimuli_performance.csv"
 log_level = "INFO"
@@ -19,11 +19,11 @@ log_color = "CYAN"
 window_x_offset = 3840           # Start of experimental screens (DP-0.1)
 window_width = 7680              # Total width: 4 screens × 1920 pixels
 window_height = 1080
-target_fps = 240
+target_fps = 60
 
 # Screen identification (set after running --calibrate)
 # Order corresponds to: DP-0.1, DP-0.2, DP-2.1, DP-2.2
-screen_mapping = ["South", "West", "North", "East"]
+screen_mapping = ["West", "North", "South", "East"]
 
 # ------------------------------------------------------------------------------
 # Calibration Settings
