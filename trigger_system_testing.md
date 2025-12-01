@@ -35,18 +35,21 @@ The system adapts outer zone based on camera availability:
 **Position**: x=0.06, y=0.04, z=0.20 (distance from origin: ~0.072m)
 **Heading**: Toward center
 **Expected**:
-- ✅ LENS message sent (if liquid_lens_active=true)
 - ✅ TRIGGER message sent with trigger_type="recording"
+  - Liquid lens starts tracking (if active)
+  - Camera starts recording (if active)
 - ❌ NO stimulation trigger (distance 0.072m > radius 0.05m)
-- Result: Camera starts recording, lens starts tracking
+- Result: Camera records, lens tracks
 
 ### Test 4: Fly in Trigger Zone (Inner Zone), Heading to Center
 **Position**: x=0.03, y=0.02, z=0.20 (distance from origin: ~0.036m)
 **Heading**: Toward center
 **Expected**:
-- ✅ LENS message sent (if liquid_lens_active=true)
 - ✅ TRIGGER message sent with trigger_type="recording"
+  - Liquid lens starts tracking (if active)
+  - Camera starts recording (if active)
 - ✅ TRIGGER message sent with trigger_type="stimulation"
+  - LED activates, visual stimuli display
 - Result: Camera records, lens tracks, LED activates, visual stimuli display
 
 ### Test 5: Fly at Origin
@@ -60,7 +63,9 @@ The system adapts outer zone based on camera availability:
 **Position**: x=0.02, y=0.02, z=0.10
 **Heading**: Toward center
 **Expected**:
-- ✅ LENS + recording trigger (in FOV)
+- ✅ TRIGGER message sent with trigger_type="recording" (in FOV)
+  - Liquid lens starts tracking (if active)
+  - Camera starts recording (if active)
 - ❌ NO stimulation trigger (z=0.10 < z_lim[0]=0.15)
 
 ### Test 7: Cooldown Test
@@ -83,16 +88,19 @@ The system adapts outer zone based on camera availability:
 **Heading**: Toward center
 
 **Expected for Position A** (in expanded zone, outside inner zone):
-- ✅ LENS message sent (if liquid_lens_active=true)
 - ✅ TRIGGER message sent with trigger_type="recording"
+  - Liquid lens starts tracking (if active)
+  - Camera starts recording (if active)
 - ❌ NO stimulation trigger (0.072m > radius=0.05m but < expanded_radius=0.08m)
 - Note: Camera won't record (inactive), but trigger message still sent
 
 **Expected for Position B** (in both zones):
-- ✅ LENS message sent
 - ✅ TRIGGER message sent with trigger_type="recording"
+  - Liquid lens starts tracking (if active)
+  - Camera starts recording (if active)
 - ✅ TRIGGER message sent with trigger_type="stimulation"
-- Result: Lens tracks (if active), LED activates, visual stimuli display
+  - LED activates, visual stimuli display
+- Result: Lens tracks, LED activates, visual stimuli display
 
 **Key difference from FOV mode**:
 - Outer zone is cylindrical (0.08m radius) instead of rectangular (camera FOV)
@@ -107,7 +115,6 @@ Fly enters FOV + heading to center:
 │   ├─> Tracked ≥ 1.0s? YES
 │   ├─> In camera FOV? YES
 │   │   ├─> Cooldown expired? YES
-│   │   │   ├─> Send LENS message
 │   │   │   ├─> Send TRIGGER (type="recording")
 │   │   │   ├─> Update last_trigger_time
 │   │   │   └─> Check if in trigger zone?
@@ -126,14 +133,14 @@ Downstream processes:
 ```
 [TriggerHandler] Sent TRIGGER (recording) for object 1 (frame=1234, heading=1.57)
 [TriggerHandler] Sent TRIGGER (stimulation) for object 1 (frame=1234, heading=1.57)
-[TriggerHandler] Sent LENS trigger for object 1 at 1234567.890
 
 [OptoTrigger] Ignoring trigger_type='recording' for object 1 (OptoTrigger only responds to 'stimulation')
 [OptoTrigger] Received STIMULATION trigger for object 1 on frame 1234 (heading=1.57)
 
 [Camera] (Rust binary handles both trigger types, starts recording)
 
-[LiquidLens] (Receives TRIGGER, starts tracking)
+[LiquidLens] Received trigger for object 1 on frame 1234
+[LiquidLens] (Starts tracking, subscribes to BRAID for position updates)
 ```
 
 ## Implementation Summary
@@ -150,8 +157,9 @@ The outer zone adapts based on camera availability:
 - **Outer Zone**: Expanded cylindrical zone (radius + radius_expansion = 0.08m)
 
 **Actions (both modes)**:
-  - Liquid lens starts tracking (LENS message, if active)
-  - Camera starts recording (TRIGGER with type="recording", if active)
+  - Send TRIGGER message with type="recording"
+    - Liquid lens starts tracking (if active)
+    - Camera starts recording (if active)
   - Sets global cooldown timer
 
 ### Inner Zone (Trigger Radius)
