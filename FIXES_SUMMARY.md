@@ -59,15 +59,25 @@ Implemented sophisticated two-stage trigger logic with separate zones for record
 
 ### Architecture
 
-**Outer Zone (Camera FOV)**:
+**Outer Zone (Adaptive)**:
+The outer zone adapts based on camera availability:
+
+*Camera Active* (`camera.active = true`):
+- Uses camera FOV boundaries (rectangular: 14cm × 10.5cm)
 - Trigger condition: Fly in camera FOV + heading toward center
-- Actions:
-  - Liquid lens starts tracking (LENS message)
-  - Camera starts recording (TRIGGER with type="recording")
+
+*Camera Inactive* (`camera.active = false`):
+- Uses expanded cylindrical radius (radius + radius_expansion = 0.08m)
+- Trigger condition: Fly within expanded radius + heading toward center
+
+*Actions (both modes)*:
+  - Liquid lens starts tracking (LENS message, if active)
+  - Camera starts recording (TRIGGER with type="recording", if active)
   - Global cooldown timer set
 
 **Inner Zone (Trigger Radius)**:
-- Trigger condition: Also in cylindrical trigger zone (radius + z-limits)
+- Fixed cylindrical zone (radius = 0.05m, z-limits = [0.15, 0.25])
+- Trigger condition: Also in cylindrical trigger zone
 - Actions:
   - Optogenetic LED activates (TRIGGER with type="stimulation")
   - Visual stimuli display (TRIGGER with type="stimulation")
@@ -104,43 +114,91 @@ Implemented sophisticated two-stage trigger logic with separate zones for record
 
 ---
 
+## New Feature: Adaptive Outer Zone ✨
+
+**Commits**: 12f5cc6, 8c3f867, bb42781
+
+### Overview
+Added adaptive outer zone selection that adjusts based on camera availability, enabling camera-less operation with expanded cylindrical trigger zone.
+
+### Configuration
+Added new parameter: `radius_expansion` (default: 0.03m)
+- When camera active: Outer zone uses camera FOV (rectangular)
+- When camera inactive: Outer zone uses radius + radius_expansion (cylindrical)
+
+### Implementation
+
+**1. Configuration Updates** (`src/utils/config.py`, `config.toml`)
+- Added `radius_expansion` parameter to `TriggerHandlerConfig`
+- Added `camera_active` flag to check camera status
+- Default expansion: 0.03m (total outer zone: 0.08m when camera off)
+
+**2. Trigger Logic Updates** (`src/processes/tracking.py`)
+- Added `is_in_expanded_radius_zone()` method
+- Modified `_evaluate_triggers()` to check `camera_active` flag
+- Dynamically selects FOV or expanded radius for outer zone check
+- Inner zone (trigger radius) remains unchanged
+
+**3. Documentation Updates**
+- Updated test cases with adaptive outer zone scenarios
+- Added Test 9: Expanded Radius Mode (camera inactive)
+- Documented both operating modes in implementation summary
+
+### Use Cases
+- **Laboratory setup**: Camera + FOV-based outer zone (precise rectangular area)
+- **Field setup**: No camera + radius-based outer zone (simpler cylindrical area)
+- **Development/testing**: Test trigger logic without camera hardware
+
+---
+
 ## Testing Documentation
 
 See `trigger_system_testing.md` for:
-- 8 comprehensive test cases
+- 9 comprehensive test cases (including adaptive outer zone)
 - Message flow diagrams
 - Expected log output
 - Configuration reference
+- Adaptive outer zone test scenarios
 
 ---
 
 ## Summary of Changes
 
 ### Files Modified
-1. `src/processes/tracking.py` - Core two-stage trigger logic
+1. `src/processes/tracking.py` - Two-stage trigger logic + adaptive outer zone
 2. `src/processes/led.py` - OptoTrigger filtering by trigger_type
 3. `src/stimuli/registry.py` - Visual stimuli filtering by trigger_type
-4. `src/utils/config.py` - Z-limit validation
+4. `src/utils/config.py` - Z-limit validation + radius_expansion config
+5. `config.toml` - Added radius_expansion parameter
 
 ### Files Verified (No Changes Needed)
 1. `src/processes/camera.py` - Works with new message format
 2. `src/processes/lens.py` - Works with new message format
 
 ### New Documentation
-1. `trigger_system_testing.md` - Test cases and flow diagrams
-2. `FIXES_SUMMARY.md` - This file
+1. `trigger_system_testing.md` - Test cases, flow diagrams, adaptive outer zone tests
+2. `FIXES_SUMMARY.md` - This file (comprehensive implementation summary)
 
 ---
 
 ## Git Commits
 
 ```
-10f5117 - fix: add z_lim validation to prevent invalid trigger zone configuration
+# Critical Fixes
 8e297ba - fix: correct camera FOV loading to match config.toml structure
+10f5117 - fix: add z_lim validation to prevent invalid trigger zone configuration
+
+# Two-Stage Trigger System
 7db1161 - feat: implement two-stage trigger system in TriggerHandler
 306172f - feat: add trigger_type filtering to OptoTrigger
 45af49d - feat: add trigger_type filtering to Visual Stimuli
 d3ad8cf - docs: add two-stage trigger system test cases and documentation
+b38ce33 - docs: add comprehensive fixes and implementation summary
+
+# Adaptive Outer Zone (Camera-less Operation)
+12f5cc6 - feat: add radius_expansion parameter for camera-less operation
+8c3f867 - feat: implement adaptive outer zone selection based on camera status
+bb42781 - docs: update test cases for adaptive outer zone feature
 ```
 
 ---
