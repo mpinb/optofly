@@ -1,10 +1,29 @@
 import struct
 import serial
+from fastcrc import crc16
+
+# def crc_16(data):
+#     """
+#     Calculate CRC-16 for data validation.
+
+#     Args:
+#         data: Bytes to calculate CRC for
+
+#     Returns:
+#         int: The calculated CRC-16 value
+#     """
+#     crc = 0x0000
+#     for c in data:
+#         crc = crc ^ c
+#         for i in range(0, 8):
+#             crc = (crc >> 1) ^ 0xA001 if (crc & 1) > 0 else crc >> 1
+
+#     return crc
 
 
-def crc_16(data):
+def crc_16(data: bytes) -> int:
     """
-    Calculate CRC-16 for data validation.
+    Calculate CRC-16 for data validation using fastcrc library.
 
     Args:
         data: Bytes to calculate CRC for
@@ -12,14 +31,7 @@ def crc_16(data):
     Returns:
         int: The calculated CRC-16 value
     """
-    crc = 0x0000
-    for c in data:
-        crc = crc ^ c
-        for i in range(0, 8):
-            crc = (crc >> 1) ^ 0xA001 if (crc & 1) > 0 else crc >> 1
-
-    return crc
-
+    return crc16.arc(data)
 
 class LensException(Exception):
     """Base exception for all LiquidLens errors."""
