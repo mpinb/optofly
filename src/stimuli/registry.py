@@ -46,9 +46,20 @@ class StimulusRegistry:
     def on_trigger(self, trigger_data: Dict[str, Any]) -> None:
         """Dispatch TRIGGER message to all stimuli.
 
+        Only dispatches 'stimulation' type triggers to stimuli.
+        'recording' type triggers are ignored.
+
         Args:
-            trigger_data: Trigger message data
+            trigger_data: Trigger message data (must include 'trigger_type' field)
         """
+        # Only activate visual stimuli for stimulation triggers
+        trigger_type = trigger_data.get("trigger_type", "stimulation")  # Default for backward compatibility
+
+        if trigger_type != "stimulation":
+            # Recording triggers don't activate visual stimuli
+            return
+
+        # Dispatch to all registered stimuli
         for stimulus in self._stimuli.values():
             stimulus.on_trigger(trigger_data)
 
