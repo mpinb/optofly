@@ -166,8 +166,11 @@ class OptoTriggerWorker(WorkerProcess):
         """
         Handle a trigger event by activating hardware and logging to CSV.
 
+        Only activates LED for 'stimulation' type triggers.
+        'recording' type triggers are ignored by this process.
+
         Args:
-            trigger_data: Dictionary containing obj_id, frame, timestamps, mean_heading, etc.
+            trigger_data: Dictionary containing obj_id, frame, timestamps, mean_heading, trigger_type, etc.
 
         Returns:
             True if trigger was handled successfully
@@ -176,11 +179,12 @@ class OptoTriggerWorker(WorkerProcess):
             # Extract trigger information
             obj_id = trigger_data.get("obj_id")
             frame = trigger_data.get("frame")
+            trigger_type = trigger_data.get("trigger_type", "stimulation")  # Default for backward compatibility
 
             # Get both timestamps (with backward compatibility fallback)
             braid_timestamp = trigger_data.get("braid_timestamp")
             trigger_timestamp = trigger_data.get("trigger_timestamp")
-            
+
             # Fallback to old 'timestamp' field if new fields not present
             if braid_timestamp is None:
                 braid_timestamp = trigger_data.get("timestamp")
@@ -195,8 +199,16 @@ class OptoTriggerWorker(WorkerProcess):
                 )
                 return False
 
+            # Only activate LED for stimulation triggers
+            if trigger_type != "stimulation":
+                self.logger.debug(
+                    f"Ignoring trigger_type='{trigger_type}' for object {obj_id} "
+                    f"(OptoTrigger only responds to 'stimulation')"
+                )
+                return True  # Not an error, just not our trigger type
+
             self.logger.info(
-                f"Received trigger for object {obj_id} on frame {frame} "
+                f"Received STIMULATION trigger for object {obj_id} on frame {frame} "
                 f"(heading={mean_heading})"
             )
 
@@ -211,6 +223,7 @@ class OptoTriggerWorker(WorkerProcess):
                 "braid_timestamp": braid_timestamp,
                 "trigger_timestamp": trigger_timestamp,
                 "mean_heading": mean_heading,
+                "trigger_type": trigger_type,
                 "duration": self.opto_trigger.config.duration,
                 "intensity": self.opto_trigger.config.intensity,
                 "frequency": self.opto_trigger.config.frequency,
