@@ -308,6 +308,29 @@ class TriggerHandler(WorkerProcess):
             and self.config.z_lim[0] <= z <= self.config.z_lim[1]
         )
 
+    def is_in_expanded_radius_zone(self, x: float, y: float, z: float) -> bool:
+        """
+        Check if a point is within the expanded cylindrical zone (outer zone).
+        Used when camera is not active as alternative to camera FOV.
+
+        Args:
+            x: X-coordinate in meters
+            y: Y-coordinate in meters
+            z: Z-coordinate in meters
+
+        Returns:
+            True if the point is within the expanded zone
+        """
+        # Calculate distance from center in xy plane
+        distance = np.sqrt(x * x + y * y)
+
+        # Check if within expanded radius and z-limits
+        expanded_radius = self.config.radius + self.config.radius_expansion
+        return (
+            distance <= expanded_radius
+            and self.config.z_lim[0] <= z <= self.config.z_lim[1]
+        )
+
     def process_message(self, message_data: Dict[str, Any]) -> None:
         """
         Process a message from the Braid server.
@@ -433,7 +456,9 @@ class TriggerHandler(WorkerProcess):
         Evaluate whether to send trigger signals based on the object's trajectory.
 
         Two-stage trigger system:
-        - Stage 1 (Outer zone - Camera FOV): Start recording + lens tracking
+        - Stage 1 (Outer zone): Start recording + lens tracking
+          - If camera active: Use camera FOV boundaries
+          - If camera inactive: Use expanded radius (radius + radius_expansion)
         - Stage 2 (Inner zone - Trigger radius): Activate opto + visual stimuli
 
         Args:
@@ -451,9 +476,16 @@ class TriggerHandler(WorkerProcess):
         if tracking_duration < self.config.min_trajectory_time:
             return
 
-        # OUTER ZONE CHECK: Camera FOV (larger area)
-        # If in FOV + heading to center, start recording and lens tracking
-        if self.is_in_camera_fov(x, y):
+        # OUTER ZONE CHECK: Determine which outer zone to use
+        # Camera active: use camera FOV (rectangular area)
+        # Camera inactive: use expanded radius (cylindrical area)
+        in_outer_zone = False
+        if self.config.camera_active:
+            in_outer_zone = self.is_in_camera_fov(x, y)
+        else:
+            in_outer_zone = self.is_in_expanded_radius_zone(x, y, z)
+
+        if in_outer_zone:
             # Check global cooldown
             if current_time - self.last_trigger_time < self.config.min_trigger_interval:
                 return
@@ -462,7 +494,7 @@ class TriggerHandler(WorkerProcess):
             if self.config.liquid_lens_active:
                 self._send_lens_trigger(tracked_obj.obj_id)
 
-            # Send recording trigger (camera starts recording)
+            # Send recording trigger (camera starts recording if active)
             self._send_trigger(tracked_obj, trigger_type="recording")
 
             # Update last trigger time (enforces global cooldown)
