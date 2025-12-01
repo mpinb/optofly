@@ -199,7 +199,31 @@ b38ce33 - docs: add comprehensive fixes and implementation summary
 12f5cc6 - feat: add radius_expansion parameter for camera-less operation
 8c3f867 - feat: implement adaptive outer zone selection based on camera status
 bb42781 - docs: update test cases for adaptive outer zone feature
+
+# Code Cleanup
+9d4d965 - refactor: remove unused LENS topic and _send_lens_trigger() method
+9bb1353 - docs: update test documentation to remove LENS topic references
 ```
+
+---
+
+## Code Cleanup: Removed Dead LENS Topic ✨
+
+**Commits**: 9d4d965, 9bb1353
+
+### Issue Discovered
+The `_send_lens_trigger()` method was sending messages to the LENS topic, but the LiquidLens process doesn't subscribe to that topic - it only subscribes to BRAID and TRIGGER topics.
+
+### Root Cause
+The lens receives TRIGGER messages (both "recording" and "stimulation" types) and uses those to start tracking. The separate LENS messages were being sent but never received - pure dead code.
+
+### Fix Applied
+- **Removed** `_send_lens_trigger()` method (was ~17 lines)
+- **Removed** calls to `_send_lens_trigger()` in `_evaluate_triggers()`
+- **Updated** documentation to reflect actual message flow
+
+### Verification
+Confirmed liquid lens receives TRIGGER messages at `lens.py:472-490` and starts tracking correctly. No functionality lost - this was pure dead code removal.
 
 ---
 
@@ -212,10 +236,7 @@ bb42781 - docs: update test cases for adaptive outer zone feature
 
 ---
 
-## Notes
-
-### Discovered Issue (Pre-existing)
-The `_send_lens_trigger()` method sends LENS messages, but the LiquidLens process doesn't subscribe to the LENS topic. It only subscribes to BRAID and TRIGGER topics. This appears to be dead code from an earlier design. The lens works correctly via TRIGGER messages, so no immediate fix needed.
+## Configuration Reference
 
 ### Configuration Values (from config.toml)
 - Camera FOV: x=[-0.07, 0.07], y=[-0.045, 0.06] (14cm × 10.5cm)
