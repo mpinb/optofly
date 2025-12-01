@@ -490,11 +490,8 @@ class TriggerHandler(WorkerProcess):
             if current_time - self.last_trigger_time < self.config.min_trigger_interval:
                 return
 
-            # Send lens trigger (if liquid lens is active)
-            if self.config.liquid_lens_active:
-                self._send_lens_trigger(tracked_obj.obj_id)
-
             # Send recording trigger (camera starts recording if active)
+            # Liquid lens also receives this TRIGGER message and starts tracking
             self._send_trigger(tracked_obj, trigger_type="recording")
 
             # Update last trigger time (enforces global cooldown)
@@ -537,24 +534,6 @@ class TriggerHandler(WorkerProcess):
             )
         except Exception as e:
             self.logger.error(f"Error sending trigger: {e}")
-
-    def _send_lens_trigger(self, obj_id: int) -> None:
-        """
-        Send a trigger message for the liquid lens system.
-
-        Args:
-            obj_id: ID of the object that triggered the lens system
-        """
-        try:
-            timestamp = time.time()
-            message = json.dumps({"timestamp": timestamp, "obj_id": obj_id})
-
-            self.publisher.send_string(f"{self.config.zmq.lens_topic} {message}")
-            self.logger.debug(
-                f"Sent LENS trigger for object {obj_id} at {timestamp:.3f}"
-            )
-        except Exception as e:
-            self.logger.error(f"Error sending lens trigger: {e}")
 
     def _cleanup_stale_objects(self) -> None:
         """Remove objects that haven't been updated recently."""
