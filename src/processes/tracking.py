@@ -198,7 +198,11 @@ class TriggerHandler(WorkerProcess):
 
         # Camera FOV from config
         camera_config = self.config_base.get("camera", {})
-        self.camera_fov = camera_config.get("FOV", [[-0.5, 0.5], [-0.5, 0.5]])
+        fov_config = camera_config.get("FOV", {})
+        self.fov_x_min = fov_config.get("x_min", -0.5)
+        self.fov_x_max = fov_config.get("x_max", 0.5)
+        self.fov_y_min = fov_config.get("y_min", -0.5)
+        self.fov_y_max = fov_config.get("y_max", 0.5)
 
         # Track when the last trigger was sent
         self.last_trigger_time = 0.0
@@ -279,16 +283,9 @@ class TriggerHandler(WorkerProcess):
         Returns:
             True if the point is within the FOV
         """
-        try:
-            x_min, x_max = self.camera_fov[0]
-            y_min, y_max = self.camera_fov[1]
-            return (x_min <= x <= x_max) and (y_min <= y <= y_max)
-        except (IndexError, TypeError) as e:
-            self.logger.error(
-                f"Error checking camera FOV: {e}, using default FOV check"
-            )
-            # Default to a square FOV if config is invalid
-            return -0.5 <= x <= 0.5 and -0.5 <= y <= 0.5
+        return (self.fov_x_min <= x <= self.fov_x_max) and (
+            self.fov_y_min <= y <= self.fov_y_max
+        )
 
     def is_in_trigger_zone(self, x: float, y: float, z: float) -> bool:
         """
