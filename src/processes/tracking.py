@@ -432,6 +432,10 @@ class TriggerHandler(WorkerProcess):
         """
         Evaluate whether to send trigger signals based on the object's trajectory.
 
+        Two-stage trigger system:
+        - Stage 1 (Outer zone - Camera FOV): Start recording + lens tracking
+        - Stage 2 (Inner zone - Trigger radius): Activate opto + visual stimuli
+
         Args:
             tracked_obj: The tracked object to evaluate
         """
@@ -442,39 +446,41 @@ class TriggerHandler(WorkerProcess):
         if not tracked_obj.is_heading_toward_center(self.config.heading_threshold):
             return
 
-        # Process LENS trigger (if liquid lens is active)
-        # This happens independently of other triggers and doesn't update last_trigger_time
-        if self.config.liquid_lens_active and self.is_in_camera_fov(x, y):
-            self._send_lens_trigger(tracked_obj.obj_id)
-
         # Check if object has been tracked long enough
         tracking_duration = tracked_obj.get_tracking_duration(current_time)
         if tracking_duration < self.config.min_trajectory_time:
             return
 
-        # Check if enough time has passed since last trigger
-        if current_time - self.last_trigger_time < self.config.min_trigger_interval:
-            return
+        # OUTER ZONE CHECK: Camera FOV (larger area)
+        # If in FOV + heading to center, start recording and lens tracking
+        if self.is_in_camera_fov(x, y):
+            # Check global cooldown
+            if current_time - self.last_trigger_time < self.config.min_trigger_interval:
+                return
 
-        # Check if object is in trigger zone
-        if self.is_in_trigger_zone(x, y, z):
-            # Send trigger and update last trigger time
-            self._send_trigger(tracked_obj)
+            # Send lens trigger (if liquid lens is active)
+            if self.config.liquid_lens_active:
+                self._send_lens_trigger(tracked_obj.obj_id)
+
+            # Send recording trigger (camera starts recording)
+            self._send_trigger(tracked_obj, trigger_type="recording")
+
+            # Update last trigger time (enforces global cooldown)
             self.last_trigger_time = current_time
 
-    def _send_trigger(self, tracked_obj: TrackedObject) -> None:
+            # INNER ZONE CHECK: Trigger radius (smaller area near origin)
+            # If also in trigger zone, activate stimulation
+            if self.is_in_trigger_zone(x, y, z):
+                self._send_trigger(tracked_obj, trigger_type="stimulation")
+
+    def _send_trigger(self, tracked_obj: TrackedObject, trigger_type: str = "stimulation") -> None:
         """
-        Send a trigger message for optogenetic stimulation.
+        Send a trigger message for camera recording and/or optogenetic stimulation.
 
         Args:
-            tracked_obj: The TrackedObject that triggered the stimulation
+            tracked_obj: The TrackedObject that triggered the action
+            trigger_type: Type of trigger - "recording" (camera only) or "stimulation" (opto + visual)
         """
-        if not self.config.opto_trigger_active:
-            self.logger.debug(
-                f"Stimulation trigger skipped for object {tracked_obj.obj_id} (opto_trigger not active)"
-            )
-            return
-
         try:
             # Get mean heading (may be None if not enough data)
             mean_heading = tracked_obj.get_mean_heading()
@@ -486,6 +492,7 @@ class TriggerHandler(WorkerProcess):
                 "braid_timestamp": tracked_obj.current_timestamp,
                 "trigger_timestamp": time.time(),
                 "mean_heading": mean_heading,
+                "trigger_type": trigger_type,  # "recording" or "stimulation"
                 # Keep old 'timestamp' field for backward compatibility
                 "timestamp": tracked_obj.current_timestamp,
             }
@@ -493,7 +500,7 @@ class TriggerHandler(WorkerProcess):
             message = json.dumps(message_data)
             self.publisher.send_string(f"{self.config.zmq.trigger_topic} {message}")
             self.logger.info(
-                f"Sent TRIGGER for object {tracked_obj.obj_id} "
+                f"Sent TRIGGER ({trigger_type}) for object {tracked_obj.obj_id} "
                 f"(frame={tracked_obj.current_frame}, heading={mean_heading})"
             )
         except Exception as e:
