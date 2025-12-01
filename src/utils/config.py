@@ -65,6 +65,8 @@ class TriggerHandlerConfig(ConfigBase):
 
         # Spatial trigger zone settings
         self.radius: float = float(config.get("radius", 0.025))
+        # Radius expansion for outer zone when camera is not active (meters)
+        self.radius_expansion: float = float(config.get("radius_expansion", 0.03))
         z_lim_config = config.get("z_lim", [0.0, 0.0])
         try:
             self.z_lim = (float(z_lim_config[0]), float(z_lim_config[1]))
@@ -96,6 +98,9 @@ class TriggerHandlerConfig(ConfigBase):
 
         # Linked subsystem state
         root_config = ConfigBase(config_path)._load_config()
+        self.camera_active: bool = bool(
+            root_config.get("camera", {}).get("active", False)
+        )
         self.liquid_lens_active: bool = bool(
             root_config.get("liquid_lens", {}).get("active", False)
         )
