@@ -73,6 +73,20 @@ class TriggerHandlerConfig(ConfigBase):
                 "trigger_handler.z_lim must contain two numeric values"
             ) from None
 
+        # Validate z_lim bounds
+        if self.z_lim[0] >= self.z_lim[1]:
+            raise ValueError(
+                f"trigger_handler.z_lim[0] must be less than z_lim[1], "
+                f"got z_lim={self.z_lim}"
+            )
+
+        # Validate reasonable bounds for fly tracking arena
+        if self.z_lim[0] < -1.0 or self.z_lim[1] > 2.0:
+            raise ValueError(
+                f"trigger_handler.z_lim values must be within reasonable bounds "
+                f"(-1.0m to 2.0m), got z_lim={self.z_lim}"
+            )
+
         # Heading cone configuration (degrees -> radians)
         self.heading_cone_deg: float = float(config.get("heading_cone_deg", 45.0))
         self.heading_threshold: float = math.radians(self.heading_cone_deg)
