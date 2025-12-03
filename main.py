@@ -19,6 +19,7 @@ from src.processes.led import OptoTriggerWorker
 from src.processes.camera import CameraProcess
 from src.processes.lens import LiquidLens
 from src.utils.braid import check_braid_folder_exists
+from src.monitoring.server import run_server
 
 
 def load_config(config_path: str) -> dict:
@@ -55,6 +56,16 @@ def print_experiment_config(config: dict, active_processes: list):
     print("\nActive Processes:")
     for process_name in active_processes:
         print(f"  ✓ {process_name}")
+
+    # Monitoring server details
+    if "Monitoring Server" in active_processes:
+        monitoring_config = config.get("monitoring", {})
+        host = monitoring_config.get("host", "0.0.0.0")
+        port = monitoring_config.get("port", 5000)
+        # If host is 0.0.0.0, show localhost for user convenience
+        display_host = "localhost" if host == "0.0.0.0" else host
+        print(f"\nMonitoring Dashboard:")
+        print(f"  URL: http://{display_host}:{port}")
 
     # Visual stimuli details
     if "VisualStimuliProcess" in active_processes:
@@ -173,7 +184,28 @@ def main():
         # Optional processes (based on config)
         print("\nStarting optional processes (based on config)...")
 
-        # 3. VisualStimuliProcess - displays visual patterns
+        # 3. Monitoring Server - web dashboard for trigger visualization
+        if config.get("monitoring", {}).get("active", False):
+            print("  - Monitoring Server")
+            monitoring_config = config.get("monitoring", {})
+            zmq_trigger_port = config.get("zmq", {}).get("trigger_port", 5556)
+            monitoring_host = monitoring_config.get("host", "0.0.0.0")
+            monitoring_port = monitoring_config.get("port", 5000)
+            zmq_address = f"tcp://localhost:{zmq_trigger_port}"
+
+            monitoring_process = mp.Process(
+                target=run_server,
+                args=(zmq_address, monitoring_host, monitoring_port),
+                daemon=True
+            )
+            monitoring_process.start()
+            processes.append(("Monitoring Server", monitoring_process))
+            active_process_names.append("Monitoring Server")
+            print(f"    Dashboard available at http://{monitoring_host}:{monitoring_port}")
+        else:
+            print("  - Monitoring Server (disabled in config)")
+
+        # 4. VisualStimuliProcess - displays visual patterns
         if config.get("visual_stimuli", {}).get("active", False):
             print("  - VisualStimuliProcess")
             visual_stimuli = VisualStimuliProcess(
@@ -185,7 +217,7 @@ def main():
         else:
             print("  - VisualStimuliProcess (disabled in config)")
 
-        # 4. CameraProcess - high-speed video recording
+        # 5. CameraProcess - high-speed video recording
         if config.get("camera", {}).get("active", False):
             print("  - CameraProcess")
             camera = CameraProcess(config_path=config_path, event=stop_event)
@@ -195,7 +227,7 @@ def main():
         else:
             print("  - CameraProcess (disabled in config)")
 
-        # 5. OptoTriggerWorker - optogenetic LED activation
+        # 6. OptoTriggerWorker - optogenetic LED activation
         if config.get("opto_trigger", {}).get("active", False):
             print("  - OptoTriggerWorker")
             opto_trigger = OptoTriggerWorker(
@@ -207,7 +239,7 @@ def main():
         else:
             print("  - OptoTriggerWorker (disabled in config)")
 
-        # 6. LiquidLens - auto-focus system
+        # 7. LiquidLens - auto-focus system
         if config.get("liquid_lens", {}).get("active", False):
             print("  - LiquidLens")
             liquid_lens = LiquidLens(event=stop_event, config_path=config_path)
