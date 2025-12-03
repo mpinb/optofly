@@ -127,6 +127,12 @@ def main():
     braid_folder = check_braid_folder_exists(experiments_path)
     print(f"Experiment data will be saved to: {braid_folder}")
 
+    experiment_duration = config.get("experiment_duration", 24)  # hours
+    experiment_end_time = datetime.now().timestamp() + experiment_duration * 3600
+    print(f"Experiment duration set to {experiment_duration} hours.")
+    print(
+        f"Experiment will end at: {datetime.fromtimestamp(experiment_end_time).strftime('%Y-%m-%d %H:%M:%S')}"
+    )
     # Copy config.toml
     copy_config_to_braid_folder(config_path, braid_folder)
 
@@ -214,8 +220,11 @@ def main():
         # Print experiment summary
         print_experiment_config(config, active_process_names)
 
-        # Wait for keyboard interrupt
+        # Wait for keyboard interrupt or experiment end time
         while not stop_event.is_set():
+            if datetime.now().timestamp() >= experiment_end_time:
+                print("\n\nExperiment duration reached, shutting down...")
+                stop_event.set()
             time.sleep(0.1)
 
     except KeyboardInterrupt:

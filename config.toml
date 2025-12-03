@@ -16,6 +16,7 @@ atr_date = "2024-01-01"
 experiment_date = "2024-02-15"
 n_flies = 10
 notes = "Additional notes about the experiment."
+experiment_duration = 24 # hours
 
 # ==============================================================================
 # SYSTEM CONFIGURATION
