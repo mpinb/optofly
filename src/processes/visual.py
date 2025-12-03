@@ -331,8 +331,8 @@ class VisualStimuliProcess(WorkerProcess):
         try:
             # Non-blocking receive
             if self.subscriber.poll(timeout=0):
-                topic, message = self.subscriber.recv_multipart(zmq.NOBLOCK)
-                message_str = message.decode("utf-8")
+                message = self.subscriber.recv_string(zmq.NOBLOCK)
+                _, message_str = message.split(" ", 1)
                 trigger_data = json.loads(message_str)
 
                 # Dispatch to stimuli

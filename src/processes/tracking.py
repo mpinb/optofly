@@ -170,7 +170,7 @@ class TriggerHandler(WorkerProcess):
         event: Optional[mp.Event] = None,
         process_name: str = "TriggerHandler",
         log_level: str = "INFO",
-        log_color: str = "MAGENTA",  # Added log_color parameter with default value
+        log_color: str = "MAGENTA",
     ):
         """
         Initialize the TriggerHandler.

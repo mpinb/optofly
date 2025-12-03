@@ -244,7 +244,7 @@ class BraidPublisher(WorkerProcess):
                 connection_attempts += 1
                 retry_delay = min(self.config.reconnect_delay * connection_attempts, 30)
 
-                self.logger.error(
+                self.logger.debug(
                     f"Connection error: {e}. Retrying in {retry_delay}s..."
                 )
                 time.sleep(retry_delay)

@@ -50,7 +50,7 @@ min_trajectory_time = 1.0        # Minimum tracking time before triggering (seco
 min_trigger_interval = 10.0      # Minimum time between triggers (seconds)
 radius = 0.05                   # Trigger zone radius (meters)
 z_lim = [0.15, 0.25]            # Vertical trigger zone limits (meters)
-heading_cone_deg = 45.0          # Angular tolerance for heading alignment (degrees)
+heading_cone_deg = 30.0          # Angular tolerance for heading alignment (degrees)
 min_velocity = 0.01              # Minimum velocity to consider object "moving" (m/s)
 
 [camera]

@@ -42,8 +42,8 @@ arena_center_to_screen_cm = 25.0   # Distance from arena center to screens
 enabled = true
 square_color = "black"           # Pattern color
 background_color = "white"       # Background color
-pattern_density = 0.3            # Pattern density (0.0-1.0)
-downscale_factor = 2             # Resolution divisor: 1=full, 2=half, 4=quarter
+pattern_density = 0.5            # Pattern density (0.0-1.0)
+downscale_factor = 32             # Resolution divisor: 1=full, 2=half, 4=quarter
 random_seed = 42                 # For reproducible patterns
 
 # ------------------------------------------------------------------------------
