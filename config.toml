@@ -48,8 +48,7 @@ experiments_path = "/mnt/data/experiments/"  # Root path where Braid saves .brai
 # Trigger detection criteria
 min_trajectory_time = 1.0        # Minimum tracking time before triggering (seconds)
 min_trigger_interval = 10.0      # Minimum time between triggers (seconds)
-radius = 0.05                    # Inner trigger zone radius (meters)
-radius_expansion = 0.03          # Outer zone expansion when camera inactive (meters added to radius)
+radius = 0.05                    # Trigger zone radius (meters)
 z_lim = [0.15, 0.25]             # Vertical trigger zone limits (meters)
 heading_cone_deg = 45.0          # Angular tolerance for heading alignment (degrees)
 min_velocity = 0.01              # Minimum velocity to consider object "moving" (m/s)
@@ -109,6 +108,12 @@ measurement_noise = 0.1          # Accuracy of position measurements
 initial_covariance = 1.0         # Uncertainty in initial state
 system_latency = 0.05            # Message processing + lens adjustment time (seconds)
 prediction_horizon = 0.1         # Prediction lookahead time (seconds)
+
+[liquid_lens.prediction]
+# Predictive lens tracking (trajectory-based triggering)
+enabled = false                  # Enable predictive lens triggering
+horizon = 1.5                    # How far ahead to predict trajectory (seconds)
+time_step = 0.1                  # Time interval for trajectory sampling (seconds)
 
 # ==============================================================================
 # VISUAL STIMULI

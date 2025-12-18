@@ -179,7 +179,6 @@ class OptoTriggerWorker(WorkerProcess):
             # Extract trigger information
             obj_id = trigger_data.get("obj_id")
             frame = trigger_data.get("frame")
-            trigger_type = trigger_data.get("trigger_type", "stimulation")  # Default for backward compatibility
 
             # Get both timestamps (with backward compatibility fallback)
             braid_timestamp = trigger_data.get("braid_timestamp")
@@ -199,16 +198,8 @@ class OptoTriggerWorker(WorkerProcess):
                 )
                 return False
 
-            # Only activate LED for stimulation triggers
-            if trigger_type != "stimulation":
-                self.logger.debug(
-                    f"Ignoring trigger_type='{trigger_type}' for object {obj_id} "
-                    f"(OptoTrigger only responds to 'stimulation')"
-                )
-                return True  # Not an error, just not our trigger type
-
             self.logger.info(
-                f"Received STIMULATION trigger for object {obj_id} on frame {frame} "
+                f"Received trigger for object {obj_id} on frame {frame} "
                 f"(heading={mean_heading})"
             )
 
@@ -223,7 +214,6 @@ class OptoTriggerWorker(WorkerProcess):
                 "braid_timestamp": braid_timestamp,
                 "trigger_timestamp": trigger_timestamp,
                 "mean_heading": mean_heading,
-                "trigger_type": trigger_type,
                 "duration": self.opto_trigger.config.duration,
                 "intensity": self.opto_trigger.config.intensity,
                 "frequency": self.opto_trigger.config.frequency,

@@ -65,8 +65,6 @@ class TriggerHandlerConfig(ConfigBase):
 
         # Spatial trigger zone settings
         self.radius: float = float(config.get("radius", 0.025))
-        # Radius expansion for outer zone when camera is not active (meters)
-        self.radius_expansion: float = float(config.get("radius_expansion", 0.03))
         z_lim_config = config.get("z_lim", [0.0, 0.0])
         try:
             self.z_lim = (float(z_lim_config[0]), float(z_lim_config[1]))
@@ -201,8 +199,17 @@ class LiquidLensConfig(ConfigBase):
         self.initial_covariance: float = kalman_config.get("initial_covariance", 1.0)
         # System latency in seconds (message processing + lens adjustment time)
         self.system_latency: float = kalman_config.get("system_latency", 0.05)
-        # How far in the future to predict (in seconds)
+        # How far in the future to predict (in seconds) for Kalman filter
         self.prediction_horizon: float = kalman_config.get("prediction_horizon", 0.1)
+
+        # Predictive tracking settings (trajectory-based lens triggering)
+        prediction_config = config.get("prediction", {})
+        # Enable/disable predictive lens tracking
+        self.predictive_tracking: bool = prediction_config.get("enabled", False)
+        # How far ahead to predict trajectory intersection (seconds)
+        self.prediction_horizon_trajectory: float = prediction_config.get("horizon", 1.5)
+        # Time step for trajectory sampling (seconds)
+        self.prediction_time_step: float = prediction_config.get("time_step", 0.1)
 
         # ZMQ configuration
         self.zmq = ZMQConfig(config_path)
