@@ -81,7 +81,7 @@ y_max = 0.06
 
 [opto_trigger]
 # LED optogenetic stimulation
-active = true
+active = false
 port = "/dev/opto_trigger"
 baudrate = 115200
 

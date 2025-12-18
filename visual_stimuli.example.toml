@@ -51,13 +51,13 @@ random_seed = 42                 # For reproducible patterns
 # ------------------------------------------------------------------------------
 
 [visual_stimuli.looming]
-enabled = false
+enabled = true
 
 # Size parameters (degrees visual angle)
 initial_size_deg = 5.0
 # initial_size_deg = [5.0, 10.0, 15.0]  # Example: randomization
 
-final_size_deg = 64.0
+final_size_deg = 72.0
 # final_size_deg = [60.0, 70.0, 80.0, 90.0]
 
 # Timing parameters (milliseconds)
