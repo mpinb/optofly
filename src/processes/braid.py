@@ -230,9 +230,10 @@ class BraidPublisher(WorkerProcess):
                         if "msg" in data and self.zmq_socket is not None:
                             # Publish to ZMQ
                             message = json.dumps(data["msg"])
-                            self.zmq_socket.send_string(
-                                f"{self.config.zmq.braid_topic} {message}"
-                            )
+                            self.zmq_socket.send_multipart([
+                                self.config.zmq.braid_topic.encode('utf-8'),
+                                message.encode('utf-8')
+                            ])
                             self.logger.debug(f"Published message: {message[:50]}...")
                     except Exception as e:
                         self.logger.error(f"Error processing chunk: {e}")

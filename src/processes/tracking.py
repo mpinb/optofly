@@ -527,7 +527,10 @@ class TriggerHandler(WorkerProcess):
             }
 
             message = json.dumps(message_data)
-            self.publisher.send_string(f"{self.config.zmq.trigger_topic} {message}")
+            self.publisher.send_multipart([
+                self.config.zmq.trigger_topic.encode('utf-8'),
+                message.encode('utf-8')
+            ])
             self.logger.info(
                 f"Sent TRIGGER ({trigger_type}) for object {tracked_obj.obj_id} "
                 f"(frame={tracked_obj.current_frame}, heading={mean_heading})"
@@ -573,8 +576,9 @@ class TriggerHandler(WorkerProcess):
                     # Process incoming message
                     try:
                         # Receive multipart message (topic, content)
-                        message = self.subscriber.recv_string()
-                        topic, json_str = message.split(" ", 1)
+                        topic, message = self.subscriber.recv_multipart()
+                        topic = topic.decode('utf-8')
+                        json_str = message.decode('utf-8')
 
                         # Parse JSON message
                         message_data = json.loads(json_str)

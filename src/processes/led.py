@@ -152,9 +152,9 @@ class OptoTriggerWorker(WorkerProcess):
             The parsed message dictionary or None if no message available
         """
         try:
-            message = self.trigger_socket.recv_string(flags=zmq.NOBLOCK)
-            # Message format: "TRIGGER {json_data}"
-            _, json_data = message.split(" ", 1)
+            topic, message = self.trigger_socket.recv_multipart(flags=zmq.NOBLOCK)
+            topic = topic.decode('utf-8')
+            json_data = message.decode('utf-8')
             return json.loads(json_data)
         except zmq.Again:
             return None

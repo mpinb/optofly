@@ -233,8 +233,9 @@ class LiquidLens(WorkerProcess):
             The parsed message or None if no message available
         """
         try:
-            message = socket.recv_string(flags=zmq.NOBLOCK)
-            _, json_data = message.split(" ", 1)
+            topic, message = socket.recv_multipart(flags=zmq.NOBLOCK)
+            topic = topic.decode('utf-8')
+            json_data = message.decode('utf-8')
             return json.loads(json_data)
         except zmq.Again:
             return None
