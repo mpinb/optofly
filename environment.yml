@@ -1,4 +1,4 @@
-name: optofly
+name: optofly_env
 channels:
   - conda-forge
   - defaults
