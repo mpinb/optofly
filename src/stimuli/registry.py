@@ -49,6 +49,7 @@ class StimulusRegistry:
         Args:
             trigger_data: Trigger message data
         """
+        # Dispatch to all registered stimuli
         for stimulus in self._stimuli.values():
             stimulus.on_trigger(trigger_data)
 

@@ -11,12 +11,12 @@ from dataclasses import dataclass, field
 import json
 import multiprocessing as mp
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 import numpy as np
 from scipy import stats
 import zmq
 
-from src.utils.config import ConfigBase, TriggerHandlerConfig
+from src.utils.config import ConfigBase, TriggerHandlerConfig, LiquidLensConfig
 from src.utils.logger import init_class_logger
 from src.utils.worker import WorkerProcess
 
@@ -154,6 +154,82 @@ class TrackedObject:
         # Object is heading toward center if difference is less than threshold
         return diff < threshold
 
+    def get_mean_velocity(self) -> Optional[Tuple[float, float, float]]:
+        """
+        Calculate the mean velocity from recent velocity history.
+
+        Returns:
+            Tuple of (vx, vy, vz) mean velocities or None if no velocity data
+        """
+        if not self.velocities:
+            return None
+
+        # Calculate mean of recent velocities
+        velocities_array = np.array(list(self.velocities))
+        mean_vel = np.mean(velocities_array, axis=0)
+        return tuple(mean_vel)
+
+    def will_enter_trigger_zone(
+        self,
+        radius: float,
+        z_lim: Tuple[float, float],
+        prediction_horizon: float = 2.0,
+        time_step: float = 0.1
+    ) -> Tuple[bool, Optional[float]]:
+        """
+        Predict if the object's current trajectory will intersect the trigger zone.
+
+        Uses linear extrapolation of current position and mean velocity to predict
+        future positions. Samples the trajectory at regular intervals to check for
+        intersection with the cylindrical trigger zone.
+
+        Args:
+            radius: Trigger zone radius in meters
+            z_lim: Tuple of (z_min, z_max) for vertical limits in meters
+            prediction_horizon: How far ahead to predict in seconds
+            time_step: Time interval between prediction samples in seconds
+
+        Returns:
+            Tuple of (will_intersect, time_to_intersection)
+            - will_intersect: True if trajectory predicted to enter zone
+            - time_to_intersection: Time in seconds until entry, or None if no intersection
+        """
+        # Get mean velocity
+        mean_vel = self.get_mean_velocity()
+        if mean_vel is None:
+            return (False, None)
+
+        vx, vy, vz = mean_vel
+
+        # Check if object is moving (avoid false positives for stationary objects)
+        velocity_magnitude = np.sqrt(vx**2 + vy**2 + vz**2)
+        if velocity_magnitude < 0.001:  # Essentially stationary
+            return (False, None)
+
+        # Current position
+        x0, y0, z0 = self.current_x, self.current_y, self.current_z
+
+        # Sample trajectory at regular intervals
+        num_steps = int(prediction_horizon / time_step)
+        for i in range(1, num_steps + 1):
+            t = i * time_step
+
+            # Project position forward
+            x_future = x0 + vx * t
+            y_future = y0 + vy * t
+            z_future = z0 + vz * t
+
+            # Check if in trigger zone (cylinder)
+            distance_from_center = np.sqrt(x_future**2 + y_future**2)
+
+            if (distance_from_center <= radius and
+                z_lim[0] <= z_future <= z_lim[1]):
+                # Trajectory intersects trigger zone!
+                return (True, t)
+
+        # No intersection found within prediction horizon
+        return (False, None)
+
 
 class TriggerHandler(WorkerProcess):
     """
@@ -193,12 +269,17 @@ class TriggerHandler(WorkerProcess):
         # Initialize TriggerHandler-specific attributes
         self.config_base = ConfigBase(config_path)._load_config()
         self.config = TriggerHandlerConfig(config_path)
+        self.lens_config = LiquidLensConfig(config_path)
         self.stop_event = event if event is not None else mp.Event()
         self.is_initialized = False
 
         # Camera FOV from config
         camera_config = self.config_base.get("camera", {})
-        self.camera_fov = camera_config.get("FOV", [[-0.5, 0.5], [-0.5, 0.5]])
+        fov_config = camera_config.get("FOV", {})
+        self.fov_x_min = fov_config.get("x_min", -0.5)
+        self.fov_x_max = fov_config.get("x_max", 0.5)
+        self.fov_y_min = fov_config.get("y_min", -0.5)
+        self.fov_y_max = fov_config.get("y_max", 0.5)
 
         # Track when the last trigger was sent
         self.last_trigger_time = 0.0
@@ -279,16 +360,9 @@ class TriggerHandler(WorkerProcess):
         Returns:
             True if the point is within the FOV
         """
-        try:
-            x_min, x_max = self.camera_fov[0]
-            y_min, y_max = self.camera_fov[1]
-            return (x_min <= x <= x_max) and (y_min <= y <= y_max)
-        except (IndexError, TypeError) as e:
-            self.logger.error(
-                f"Error checking camera FOV: {e}, using default FOV check"
-            )
-            # Default to a square FOV if config is invalid
-            return -0.5 <= x <= 0.5 and -0.5 <= y <= 0.5
+        return (self.fov_x_min <= x <= self.fov_x_max) and (
+            self.fov_y_min <= y <= self.fov_y_max
+        )
 
     def is_in_trigger_zone(self, x: float, y: float, z: float) -> bool:
         """
@@ -435,6 +509,10 @@ class TriggerHandler(WorkerProcess):
         """
         Evaluate whether to send trigger signals based on the object's trajectory.
 
+        Single-stage trigger system:
+        - Trigger fires when fly enters trigger zone + heading toward center
+        - All systems (camera, opto, visual) activate together
+
         Args:
             tracked_obj: The tracked object to evaluate
         """
@@ -445,39 +523,47 @@ class TriggerHandler(WorkerProcess):
         if not tracked_obj.is_heading_toward_center(self.config.heading_threshold):
             return
 
-        # Process LENS trigger (if liquid lens is active)
-        # This happens independently of other triggers and doesn't update last_trigger_time
-        if self.config.liquid_lens_active and self.is_in_camera_fov(x, y):
-            self._send_lens_trigger(tracked_obj.obj_id)
-
         # Check if object has been tracked long enough
         tracking_duration = tracked_obj.get_tracking_duration(current_time)
         if tracking_duration < self.config.min_trajectory_time:
             return
 
-        # Check if enough time has passed since last trigger
+        # PREDICTIVE LENS CHECK (independent of main trigger)
+        # Only run if lens is active and predictive tracking is enabled
+        if (self.lens_config.active and
+            self.lens_config.predictive_tracking and
+            self.is_in_camera_fov(x, y)):
+
+            # Predict if fly will enter trigger zone
+            will_trigger, time_to_trigger = tracked_obj.will_enter_trigger_zone(
+                self.config.radius,
+                self.config.z_lim,
+                self.lens_config.prediction_horizon_trajectory,
+                self.lens_config.prediction_time_step
+            )
+
+            if will_trigger:
+                # Send LENS trigger to start tracking early
+                self._send_lens_trigger(tracked_obj, time_to_trigger)
+
+        # Check global cooldown
         if current_time - self.last_trigger_time < self.config.min_trigger_interval:
             return
 
         # Check if object is in trigger zone
         if self.is_in_trigger_zone(x, y, z):
-            # Send trigger and update last trigger time
+            # Send trigger (all systems activate)
             self._send_trigger(tracked_obj)
+            # Update last trigger time (enforces global cooldown)
             self.last_trigger_time = current_time
 
     def _send_trigger(self, tracked_obj: TrackedObject) -> None:
         """
-        Send a trigger message for optogenetic stimulation.
+        Send a trigger message for camera recording and optogenetic stimulation.
 
         Args:
-            tracked_obj: The TrackedObject that triggered the stimulation
+            tracked_obj: The TrackedObject that triggered the action
         """
-        if not self.config.opto_trigger_active:
-            self.logger.debug(
-                f"Stimulation trigger skipped for object {tracked_obj.obj_id} (opto_trigger not active)"
-            )
-            return
-
         try:
             # Get mean heading (may be None if not enough data)
             mean_heading = tracked_obj.get_mean_heading()
@@ -494,7 +580,10 @@ class TriggerHandler(WorkerProcess):
             }
 
             message = json.dumps(message_data)
-            self.publisher.send_string(f"{self.config.zmq.trigger_topic} {message}")
+            self.publisher.send_multipart([
+                self.config.zmq.trigger_topic.encode('utf-8'),
+                message.encode('utf-8')
+            ])
             self.logger.info(
                 f"Sent TRIGGER for object {tracked_obj.obj_id} "
                 f"(frame={tracked_obj.current_frame}, heading={mean_heading})"
@@ -502,20 +591,42 @@ class TriggerHandler(WorkerProcess):
         except Exception as e:
             self.logger.error(f"Error sending trigger: {e}")
 
-    def _send_lens_trigger(self, obj_id: int) -> None:
+    def _send_lens_trigger(
+        self,
+        tracked_obj: TrackedObject,
+        predicted_entry_time: Optional[float] = None
+    ) -> None:
         """
-        Send a trigger message for the liquid lens system.
+        Send a LENS trigger message for predictive liquid lens tracking.
 
         Args:
-            obj_id: ID of the object that triggered the lens system
+            tracked_obj: The TrackedObject that will likely trigger
+            predicted_entry_time: Estimated time until trigger zone entry (seconds)
         """
         try:
-            timestamp = time.time()
-            message = json.dumps({"timestamp": timestamp, "obj_id": obj_id})
+            # Get mean heading
+            mean_heading = tracked_obj.get_mean_heading()
 
-            self.publisher.send_string(f"{self.config.zmq.lens_topic} {message}")
-            self.logger.debug(
-                f"Sent LENS trigger for object {obj_id} at {timestamp:.3f}"
+            # Create message with prediction information
+            message_data = {
+                "obj_id": tracked_obj.obj_id,
+                "frame": tracked_obj.current_frame,
+                "braid_timestamp": tracked_obj.current_timestamp,
+                "trigger_timestamp": time.time(),
+                "mean_heading": mean_heading,
+                "predicted_entry_time": predicted_entry_time,
+                # Keep old 'timestamp' field for backward compatibility
+                "timestamp": tracked_obj.current_timestamp,
+            }
+
+            message = json.dumps(message_data)
+            self.publisher.send_multipart([
+                self.config.zmq.lens_topic.encode('utf-8'),
+                message.encode('utf-8')
+            ])
+            self.logger.info(
+                f"Sent LENS trigger for object {tracked_obj.obj_id} "
+                f"(frame={tracked_obj.current_frame}, predicted_entry={predicted_entry_time:.2f}s)"
             )
         except Exception as e:
             self.logger.error(f"Error sending lens trigger: {e}")
@@ -558,8 +669,9 @@ class TriggerHandler(WorkerProcess):
                     # Process incoming message
                     try:
                         # Receive multipart message (topic, content)
-                        message = self.subscriber.recv_string()
-                        topic, json_str = message.split(" ", 1)
+                        topic, message = self.subscriber.recv_multipart()
+                        topic = topic.decode('utf-8')
+                        json_str = message.decode('utf-8')
 
                         # Parse JSON message
                         message_data = json.loads(json_str)

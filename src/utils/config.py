@@ -73,6 +73,20 @@ class TriggerHandlerConfig(ConfigBase):
                 "trigger_handler.z_lim must contain two numeric values"
             ) from None
 
+        # Validate z_lim bounds
+        if self.z_lim[0] >= self.z_lim[1]:
+            raise ValueError(
+                f"trigger_handler.z_lim[0] must be less than z_lim[1], "
+                f"got z_lim={self.z_lim}"
+            )
+
+        # Validate reasonable bounds for fly tracking arena
+        if self.z_lim[0] < -1.0 or self.z_lim[1] > 2.0:
+            raise ValueError(
+                f"trigger_handler.z_lim values must be within reasonable bounds "
+                f"(-1.0m to 2.0m), got z_lim={self.z_lim}"
+            )
+
         # Heading cone configuration (degrees -> radians)
         self.heading_cone_deg: float = float(config.get("heading_cone_deg", 45.0))
         self.heading_threshold: float = math.radians(self.heading_cone_deg)
@@ -82,6 +96,9 @@ class TriggerHandlerConfig(ConfigBase):
 
         # Linked subsystem state
         root_config = ConfigBase(config_path)._load_config()
+        self.camera_active: bool = bool(
+            root_config.get("camera", {}).get("active", False)
+        )
         self.liquid_lens_active: bool = bool(
             root_config.get("liquid_lens", {}).get("active", False)
         )
@@ -182,8 +199,17 @@ class LiquidLensConfig(ConfigBase):
         self.initial_covariance: float = kalman_config.get("initial_covariance", 1.0)
         # System latency in seconds (message processing + lens adjustment time)
         self.system_latency: float = kalman_config.get("system_latency", 0.05)
-        # How far in the future to predict (in seconds)
+        # How far in the future to predict (in seconds) for Kalman filter
         self.prediction_horizon: float = kalman_config.get("prediction_horizon", 0.1)
+
+        # Predictive tracking settings (trajectory-based lens triggering)
+        prediction_config = config.get("prediction", {})
+        # Enable/disable predictive lens tracking
+        self.predictive_tracking: bool = prediction_config.get("enabled", False)
+        # How far ahead to predict trajectory intersection (seconds)
+        self.prediction_horizon_trajectory: float = prediction_config.get("horizon", 1.5)
+        # Time step for trajectory sampling (seconds)
+        self.prediction_time_step: float = prediction_config.get("time_step", 0.1)
 
         # ZMQ configuration
         self.zmq = ZMQConfig(config_path)

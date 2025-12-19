@@ -152,9 +152,9 @@ class OptoTriggerWorker(WorkerProcess):
             The parsed message dictionary or None if no message available
         """
         try:
-            message = self.trigger_socket.recv_string(flags=zmq.NOBLOCK)
-            # Message format: "TRIGGER {json_data}"
-            _, json_data = message.split(" ", 1)
+            topic, message = self.trigger_socket.recv_multipart(flags=zmq.NOBLOCK)
+            topic = topic.decode('utf-8')
+            json_data = message.decode('utf-8')
             return json.loads(json_data)
         except zmq.Again:
             return None
@@ -166,8 +166,11 @@ class OptoTriggerWorker(WorkerProcess):
         """
         Handle a trigger event by activating hardware and logging to CSV.
 
+        Only activates LED for 'stimulation' type triggers.
+        'recording' type triggers are ignored by this process.
+
         Args:
-            trigger_data: Dictionary containing obj_id, frame, timestamps, mean_heading, etc.
+            trigger_data: Dictionary containing obj_id, frame, timestamps, mean_heading, trigger_type, etc.
 
         Returns:
             True if trigger was handled successfully
@@ -180,7 +183,7 @@ class OptoTriggerWorker(WorkerProcess):
             # Get both timestamps (with backward compatibility fallback)
             braid_timestamp = trigger_data.get("braid_timestamp")
             trigger_timestamp = trigger_data.get("trigger_timestamp")
-            
+
             # Fallback to old 'timestamp' field if new fields not present
             if braid_timestamp is None:
                 braid_timestamp = trigger_data.get("timestamp")
