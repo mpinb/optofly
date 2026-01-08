@@ -174,7 +174,7 @@ class TrackedObject:
         radius: float,
         z_lim: Tuple[float, float],
         prediction_horizon: float = 2.0,
-        time_step: float = 0.1
+        time_step: float = 0.1,
     ) -> Tuple[bool, Optional[float]]:
         """
         Predict if the object's current trajectory will intersect the trigger zone.
@@ -222,8 +222,7 @@ class TrackedObject:
             # Check if in trigger zone (cylinder)
             distance_from_center = np.sqrt(x_future**2 + y_future**2)
 
-            if (distance_from_center <= radius and
-                z_lim[0] <= z_future <= z_lim[1]):
+            if distance_from_center <= radius and z_lim[0] <= z_future <= z_lim[1]:
                 # Trajectory intersects trigger zone!
                 return (True, t)
 
@@ -418,7 +417,9 @@ class TriggerHandler(WorkerProcess):
         try:
             obj_id = data["obj_id"]
             frame = data["frame"]
-            timestamp = time.time()  # Use local timestamp (Braid messages don't include timestamp)
+            timestamp = (
+                time.time()
+            )  # Use local timestamp (Braid messages don't include timestamp)
 
             # Create new tracked object
             tracked_obj = TrackedObject(obj_id=obj_id, first_timestamp=timestamp)
@@ -457,11 +458,13 @@ class TriggerHandler(WorkerProcess):
         try:
             obj_id = data["obj_id"]
             frame = data["frame"]
-            timestamp = time.time()  # Use local timestamp (Braid messages don't include timestamp)
+            timestamp = (
+                time.time()
+            )  # Use local timestamp (Braid messages don't include timestamp)
 
             # Check if we're already tracking this object
             if obj_id not in self.tracked_objects:
-                self.logger.warning(
+                self.logger.debug(
                     f"Received Update for unknown object {obj_id}, creating new tracking entry"
                 )
                 self._process_birth(data)  # Treat as Birth if not already tracking
@@ -530,16 +533,17 @@ class TriggerHandler(WorkerProcess):
 
         # PREDICTIVE LENS CHECK (independent of main trigger)
         # Only run if lens is active and predictive tracking is enabled
-        if (self.lens_config.active and
-            self.lens_config.predictive_tracking and
-            self.is_in_camera_fov(x, y)):
-
+        if (
+            self.lens_config.active
+            and self.lens_config.predictive_tracking
+            and self.is_in_camera_fov(x, y)
+        ):
             # Predict if fly will enter trigger zone
             will_trigger, time_to_trigger = tracked_obj.will_enter_trigger_zone(
                 self.config.radius,
                 self.config.z_lim,
                 self.lens_config.prediction_horizon_trajectory,
-                self.lens_config.prediction_time_step
+                self.lens_config.prediction_time_step,
             )
 
             if will_trigger:
@@ -580,10 +584,9 @@ class TriggerHandler(WorkerProcess):
             }
 
             message = json.dumps(message_data)
-            self.publisher.send_multipart([
-                self.config.zmq.trigger_topic.encode('utf-8'),
-                message.encode('utf-8')
-            ])
+            self.publisher.send_multipart(
+                [self.config.zmq.trigger_topic.encode("utf-8"), message.encode("utf-8")]
+            )
             self.logger.info(
                 f"Sent TRIGGER for object {tracked_obj.obj_id} "
                 f"(frame={tracked_obj.current_frame}, heading={mean_heading})"
@@ -592,9 +595,7 @@ class TriggerHandler(WorkerProcess):
             self.logger.error(f"Error sending trigger: {e}")
 
     def _send_lens_trigger(
-        self,
-        tracked_obj: TrackedObject,
-        predicted_entry_time: Optional[float] = None
+        self, tracked_obj: TrackedObject, predicted_entry_time: Optional[float] = None
     ) -> None:
         """
         Send a LENS trigger message for predictive liquid lens tracking.
@@ -620,10 +621,9 @@ class TriggerHandler(WorkerProcess):
             }
 
             message = json.dumps(message_data)
-            self.publisher.send_multipart([
-                self.config.zmq.lens_topic.encode('utf-8'),
-                message.encode('utf-8')
-            ])
+            self.publisher.send_multipart(
+                [self.config.zmq.lens_topic.encode("utf-8"), message.encode("utf-8")]
+            )
             self.logger.info(
                 f"Sent LENS trigger for object {tracked_obj.obj_id} "
                 f"(frame={tracked_obj.current_frame}, predicted_entry={predicted_entry_time:.2f}s)"
@@ -670,8 +670,8 @@ class TriggerHandler(WorkerProcess):
                     try:
                         # Receive multipart message (topic, content)
                         topic, message = self.subscriber.recv_multipart()
-                        topic = topic.decode('utf-8')
-                        json_str = message.decode('utf-8')
+                        topic = topic.decode("utf-8")
+                        json_str = message.decode("utf-8")
 
                         # Parse JSON message
                         message_data = json.loads(json_str)

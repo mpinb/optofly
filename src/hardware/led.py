@@ -6,6 +6,7 @@ stimulation. It handles serial communication and command generation only.
 Data logging and process orchestration should be handled by the worker process.
 """
 
+import itertools
 import random
 import time
 from typing import Optional
@@ -25,11 +26,19 @@ class OptoTrigger:
     for optical stimulation based on specified parameters for duration,
     intensity, and frequency.
 
-    **Randomized Parameters:**
-    The stimulation parameters (duration, intensity, frequency) support randomization.
+    **Balanced Randomization:**
+    Stimulation parameters support balanced randomization to ensure uniform
+    sampling across all parameter combinations throughout the experimental session.
+
     Each parameter can be specified in config.toml as either:
-    - Single value: Used for every stimulation (e.g., duration = 300)
-    - List of options: Randomly selected on each trigger (e.g., duration = [100, 200, 300])
+    - Single value: Used for every stimulation (e.g., frequency = 0)
+    - List of options: Balanced selection across combinations (e.g., duration = [100, 200, 300])
+
+    The system tracks usage counts for all parameter combinations and preferentially
+    selects least-used combinations, guaranteeing balanced presentation:
+    - Maximum variance of 1 between any two combinations
+    - Prevents clustering bias from pure random selection
+    - Counts persist throughout the experimental session
 
     **Randomizable Parameters:**
     - duration: Stimulation duration in milliseconds (0-3000)
@@ -40,13 +49,16 @@ class OptoTrigger:
     ```toml
     [opto_trigger]
     active = true
-    duration = [100, 200, 300]     # Randomly select from 3 options
-    intensity = 255                # Fixed value
-    frequency = [0, 10, 20]        # Randomly select from 3 options
+    duration = [100, 200, 300]     # 3 options
+    intensity = [0, 51, 102, 153, 204, 255]  # 6 options
+    frequency = 0                  # Fixed (or use list: [0, 10, 20, 50])
     ```
 
-    All selected parameter values are logged for each stimulation,
-    ensuring full reproducibility of experiments.
+    With the above config (3 durations × 6 intensities × 1 frequency = 18 combinations):
+    - After 120 trials: each combination appears exactly 6-7 times
+    - Guarantees uniform experimental design
+
+    All selected parameter values are logged for full reproducibility.
     """
 
     def __init__(
@@ -78,7 +90,22 @@ class OptoTrigger:
             log_color=log_color,
         )
 
+        # PARAMETER COMBINATION BALANCING
+        # Generate all possible parameter combinations for balanced selection
+        self._parameter_combinations = self._generate_combinations()
+
+        # Track usage counts for each combination (balanced presentation)
+        # Initialized to zero, persists throughout experimental session
+        self.combination_counts = {combo: 0 for combo in self._parameter_combinations}
+
         self.logger.debug(f"OptoTrigger initialized with config: {self.config}")
+        self.logger.debug(
+            f"Initialized balanced randomization with "
+            f"{len(self._parameter_combinations)} parameter combinations "
+            f"({len(self.config.duration_options)} durations × "
+            f"{len(self.config.intensity_options)} intensities × "
+            f"{len(self.config.frequency_options)} frequencies)"
+        )
 
     def initialize(self) -> bool:
         """
@@ -137,12 +164,12 @@ class OptoTrigger:
             )
             return (True, True)
 
-        # Randomly select parameters from options
-        params = self.select_random_parameters()
+        # Select parameters using balanced randomization
+        params = self._select_balanced_parameters()
         self.set_parameters(
             duration=params["duration"],
             intensity=params["intensity"],
-            frequency=params["frequency"]
+            frequency=params["frequency"],
         )
 
         try:
@@ -182,20 +209,107 @@ class OptoTrigger:
             self.logger.error(f"Error triggering stimulation: {e}")
             return (False, False)
 
-    def select_random_parameters(self) -> dict:
-        """Randomly select parameters from config options.
+    def _generate_combinations(self) -> list[tuple[int, ...]]:
+        """Generate all possible parameter combinations for balanced selection.
+
+        Creates Cartesian product of all parameter option lists:
+        - duration_options × intensity_options × frequency_options
+
+        Handles N-way combinations automatically using itertools.product().
+        If a parameter has only 1 option, it's still included in the combination
+        but doesn't increase the total number of combinations.
 
         Returns:
-            Dictionary with selected parameter values
+            List of tuples, where each tuple is (duration, intensity, frequency)
+
+        Examples:
+            duration=[100, 200], intensity=[0, 255], frequency=[0]
+            → [(100, 0, 0), (100, 255, 0), (200, 0, 0), (200, 255, 0)]
+
+            duration=[100, 200], intensity=[0, 255], frequency=[0, 10]
+            → [(100, 0, 0), (100, 0, 10), (100, 255, 0), (100, 255, 10),
+               (200, 0, 0), (200, 0, 10), (200, 255, 0), (200, 255, 10)]
         """
-        duration = int(np.random.choice(self.config.duration_options))
-        intensity = int(np.random.choice(self.config.intensity_options))
-        frequency = int(np.random.choice(self.config.frequency_options))
+        combinations = list(
+            itertools.product(
+                self.config.duration_options,
+                self.config.intensity_options,
+                self.config.frequency_options,
+            )
+        )
+
+        # Convert to tuple of ints for consistent dictionary keys
+        return [tuple(int(val) for val in combo) for combo in combinations]
+
+    def _select_balanced_parameters(self) -> dict:
+        """Select parameter combination with least usage (balanced selection).
+
+        Implements balanced presentation algorithm (same as visual stimuli):
+        1. Find minimum usage count across all combinations
+        2. Get all combinations with that count (candidates)
+        3. Randomly select from candidates (breaks ties randomly)
+        4. Increment selected combination's count
+        5. Return selected parameters
+
+        This ensures uniform sampling across all parameter combinations over
+        the experimental session, preventing clustering bias that occurs with
+        pure random selection.
+
+        With N combinations and M trials:
+        - Each combination appears floor(M/N) or ceil(M/N) times
+        - Maximum variance between any two combinations is 1
+
+        Example:
+            18 combinations, 120 trials → each appears 6-7 times
+            72 combinations, 120 trials → each appears 1-2 times
+
+        Returns:
+            Dictionary with keys: "duration", "intensity", "frequency"
+
+        Example:
+            combination_counts = {
+                (100, 0, 0): 5,
+                (100, 51, 0): 3,
+                (200, 0, 0): 3,
+                ...
+            }
+            → min_count = 3
+            → candidates = [(100, 51, 0), (200, 0, 0), ...]
+            → randomly select (200, 0, 0)
+            → increment: combination_counts[(200, 0, 0)] = 4
+            → return {"duration": 200, "intensity": 0, "frequency": 0}
+        """
+        # Find minimum usage count across all combinations
+        min_count = min(self.combination_counts.values())
+
+        # Get all combinations with minimum count (candidates for selection)
+        candidates = [
+            combo
+            for combo, count in self.combination_counts.items()
+            if count == min_count
+        ]
+
+        # Randomly select from candidates (breaks ties randomly)
+        selected = candidates[np.random.randint(len(candidates))]
+
+        # Increment usage count for selected combination
+        self.combination_counts[selected] += 1
+
+        # Unpack selected combination
+        duration, intensity, frequency = selected
+
+        # Log selection with debug level
+        self.logger.debug(
+            f"Selected balanced parameters: duration={duration}ms, "
+            f"intensity={intensity}/255, frequency={frequency}Hz "
+            f"(count: {self.combination_counts[selected]}/{min_count + 1}, "
+            f"candidates: {len(candidates)}/{len(self._parameter_combinations)})"
+        )
 
         return {
-            "duration": duration,
-            "intensity": intensity,
-            "frequency": frequency
+            "duration": int(duration),
+            "intensity": int(intensity),
+            "frequency": int(frequency),
         }
 
     def close(self) -> bool:
@@ -221,7 +335,9 @@ class OptoTrigger:
         self.initialize()
         return self
 
-    def _collect_serial_output(self, timeout: float = 1.0, poll_interval: float = 0.05) -> list[str]:
+    def _collect_serial_output(
+        self, timeout: float = 1.0, poll_interval: float = 0.05
+    ) -> list[str]:
         """Return non-empty lines read from the serial buffer.
 
         This drains available bytes without blocking on serial timeouts and

@@ -262,7 +262,7 @@ class BraidVisualizer(WorkerProcess):
 
             # Check if we're already tracking this object
             if obj_id not in self.tracked_objects:
-                self.logger.warning(
+                self.logger.debug(
                     f"Received Update for unknown object {obj_id}, creating new tracking entry"
                 )
                 self._process_birth(data)  # Treat as Birth if not already tracking
