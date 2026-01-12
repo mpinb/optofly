@@ -156,3 +156,6 @@ docs/
 # Config files (use example files as templates)
 config.toml
 visual_stimuli.toml
+
+# Braid cookies
+braid-cookies.json
