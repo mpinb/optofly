@@ -1,29 +1,110 @@
+import json
 import os
 import re
 import sys
+import time
+import urllib.parse
 from datetime import datetime
+from pathlib import Path
+from typing import Optional
+
+import requests
+
+
+COOKIE_JAR_FNAME = "braid-cookies.json"
+
+
+class BraidProxy:
+    """Proxy for controlling Braid recording via HTTP API.
+
+    Based on the Braid Python API (see PYTHON_RECORDING_API.md).
+    """
+
+    def __init__(self, braid_url: str):
+        """Initialize Braid proxy.
+
+        Args:
+            braid_url: Base URL of Braid server (e.g., http://127.0.0.1:8397/)
+        """
+        self.braid_url = braid_url
+        self.callback_url = urllib.parse.urljoin(braid_url, "callback")
+        self.session = requests.session()
+
+        # Load cookies if available
+        if os.path.isfile(COOKIE_JAR_FNAME):
+            with open(COOKIE_JAR_FNAME, 'r') as f:
+                cookies = requests.utils.cookiejar_from_dict(json.load(f))
+                self.session.cookies.update(cookies)
+
+        # Connect to Braid (raises exception if not running)
+        try:
+            r = self.session.get(braid_url, timeout=5)
+            r.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            raise ConnectionError(
+                f"Could not connect to Braid at {braid_url}. "
+                "Is braid-run running?"
+            )
+        except requests.exceptions.Timeout:
+            raise TimeoutError(
+                f"Connection to Braid at {braid_url} timed out"
+            )
+
+        # Store cookies
+        with open(COOKIE_JAR_FNAME, 'w') as f:
+            json.dump(requests.utils.dict_from_cookiejar(self.session.cookies), f)
+
+    def send(self, cmd_dict: dict) -> None:
+        """Send command to Braid callback endpoint.
+
+        Args:
+            cmd_dict: Command dictionary (e.g., {"DoRecordCsvTables": True})
+
+        Raises:
+            requests.HTTPError: If command fails
+        """
+        r = self.session.post(self.callback_url, json=cmd_dict, timeout=10)
+        r.raise_for_status()
+
+    def start_csv_recording(self) -> None:
+        """Start CSV table recording (.braidz format)."""
+        self.send({"DoRecordCsvTables": True})
+
+    def stop_csv_recording(self) -> None:
+        """Stop CSV table recording."""
+        self.send({"DoRecordCsvTables": False})
 
 
 def check_braid_folder_exists(
     root_path: str = "/mnt/data/experiments/",
-) -> str:
+    braid_url: Optional[str] = None,
+    auto_start_recording: bool = True,
+) -> tuple[str, Optional[BraidProxy]]:
     """
-    Check if a braid folder with today's date exists.
+    Check if a braid folder with today's date exists, or start recording if not.
 
     The function looks for a folder with the structure: YYYYMMDD_HHMMSS.braid
     where YYYYMMDD matches today's date.
 
-    If no matching folder is found, the script exits immediately with an error message
-    instructing the user to start Braid recording before running the experiment.
+    If no matching folder is found and auto_start_recording is True:
+      1. Connects to Braid via HTTP API
+      2. Starts CSV recording
+      3. Waits for .braid folder to be created
+      4. Returns folder path and BraidProxy instance
+
+    If no folder exists and auto_start_recording is False, exits with error.
 
     Parameters:
-        root_path (str): The root path to check for the braid folder.
+        root_path: Root path to check for braid folders
+        braid_url: URL of Braid server (e.g., http://127.0.0.1:8397/)
+        auto_start_recording: If True, automatically start recording if no folder exists
 
     Returns:
-        str: The full path to the braid folder if it exists.
+        Tuple of (braid_folder_path, braid_proxy_instance)
+        braid_proxy is None if folder already existed
 
     Raises:
-        SystemExit: If no matching braid folder is found or root_path doesn't exist.
+        SystemExit: If root_path doesn't exist, connection fails, or recording start fails
     """
     # Check if root path exists
     if not os.path.exists(root_path):
@@ -41,47 +122,141 @@ def check_braid_folder_exists(
     # Create regex pattern to match braid folders with today's date
     pattern = re.compile(f"^{today}_\\d{{6}}\\.braid$")
 
+    def find_matching_folders():
+        """Helper to find matching .braid folders."""
+        matching = []
+        try:
+            for item in os.listdir(root_path):
+                full_path = os.path.join(root_path, item)
+                if pattern.match(item) and os.path.isdir(full_path):
+                    matching.append((item, full_path))
+        except PermissionError:
+            print(f"\n{'='*70}")
+            print("ERROR: Permission denied accessing experiments folder")
+            print(f"{'='*70}")
+            print(f"Path: {root_path}")
+            print("\nPlease check folder permissions.")
+            print(f"{'='*70}\n")
+            sys.exit(1)
+        return matching
+
     # Check if any folder in root_path matches the pattern
     print(f"Checking for braid folder with date {today} in {root_path}...")
-    matching_folders = []
+    matching_folders = find_matching_folders()
 
-    try:
-        for item in os.listdir(root_path):
-            full_path = os.path.join(root_path, item)
-            if pattern.match(item) and os.path.isdir(full_path):
-                matching_folders.append((item, full_path))
-    except PermissionError:
-        print(f"\n{'='*70}")
-        print("ERROR: Permission denied accessing experiments folder")
-        print(f"{'='*70}")
-        print(f"Path: {root_path}")
-        print("\nPlease check folder permissions.")
-        print(f"{'='*70}\n")
-        sys.exit(1)
+    if matching_folders:
+        # Folder already exists - use it
+        if len(matching_folders) > 1:
+            matching_folders.sort(reverse=True)  # Sort by folder name (timestamp)
+            print(f"Multiple braid folders found. Using most recent: {matching_folders[0][0]}")
 
-    if not matching_folders:
-        # No matching folder found - exit immediately
+        braid_folder = matching_folders[0][1]
+        print(f"✓ Found existing braid folder: {braid_folder}")
+        return braid_folder, None
+
+    # No folder found - try to start recording
+    if not auto_start_recording:
+        # Old behavior - exit with error
         print(f"\n{'='*70}")
         print("ERROR: No Braid recording folder found for today")
         print(f"{'='*70}")
         print(f"Expected folder pattern: {today}_HHMMSS.braid")
         print(f"Searched in: {root_path}")
         print("\nPlease start Braid recording BEFORE running this script.")
-        print("Steps:")
-        print("  1. Start Braid tracking system")
-        print("  2. Begin recording (this creates the .braid folder)")
-        print("  3. Run this script")
         print(f"{'='*70}\n")
         sys.exit(1)
 
-    # If multiple folders exist, use the most recent one
-    if len(matching_folders) > 1:
-        matching_folders.sort(reverse=True)  # Sort by folder name (timestamp)
-        print(f"Multiple braid folders found. Using most recent: {matching_folders[0][0]}")
+    if not braid_url:
+        print(f"\n{'='*70}")
+        print("ERROR: No Braid folder found and no Braid URL provided")
+        print(f"{'='*70}")
+        print("Cannot start recording without Braid URL.")
+        print(f"{'='*70}\n")
+        sys.exit(1)
 
-    braid_folder = matching_folders[0][1]
-    print(f"✓ Found braid folder: {braid_folder}")
-    return braid_folder
+    # Attempt to start recording
+    print(f"\nNo existing recording found. Starting Braid recording...")
+    print(f"Connecting to Braid at {braid_url}...")
+
+    try:
+        braid = BraidProxy(braid_url)
+        print("✓ Connected to Braid")
+
+        print("Starting CSV recording...")
+        braid.start_csv_recording()
+        print("✓ Recording started")
+
+        # Wait for .braid folder to be created
+        print(f"Waiting for .braid folder to appear in {root_path}...")
+        max_wait = 10  # seconds
+        start_time = time.time()
+
+        while time.time() - start_time < max_wait:
+            matching_folders = find_matching_folders()
+            if matching_folders:
+                braid_folder = matching_folders[0][1]
+                print(f"✓ Recording folder created: {braid_folder}")
+                return braid_folder, braid
+
+            time.sleep(0.5)
+
+        # Timeout - folder not created
+        print(f"\n{'='*70}")
+        print("ERROR: Recording started but .braid folder not created")
+        print(f"{'='*70}")
+        print(f"Waited {max_wait} seconds for folder to appear in {root_path}")
+        print("The recording may not be working correctly.")
+        print(f"{'='*70}\n")
+        sys.exit(1)
+
+    except (ConnectionError, TimeoutError) as e:
+        print(f"\n{'='*70}")
+        print("ERROR: Could not connect to Braid")
+        print(f"{'='*70}")
+        print(f"{e}")
+        print("\nPlease ensure:")
+        print("  1. Braid is running (braid-run ...)")
+        print(f"  2. Braid is accessible at {braid_url}")
+        print(f"{'='*70}\n")
+        sys.exit(1)
+
+    except Exception as e:
+        print(f"\n{'='*70}")
+        print("ERROR: Failed to start Braid recording")
+        print(f"{'='*70}")
+        print(f"{e}")
+        print(f"{'='*70}\n")
+        sys.exit(1)
+
+
+def copy_csv_files_to_braid(braid_folder: str) -> None:
+    """Copy all CSV files generated by OptoFly to the .braid folder.
+
+    Looks for CSV files in the braid_folder (which is where OptoTriggerWorker
+    writes opto.csv) and ensures they're preserved in the recording.
+
+    Args:
+        braid_folder: Path to the .braid recording folder
+    """
+    try:
+        braid_path = Path(braid_folder)
+        if not braid_path.exists():
+            print(f"WARNING: Braid folder does not exist: {braid_folder}")
+            return
+
+        # Find all CSV files in braid folder (opto.csv, etc.)
+        csv_files = list(braid_path.glob("*.csv"))
+
+        if not csv_files:
+            print("No CSV files found to copy")
+            return
+
+        print(f"Found {len(csv_files)} CSV file(s) in {braid_folder}")
+        for csv_file in csv_files:
+            print(f"  ✓ {csv_file.name}")
+
+    except Exception as e:
+        print(f"WARNING: Error checking CSV files: {e}")
 
 
 if __name__ == "__main__":

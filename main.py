@@ -18,7 +18,7 @@ from src.processes.visual import VisualStimuliProcess
 from src.processes.led import OptoTriggerWorker
 from src.processes.camera import CameraProcess
 from src.processes.lens import LiquidLens
-from src.utils.braid import check_braid_folder_exists
+from src.utils.braid import check_braid_folder_exists, copy_csv_files_to_braid
 from src.monitoring.server import run_server
 
 
@@ -131,11 +131,18 @@ def main():
     print(f"Loading configuration from {config_path}...")
     config = load_config(config_path)
 
-    # Check for Braid recording folder (exits if not found)
+    # Initialize variables for cleanup
+    braid_folder = None
+    braid_proxy = None
+
+    # Check for Braid recording folder or start recording if not found
     experiments_path = config.get("braid_publisher", {}).get(
         "experiments_path", "/mnt/data/experiments/"
     )
-    braid_folder = check_braid_folder_exists(experiments_path)
+    braid_url = config.get("braid_publisher", {}).get("url", "http://127.0.0.1:8397")
+    braid_folder, braid_proxy = check_braid_folder_exists(
+        experiments_path, braid_url=braid_url, auto_start_recording=True
+    )
     print(f"Experiment data will be saved to: {braid_folder}")
 
     experiment_duration = config.get("experiment_duration", 24)  # hours
@@ -289,9 +296,26 @@ def main():
                     process.terminate()
                     process.join(timeout=2)
 
-        print("\n" + "=" * 70)
-        print(f"Experiment ended. Data saved to: {braid_folder}")
-        print("=" * 70)
+        # Verify CSV files are present
+        if braid_folder:
+            print("\nVerifying data files...")
+            copy_csv_files_to_braid(braid_folder)
+
+        # Stop Braid recording if we started it
+        if braid_proxy is not None:
+            print("\nStopping Braid recording...")
+            try:
+                braid_proxy.stop_csv_recording()
+                print("✓ Recording stopped")
+            except Exception as e:
+                print(f"WARNING: Failed to stop recording: {e}")
+
+        if braid_folder:
+            print("\n" + "=" * 70)
+            print(f"Experiment ended. Data saved to: {braid_folder}")
+            print("=" * 70)
+        else:
+            print("\nExperiment terminated.")
 
 
 if __name__ == "__main__":
