@@ -69,16 +69,22 @@ def print_experiment_config(config: dict, active_processes: list):
 
     # Visual stimuli details
     if "VisualStimuliProcess" in active_processes:
-        print("\nVisual Stimuli:")
         visual_config = config.get("visual_stimuli", {})
+        enabled_stimuli = []
         if visual_config.get("static", {}).get("enabled", False):
-            print("  ✓ Static pattern")
+            enabled_stimuli.append("Static pattern")
         if visual_config.get("looming", {}).get("enabled", False):
-            print("  ✓ Looming circles")
+            enabled_stimuli.append("Looming circles")
         if visual_config.get("vertical_bar", {}).get("enabled", False):
-            print("  ✓ Vertical bar")
+            enabled_stimuli.append("Vertical bar")
         if visual_config.get("sweeping_bar", {}).get("enabled", False):
-            print("  ✓ Sweeping bar")
+            enabled_stimuli.append("Sweeping bar")
+
+        # Only show section if stimuli are configured
+        if enabled_stimuli:
+            print("\nVisual Stimuli:")
+            for stimulus in enabled_stimuli:
+                print(f"  ✓ {stimulus}")
 
     # Opto trigger details
     if "OptoTriggerWorker" in active_processes:
@@ -100,25 +106,39 @@ def print_experiment_config(config: dict, active_processes: list):
         print(f"  Resolution: {resolution}")
         print(f"  FPS: {fps}")
 
+    # Liquid lens details
+    if "LiquidLens" in active_processes:
+        lens_config = config.get("liquid_lens", {})
+        mode = lens_config.get("mode", "diopter")
+        kalman_enabled = lens_config.get("kalman", {}).get("enabled", False)
+        predictive_enabled = lens_config.get("prediction", {}).get("enabled", False)
+        print(f"\nLiquid Lens:")
+        print(f"  Mode: {mode}")
+        if kalman_enabled:
+            print(f"  ✓ Kalman filter (predictive focus)")
+        if predictive_enabled:
+            print(f"  ✓ Trajectory prediction")
+
     print("\nPress Ctrl+C to stop the experiment")
     print("=" * 70 + "\n")
 
 
 def copy_config_to_braid_folder(config_path: str, braid_folder: str):
-    """Copy config.toml to braid folder for record-keeping.
+    """Copy config file to braid folder for record-keeping.
 
     Args:
         config_path: Path to the configuration file
         braid_folder: Path to the braid experiment folder
     """
     try:
-        config_dest = Path(braid_folder) / "config.toml"
-        with open(config_path, "rb") as src_file:
+        config_src = Path(config_path)
+        config_dest = Path(braid_folder) / config_src.name
+        with open(config_src, "rb") as src_file:
             with open(config_dest, "wb") as dest_file:
                 dest_file.write(src_file.read())
-        print(f"Copied config.toml to {config_dest}")
+        print(f"  ✓ Copied {config_src.name}")
     except Exception as e:
-        print(f"WARNING: Failed to copy config.toml to braid folder: {e}")
+        print(f"  WARNING: Failed to copy {config_path}: {e}")
 
 
 def main():
@@ -151,11 +171,11 @@ def main():
     print(
         f"Experiment will end at: {datetime.fromtimestamp(experiment_end_time).strftime('%Y-%m-%d %H:%M:%S')}"
     )
-    # Copy config.toml
-    copy_config_to_braid_folder(config_path, braid_folder)
 
+    # Copy configuration files
+    print("\nCopying configuration files...")
+    copy_config_to_braid_folder(config_path, braid_folder)
     if config.get("visual_stimuli", {}).get("active", False):
-        # Copy visual stimuli config if visual stimuli are active
         copy_config_to_braid_folder(
             config.get("visual_stimuli", {}).get("config_file", "visual_stimuli.toml"),
             braid_folder,
@@ -173,7 +193,7 @@ def main():
         print("\nStarting core processes...")
 
         # 1. BraidPublisher - connects to Braid tracking and publishes to ZMQ
-        print("  - BraidPublisher")
+        print("  ✓ BraidPublisher")
         braid_publisher = BraidPublisher(config_path=config_path, event=stop_event)
         braid_publisher.start()
         processes.append(("BraidPublisher", braid_publisher))
@@ -181,7 +201,7 @@ def main():
         time.sleep(0.5)  # Allow ZMQ publisher to bind
 
         # 2. TriggerHandler - applies spatial/temporal gating
-        print("  - TriggerHandler")
+        print("  ✓ TriggerHandler")
         trigger_handler = TriggerHandler(config_path=config_path, event=stop_event)
         trigger_handler.start()
         processes.append(("TriggerHandler", trigger_handler))
@@ -189,11 +209,11 @@ def main():
         time.sleep(0.5)  # Allow ZMQ publisher to bind
 
         # Optional processes (based on config)
-        print("\nStarting optional processes (based on config)...")
+        print("\nStarting optional processes...")
 
         # 3. Monitoring Server - web dashboard for trigger visualization
         if config.get("monitoring", {}).get("active", False):
-            print("  - Monitoring Server")
+            print("  ✓ Monitoring Server")
             monitoring_config = config.get("monitoring", {})
             zmq_trigger_port = config.get("zmq", {}).get("trigger_port", 5556)
             monitoring_host = monitoring_config.get("host", "0.0.0.0")
@@ -208,53 +228,43 @@ def main():
             monitoring_process.start()
             processes.append(("Monitoring Server", monitoring_process))
             active_process_names.append("Monitoring Server")
-            print(f"    Dashboard available at http://{monitoring_host}:{monitoring_port}")
-        else:
-            print("  - Monitoring Server (disabled in config)")
+            print(f"    Dashboard: http://{monitoring_host}:{monitoring_port}")
 
         # 4. VisualStimuliProcess - displays visual patterns
         if config.get("visual_stimuli", {}).get("active", False):
-            print("  - VisualStimuliProcess")
+            print("  ✓ VisualStimuliProcess")
             visual_stimuli = VisualStimuliProcess(
                 config_path=config_path, event=stop_event
             )
             visual_stimuli.start()
             processes.append(("VisualStimuliProcess", visual_stimuli))
             active_process_names.append("VisualStimuliProcess")
-        else:
-            print("  - VisualStimuliProcess (disabled in config)")
 
         # 5. CameraProcess - high-speed video recording
         if config.get("camera", {}).get("active", False):
-            print("  - CameraProcess")
+            print("  ✓ CameraProcess")
             camera = CameraProcess(config_path=config_path, event=stop_event)
             camera.start()
             processes.append(("CameraProcess", camera))
             active_process_names.append("CameraProcess")
-        else:
-            print("  - CameraProcess (disabled in config)")
 
         # 6. OptoTriggerWorker - optogenetic LED activation
         if config.get("opto_trigger", {}).get("active", False):
-            print("  - OptoTriggerWorker")
+            print("  ✓ OptoTriggerWorker")
             opto_trigger = OptoTriggerWorker(
                 event=stop_event, braid_folder=braid_folder, config_path=config_path
             )
             opto_trigger.start()
             processes.append(("OptoTriggerWorker", opto_trigger))
             active_process_names.append("OptoTriggerWorker")
-        else:
-            print("  - OptoTriggerWorker (disabled in config)")
 
         # 7. LiquidLens - auto-focus system
         if config.get("liquid_lens", {}).get("active", False):
-            print("  - LiquidLens")
+            print("  ✓ LiquidLens")
             liquid_lens = LiquidLens(event=stop_event, config_path=config_path)
             liquid_lens.start()
             processes.append(("LiquidLens", liquid_lens))
             active_process_names.append("LiquidLens")
-        else:
-            print("  - LiquidLens (disabled in config)")
 
         # Print experiment summary
         print_experiment_config(config, active_process_names)

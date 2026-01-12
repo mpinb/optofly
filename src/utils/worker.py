@@ -19,10 +19,10 @@ class WorkerProcess(Process):
 
     def _initialize_logger(self):
         self.logger = init_class_logger(
-            instance=self,  # Changed from self.__class__.__name__ to instance=self
+            instance=self,
             log_level=self.log_level,
-            log_color=self.log_color,  # Changed from log_color to color to match parameter name
+            log_color=self.log_color,
             process_name=self.process_name,
-            init_message=f"Logger initialized for {self.process_name} with level {self.log_level} and color {self.log_color}",
+            # init_message suppressed to reduce startup noise
         )
         return self.logger
