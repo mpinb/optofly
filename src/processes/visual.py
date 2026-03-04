@@ -149,6 +149,9 @@ class VisualStimuliProcess(WorkerProcess):
             True if initialization successful
         """
         try:
+            # Reinitialize logger in child process (required for multiprocessing)
+            self._initialize_logger()
+
             # Initialize ZMQ (skip in standalone mode)
             if not self.standalone:
                 self._initialize_zmq()
@@ -221,7 +224,7 @@ class VisualStimuliProcess(WorkerProcess):
     def _initialize_csv(self) -> None:
         """Initialize CSV writer for stimulus event logging."""
         import os
-        log_file = self.config.get("log_file", "visual_stimuli.csv")
+        log_file = self.config.get("log_file", "stim.csv")
 
         # If braid_folder is specified, write CSV there
         if self.braid_folder:

@@ -234,7 +234,7 @@ def main():
         if config.get("visual_stimuli", {}).get("active", False):
             print("  ✓ VisualStimuliProcess")
             visual_stimuli = VisualStimuliProcess(
-                config_path=config_path, event=stop_event
+                config_path=config_path, event=stop_event, braid_folder=braid_folder
             )
             visual_stimuli.start()
             processes.append(("VisualStimuliProcess", visual_stimuli))
