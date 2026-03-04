@@ -612,6 +612,10 @@ class LiquidLens(WorkerProcess):
                         self._clear_kalman_filter(self.current_tracked_obj)
                     self.is_tracking = False
 
+                # Drain any stale trigger messages that queued during tracking
+                while self._receive_message(self.trigger_socket, "trigger") is not None:
+                    pass
+
             except Exception as e:
                 self.logger.error(f"Error in Liquid Lens process: {e}")
                 # Continue running despite errors, only exit if stop event is set
