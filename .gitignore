@@ -150,9 +150,6 @@ visual_stimuli_performance.csv
 
 .worktrees
 
-# Documentation (use example files as templates)
-docs/
-
 # Config files (use example files as templates)
 config.toml
 visual_stimuli.toml

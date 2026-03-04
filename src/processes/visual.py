@@ -40,7 +40,8 @@ class VisualStimuliProcess(WorkerProcess):
         process_name: str = "VisualStimuli",
         log_level: str = "INFO",
         log_color: str = "CYAN",
-        standalone: bool = False
+        standalone: bool = False,
+        braid_folder: Optional[str] = None
     ):
         """Initialize VisualStimuliProcess.
 
@@ -51,6 +52,7 @@ class VisualStimuliProcess(WorkerProcess):
             log_level: Logging level
             log_color: Color for log messages
             standalone: If True, run in standalone testing mode (no ZMQ, small window)
+            braid_folder: Path to .braid folder for CSV output (if None, uses current directory)
         """
         # Initialize parent WorkerProcess
         super().__init__(
@@ -75,6 +77,9 @@ class VisualStimuliProcess(WorkerProcess):
 
         # Standalone mode flag
         self.standalone = standalone
+
+        # Braid folder for CSV output
+        self.braid_folder = braid_folder
 
         # ZMQ connections (None if standalone)
         self.context = None
@@ -215,7 +220,13 @@ class VisualStimuliProcess(WorkerProcess):
 
     def _initialize_csv(self) -> None:
         """Initialize CSV writer for stimulus event logging."""
+        import os
         log_file = self.config.get("log_file", "visual_stimuli.csv")
+
+        # If braid_folder is specified, write CSV there
+        if self.braid_folder:
+            log_file = os.path.join(self.braid_folder, log_file)
+
         self.csv_writer = CSVWriter(log_file)
         self.logger.info(f"CSV logging to: {log_file}")
 
@@ -483,6 +494,22 @@ if __name__ == "__main__":
         action="store_true",
         help="Test mode (simulate triggers)"
     )
+    parser.add_argument(
+        "--test-calibration",
+        action="store_true",
+        help="Test screen arrangement and wrapping with a sweeping circle"
+    )
+    parser.add_argument(
+        "--test-mapping",
+        action="store_true",
+        help="Test calibration mapping by entering Braid coordinates"
+    )
+    parser.add_argument(
+        "--braid-folder",
+        type=str,
+        default=None,
+        help="Path to .braid folder for CSV output"
+    )
 
     args = parser.parse_args()
 
@@ -497,6 +524,16 @@ if __name__ == "__main__":
         run_heading_calibration()
         exit(0)
 
+    if args.test_calibration:
+        from src.stimuli.calibration import run_calibration_test
+        run_calibration_test()
+        exit(0)
+
+    if args.test_mapping:
+        from src.stimuli.calibration import run_mapping_test
+        run_mapping_test()
+        exit(0)
+
     # TODO: Implement test mode
 
     # Normal operation or standalone mode
@@ -505,7 +542,8 @@ if __name__ == "__main__":
         config_path=args.config,
         event=stop_event,
         log_level=args.log_level,
-        standalone=args.standalone
+        standalone=args.standalone,
+        braid_folder=args.braid_folder
     )
 
     try:
