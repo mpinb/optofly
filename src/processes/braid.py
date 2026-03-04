@@ -96,9 +96,6 @@ class BraidPublisher(WorkerProcess):
         self.config = BraidPublisherConfig(config_path)
         self.stop_event = event if event is not None else mp.Event()
 
-        # Initialize logger
-        self._initialize_logger()
-
         # Connection objects (initialized later)
         self.session = None
         self.events_url = None
@@ -106,10 +103,6 @@ class BraidPublisher(WorkerProcess):
         self.zmq_socket = None
         self.stream_thread = None
         self.is_connected = False
-
-        # For handling signals in the process
-        signal.signal(signal.SIGINT, self._handle_signal)
-        signal.signal(signal.SIGTERM, self._handle_signal)
 
     def _handle_signal(self, signum, frame):
         """Handle termination signals by setting the stop event."""
@@ -123,6 +116,11 @@ class BraidPublisher(WorkerProcess):
         Returns:
             True if both connections were established successfully, False otherwise
         """
+        # Initialize logger and signal handlers in child process (after spawn)
+        self._initialize_logger()
+        signal.signal(signal.SIGINT, self._handle_signal)
+        signal.signal(signal.SIGTERM, self._handle_signal)
+
         try:
             self._connect_to_braid()
             self._connect_to_zmq()

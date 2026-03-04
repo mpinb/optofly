@@ -291,10 +291,6 @@ class TriggerHandler(WorkerProcess):
         self.subscriber = None
         self.publisher = None
 
-        # Initialize logger
-        self._initialize_logger()
-        self.logger.info(f"Initializing TriggerHandler with config: {config_path}")
-
     def initialize(self) -> bool:
         """
         Initialize the trigger handler and ZMQ connections.
@@ -302,6 +298,10 @@ class TriggerHandler(WorkerProcess):
         Returns:
             True if initialization was successful, False otherwise
         """
+        # Initialize logger in child process (after spawn)
+        self._initialize_logger()
+        self.logger.info("Initializing TriggerHandler")
+
         try:
             self._initialize_zmq()
             self.is_initialized = True
@@ -492,14 +492,15 @@ class TriggerHandler(WorkerProcess):
         except Exception as e:
             self.logger.error(f"Error processing Update message: {e}")
 
-    def _process_death(self, obj_id: int) -> None:
+    def _process_death(self, data) -> None:
         """
         Process a Death message for a tracked object.
 
         Args:
-            obj_id: ID of the object to remove from tracking
+            data: Death message data — either an int (obj_id) or a dict with "obj_id" key
         """
         try:
+            obj_id = data if isinstance(data, int) else data.get("obj_id", data)
             if obj_id in self.tracked_objects:
                 self.logger.debug(f"Stopped tracking object {obj_id}")
                 del self.tracked_objects[obj_id]

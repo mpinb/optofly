@@ -429,6 +429,9 @@ class VisualStimuliProcess(WorkerProcess):
         target_fps = self.config.get("target_fps", 240)
         pyglet.clock.schedule_interval(self._render_loop, 1.0 / target_fps)
 
+        # Schedule periodic stop_event check so the process can be stopped cleanly
+        pyglet.clock.schedule_interval(self._check_stop_event, 0.1)
+
         # Run pyglet event loop
         try:
             pyglet.app.run()
@@ -437,6 +440,11 @@ class VisualStimuliProcess(WorkerProcess):
 
         # Cleanup
         self._cleanup()
+
+    def _check_stop_event(self, dt: float) -> None:
+        """Check if stop_event is set and exit pyglet if so."""
+        if self.stop_event.is_set():
+            pyglet.app.exit()
 
     def _cleanup(self) -> None:
         """Clean up resources."""

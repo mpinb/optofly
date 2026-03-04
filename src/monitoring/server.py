@@ -31,8 +31,9 @@ def zmq_listener(zmq_address="tcp://localhost:23456"):
     subscriber.setsockopt_string(zmq.SUBSCRIBE, "TRIGGER")
 
     while True:
-        message = subscriber.recv_string()
-        topic, json_data = message.split(" ", 1)
+        topic, message = subscriber.recv_multipart()
+        topic = topic.decode("utf-8")
+        json_data = message.decode("utf-8")
 
         if topic == "TRIGGER":
             data = json.loads(json_data)
