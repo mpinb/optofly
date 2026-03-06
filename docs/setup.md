@@ -51,13 +51,13 @@ Binary will be at `rust/ximea_camera/target/release/ximea_camera`.
 Copy the example configs and customize them:
 
 ```bash
-cp config.example.toml config.toml
-cp visual_stimuli.example.toml visual_stimuli.toml
+cp configs/config.example.toml configs/config.toml
+cp configs/visual_stimuli.example.toml configs/visual_stimuli.toml
 ```
 
 Both files are git-ignored so local customizations are safe.
 
-### config.toml
+### configs/config.toml
 
 Key sections:
 
@@ -95,10 +95,10 @@ calibration_file = "calibrations/liquid_lens.csv"
 
 [visual_stimuli]
 active = true
-config_file = "visual_stimuli.toml"
+config_file = "configs/visual_stimuli.toml"
 ```
 
-### visual_stimuli.toml
+### configs/visual_stimuli.toml
 
 ```toml
 [display]

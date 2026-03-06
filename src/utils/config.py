@@ -52,7 +52,7 @@ class ConfigBase:
 class TriggerHandlerConfig(ConfigBase):
     """Configuration helper for the trigger handler process."""
 
-    def __init__(self, config_path: str = "config.toml"):
+    def __init__(self, config_path: str = "configs/config.toml"):
         """Load trigger handler specific configuration."""
         super().__init__(config_path, "trigger_handler")
         config = self._load_config()
@@ -113,7 +113,7 @@ class TriggerHandlerConfig(ConfigBase):
 class LiquidLensConfig(ConfigBase):
     """Configuration for the Liquid Lens hardware control."""
 
-    def __init__(self, config_path: str = "config.toml"):
+    def __init__(self, config_path: str = "configs/config.toml"):
         """Initialize LiquidLens configuration.
 
         Args:
@@ -177,7 +177,7 @@ class LiquidLensConfig(ConfigBase):
 class ZMQConfig(ConfigBase):
     """Configuration for ZMQ communication channels across the system."""
 
-    def __init__(self, config_path: str = "config.toml"):
+    def __init__(self, config_path: str = "configs/config.toml"):
         """Initialize ZMQ configuration."""
         super().__init__(config_path, "zmq")
         config = self._load_config()
@@ -211,7 +211,7 @@ class ZMQConfig(ConfigBase):
 class BraidPublisherConfig(ConfigBase):
     """Configuration helper for the Braid publisher process."""
 
-    def __init__(self, config_path: str = "config.toml"):
+    def __init__(self, config_path: str = "configs/config.toml"):
         """Load configuration for the Braid publisher."""
         super().__init__(config_path, "braid_publisher")
         config = self._load_config()
@@ -248,7 +248,7 @@ class BraidPublisherConfig(ConfigBase):
 class TriggerConfig(ConfigBase):
     """Configuration for the trigger handler."""
 
-    def __init__(self, config_path: str = "config.toml"):
+    def __init__(self, config_path: str = "configs/config.toml"):
         """Initialize trigger configuration."""
         super().__init__(config_path, "trigger")
         config = self._load_config()
@@ -294,7 +294,7 @@ class OptoTriggerConfig(ConfigBase):
 
     SUPPORTED_COLORS: ClassVar[tuple[str, ...]] = ("red", "green", "blue", "white")
 
-    def __init__(self, config_path: str = "config.toml"):
+    def __init__(self, config_path: str = "configs/config.toml"):
         """Initialize the opto trigger configuration."""
         super().__init__(config_path, "opto_trigger")
         config = self._load_config()
@@ -396,7 +396,7 @@ class OptoTriggerConfig(ConfigBase):
 class CameraConfig(ConfigBase):
     """Configuration for the camera and visual field."""
 
-    def __init__(self, config_path: str = "config.toml"):
+    def __init__(self, config_path: str = "configs/config.toml"):
         """Initialize camera configuration."""
         super().__init__(config_path, "camera")
         config = self._load_config()

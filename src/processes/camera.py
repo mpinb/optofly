@@ -18,7 +18,7 @@ from src.utils.config import CameraConfig
 from src.utils.worker import WorkerProcess
 
 
-def check_camera_prerequisites(config_path: str = "config.toml") -> dict:
+def check_camera_prerequisites(config_path: str = "configs/config.toml") -> dict:
     """
     Run pre-flight checks for the camera system.
 
@@ -151,7 +151,7 @@ class CameraProcess(WorkerProcess):
 
     def __init__(
         self,
-        config_path: str = "config.toml",
+        config_path: str = "configs/config.toml",
         event: Optional[mp.Event] = None,
         save_folder: Optional[str] = None,
         process_name: str = "CameraProcess",
@@ -392,7 +392,7 @@ if __name__ == "__main__":
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Camera Process")
     parser.add_argument(
-        "--config", "-c", default="config.toml", help="Path to config file"
+        "--config", "-c", default="configs/config.toml", help="Path to config file"
     )
     parser.add_argument(
         "--log-level",

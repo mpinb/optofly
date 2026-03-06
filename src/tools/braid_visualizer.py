@@ -117,7 +117,7 @@ class BraidVisualizer(WorkerProcess):
 
     def __init__(
         self,
-        config_path: str = "config.toml",
+        config_path: str = "configs/config.toml",
         event: Optional[mp.Event] = None,
         process_name: str = "BraidVisualizer",
         log_level: str = "INFO",
@@ -418,7 +418,7 @@ def run_as_script():
     parser.add_argument(
         "--config",
         "-c",
-        default="/home/buchsbaum/src/OptoFly/config.toml",
+        default="/home/buchsbaum/src/OptoFly/configs/config.toml",
         help="Path to config file",
     )
     parser.add_argument(
@@ -450,7 +450,7 @@ def run_as_script():
 
 
 # Function to start visualization in a separate process
-def start_visualization(config_path="config.toml", log_level="INFO"):
+def start_visualization(config_path="configs/config.toml", log_level="INFO"):
     """
     Start the Braid visualizer in a separate process.
 

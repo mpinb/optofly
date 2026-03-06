@@ -24,7 +24,7 @@ from src.processes.ximea_camera import CameraProcess, check_camera_prerequisites
 from src.utils.config import CameraConfig
 
 
-def test_prerequisites(config_path: str = "config.toml") -> bool:
+def test_prerequisites(config_path: str = "configs/config.toml") -> bool:
     """
     Test pre-flight checks.
 
@@ -60,7 +60,7 @@ def test_prerequisites(config_path: str = "config.toml") -> bool:
     return results["overall"]
 
 
-def test_trigger_simulation(config_path: str = "config.toml", duration: float = 5.0):
+def test_trigger_simulation(config_path: str = "configs/config.toml", duration: float = 5.0):
     """
     Test camera response to simulated triggers.
 
@@ -172,7 +172,7 @@ def main():
     print("XIMEA CAMERA INTEGRATION TESTS")
     print("=" * 60)
 
-    config_path = "config.toml"
+    config_path = "configs/config.toml"
 
     # Test 1: Pre-flight checks
     if not test_prerequisites(config_path):

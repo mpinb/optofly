@@ -12,7 +12,7 @@ Identifies which physical screen corresponds to which display port.
 python -m src.processes.visual --calibrate
 ```
 
-Labels appear on each screen showing "Screen 1", "Screen 2", etc. with display port names. Identify which screen is North/East/South/West in your arena, then press ESC. Update `screen_mapping` in `visual_stimuli.toml` if needed.
+Labels appear on each screen showing "Screen 1", "Screen 2", etc. with display port names. Identify which screen is North/East/South/West in your arena, then press ESC. Update `screen_mapping` in `configs/visual_stimuli.toml` if needed.
 
 ### Step 2: Heading-to-Pixel Mapping
 
@@ -36,7 +36,7 @@ For each of the 4 calibration positions (one per screen):
 | `calibrations/heading_mapping_data.csv` | Raw calibration data (pixel_x, braid_x, braid_y) |
 | `calibrations/heading_mapping_model.npz` | Interpolation model used at runtime |
 
-**Apply calibration in `config.toml`:**
+**Apply calibration in `configs/config.toml`:**
 ```toml
 [visual_stimuli]
 calibration_mapping_file = "calibrations/heading_mapping_model.npz"
@@ -124,7 +124,7 @@ Maps fly z-position (meters) to lens focal power (diopters) so the lens tracks f
 
 ### Configuration
 
-Enable the lens and point to the calibration file in `config.toml`:
+Enable the lens and point to the calibration file in `configs/config.toml`:
 
 ```toml
 [liquid_lens]

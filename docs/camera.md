@@ -37,7 +37,7 @@ from src.processes.camera import CameraProcess
 import multiprocessing as mp
 
 stop_event = mp.Event()
-camera = CameraProcess(config_path="config.toml", event=stop_event)
+camera = CameraProcess(config_path="configs/config.toml", event=stop_event)
 if camera.initialize():
     camera.start()
     stop_event.set()
@@ -47,7 +47,7 @@ if camera.initialize():
 **Pre-flight checks:**
 ```python
 from src.processes.camera import check_camera_prerequisites
-results = check_camera_prerequisites("config.toml")
+results = check_camera_prerequisites("configs/config.toml")
 if not results["overall"]:
     for error in results["errors"]:
         print(error)

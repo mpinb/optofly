@@ -151,8 +151,8 @@ visual_stimuli_performance.csv
 .worktrees
 
 # Config files (use example files as templates)
-config.toml
-visual_stimuli.toml
+configs/config.toml
+configs/visual_stimuli.toml
 
 # Braid cookies
 braid-cookies.json

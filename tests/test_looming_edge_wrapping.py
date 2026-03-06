@@ -50,7 +50,7 @@ def run_edge_wrapping_test(use_experimental_display=False):
     # Update config if using experimental display
     if use_experimental_display:
         print("Configuring for experimental display...")
-        config = ConfigBase("config.toml")._load_config()
+        config = ConfigBase("configs/config.toml")._load_config()
         config["visual_stimuli"]["standalone"]["use_experimental_display"] = True
         # Save temporarily (or just modify in memory)
 
@@ -77,7 +77,7 @@ def run_edge_wrapping_test(use_experimental_display=False):
     # Initialize visual stimuli process
     stop_event = mp.Event()
     process = VisualStimuliProcess(
-        config_path="config.toml",
+        config_path="configs/config.toml",
         event=stop_event,
         log_level="INFO",
         standalone=True

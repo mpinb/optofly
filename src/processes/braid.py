@@ -68,7 +68,7 @@ class BraidPublisher(WorkerProcess):
 
     def __init__(
         self,
-        config_path: str = "config.toml",
+        config_path: str = "configs/config.toml",
         event: Optional[mp.Event] = None,
         process_name: str = "BraidPublisher",
         log_level: str = "INFO",
@@ -320,7 +320,7 @@ if __name__ == "__main__":
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Braid Subscriber Process")
     parser.add_argument(
-        "--config", "-c", default="config.toml", help="Path to config file"
+        "--config", "-c", default="configs/config.toml", help="Path to config file"
     )
     parser.add_argument(
         "--log-level",

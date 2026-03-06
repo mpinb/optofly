@@ -101,8 +101,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         "-c",
-        default="config.toml",
-        help="Path to configuration file (default: config.toml)",
+        default="configs/config.toml",
+        help="Path to configuration file (default: configs/config.toml)",
     )
     parser.add_argument(
         "--spawn-interval",

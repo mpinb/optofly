@@ -11,8 +11,8 @@ ls target/release/ximea_camera
 
 **Config files missing:**
 ```bash
-cp config.example.toml config.toml
-cp visual_stimuli.example.toml visual_stimuli.toml
+cp configs/config.example.toml configs/config.toml
+cp configs/visual_stimuli.example.toml configs/visual_stimuli.toml
 ```
 
 **Camera permission denied:**
@@ -45,14 +45,14 @@ level = "DEBUG"
 ```
 
 **Visual stimuli not appearing:**
-- Verify `enabled = true` in `visual_stimuli.toml`
+- Verify `enabled = true` in `configs/visual_stimuli.toml`
 - Test standalone: `python -m src.processes.visual --standalone`
 - Check window appears (may be on a different screen)
 
 **Camera not recording:**
 ```python
 from src.processes.camera import check_camera_prerequisites
-results = check_camera_prerequisites("config.toml")
+results = check_camera_prerequisites("configs/config.toml")
 print(results)
 ```
 

@@ -30,7 +30,7 @@ class OptoTrigger:
     Stimulation parameters support balanced randomization to ensure uniform
     sampling across all parameter combinations throughout the experimental session.
 
-    Each parameter can be specified in config.toml as either:
+    Each parameter can be specified in configs/config.toml as either:
     - Single value: Used for every stimulation (e.g., frequency = 0)
     - List of options: Balanced selection across combinations (e.g., duration = [100, 200, 300])
 
@@ -63,7 +63,7 @@ class OptoTrigger:
 
     def __init__(
         self,
-        config_path: str = "config.toml",
+        config_path: str = "configs/config.toml",
         process_name: str = "OptoTrigger",
         log_level: str = "INFO",
         log_color: str = "RED",
@@ -428,7 +428,7 @@ if __name__ == "__main__":
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="OptoTrigger Controller")
     parser.add_argument(
-        "--config", "-c", default="config.toml", help="Path to config file"
+        "--config", "-c", default="configs/config.toml", help="Path to config file"
     )
     parser.add_argument(
         "--log-level",

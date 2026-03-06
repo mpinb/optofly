@@ -84,7 +84,7 @@ Document any inter-channel brightness imbalance for future calibration.
 
 **No response from Arduino:**
 - Check USB connection
-- Verify the correct COM port in `config.toml`
+- Verify the correct COM port in `configs/config.toml`
 - Confirm baud rate is 115200
 
 **Inaccurate timing at high frequencies:**

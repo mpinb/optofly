@@ -23,8 +23,8 @@ Full documentation is in the [`docs/`](docs/) folder:
 uv sync
 
 # Copy and customize configs
-cp config.example.toml config.toml
-cp visual_stimuli.example.toml visual_stimuli.toml
+cp configs/config.example.toml configs/config.toml
+cp configs/visual_stimuli.example.toml configs/visual_stimuli.toml
 
 # Build camera binary
 cd rust/ximea_camera && cargo build --release && cd ../..

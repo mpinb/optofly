@@ -93,7 +93,7 @@ class LiquidLens(WorkerProcess):
     def __init__(
         self,
         event: mp.Event,
-        config_path: str = "config.toml",
+        config_path: str = "configs/config.toml",
         process_name: str = "LiquidLens",
         log_level: str = "INFO",
         log_color: str = "GREEN",  # Use uppercase for consistency

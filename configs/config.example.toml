@@ -129,7 +129,7 @@ time_step = 0.1                  # Time interval for trajectory sampling (second
 # ==============================================================================
 # VISUAL STIMULI
 # ==============================================================================
-# Visual stimuli configuration has been moved to visual_stimuli.toml
+# Visual stimuli configuration has been moved to configs/visual_stimuli.toml
 # This keeps system config clean and allows easy experiment preset swapping
 
 [visual_stimuli]
@@ -137,4 +137,4 @@ time_step = 0.1                  # Time interval for trajectory sampling (second
 active = true
 
 # Path to visual stimuli configuration file
-config_file = "visual_stimuli.toml"
+config_file = "configs/visual_stimuli.toml"

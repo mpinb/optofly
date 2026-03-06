@@ -57,7 +57,7 @@ def run_screen_identification(
 
     # Instructions at top
     instructions = pyglet.text.Label(
-        "Identify which screen is North/East/South/West, then update config.toml",
+        "Identify which screen is North/East/South/West, then update configs/config.toml",
         font_name='Arial',
         font_size=36,
         x=window_width // 2,
@@ -86,7 +86,7 @@ def run_screen_identification(
     signal.signal(signal.SIGINT, sigint_handler)
 
     print("Displaying screen labels...")
-    print("Update config.toml with screen_mapping after identification.")
+    print("Update configs/config.toml with screen_mapping after identification.")
     print()
 
     pyglet.app.run()
@@ -155,7 +155,7 @@ def run_heading_calibration(
 
         calibration_x_positions = np.array(calibration_x_positions)
 
-    # Screen direction labels (matching visual_stimuli.toml screen_mapping order)
+    # Screen direction labels (matching configs/visual_stimuli.toml screen_mapping order)
     screen_directions = ["West", "North", "East", "South"]  # After cable swap
 
     def get_screen_for_pixel(pixel_x):
@@ -296,7 +296,7 @@ def save_calibration_data(
     np.savez(model_file, headings=headings_sorted, pixels=pixels_sorted)
     print(f"Interpolation model saved to: {model_file}")
     print()
-    print("Update config.toml:")
+    print("Update configs/config.toml:")
     print(f'  calibration_mapping_file = "{model_file}"')
     print('  use_empirical_calibration = true')
 

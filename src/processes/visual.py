@@ -35,7 +35,7 @@ class VisualStimuliProcess(WorkerProcess):
 
     def __init__(
         self,
-        config_path: str = "config.toml",
+        config_path: str = "configs/config.toml",
         event: Optional[mp.Event] = None,
         process_name: str = "VisualStimuli",
         log_level: str = "INFO",
@@ -110,7 +110,7 @@ class VisualStimuliProcess(WorkerProcess):
         """Load visual stimuli configuration from separate file or fall back to main config.
 
         Args:
-            main_config_path: Path to main config.toml file
+            main_config_path: Path to main configs/config.toml file
 
         Returns:
             Dictionary containing visual_stimuli configuration
@@ -120,7 +120,7 @@ class VisualStimuliProcess(WorkerProcess):
 
         # Check if visual_stimuli section in main config specifies a config_file
         visual_stimuli_section = self.config_base.get("visual_stimuli", {})
-        visual_config_file = visual_stimuli_section.get("config_file", "visual_stimuli.toml")
+        visual_config_file = visual_stimuli_section.get("config_file", "configs/visual_stimuli.toml")
 
         # Construct full path to visual stimuli config
         visual_config_path = config_dir / visual_config_file
@@ -468,7 +468,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Visual Stimuli Display Process")
     parser.add_argument(
         "--config", "-c",
-        default="config.toml",
+        default="configs/config.toml",
         help="Path to config file"
     )
     parser.add_argument(

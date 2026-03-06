@@ -24,7 +24,7 @@ class OptoTriggerWorker(WorkerProcess):
         self,
         event: mp.Event,
         braid_folder: str,
-        config_path: str = "config.toml",
+        config_path: str = "configs/config.toml",
         process_name: str = "OptoTriggerWorker",
         log_level: str = "INFO",
         log_color: str = "RED",
@@ -318,7 +318,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="OptoTrigger Worker Process")
     parser.add_argument(
-        "--config", "-c", default="config.toml", help="Path to config file"
+        "--config", "-c", default="configs/config.toml", help="Path to config file"
     )
     parser.add_argument(
         "--braid-folder",

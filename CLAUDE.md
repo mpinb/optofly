@@ -38,12 +38,12 @@ python -m src.tools.braid_simulator
 
 Copy and customize — local files are git-ignored:
 ```bash
-cp config.example.toml config.toml
-cp visual_stimuli.example.toml visual_stimuli.toml
+cp configs/config.example.toml configs/config.toml
+cp configs/visual_stimuli.example.toml configs/visual_stimuli.toml
 ```
 
-`config.toml` controls hardware (Braid URL, trigger zone, camera, opto, lens).
-`visual_stimuli.toml` controls display layout, screen mapping, stimuli parameters.
+`configs/config.toml` controls hardware (Braid URL, trigger zone, camera, opto, lens).
+`configs/visual_stimuli.toml` controls display layout, screen mapping, stimuli parameters.
 Each process checks its own `active = true/false` flag before starting.
 
 ## Architecture
@@ -95,7 +95,7 @@ All processes inherit `WorkerProcess` (`src/utils/worker.py`) and run as `multip
 Plugin-based factory pattern in `src/stimuli/`. To add a stimulus:
 1. Create class in `src/stimuli/my_stimulus.py` implementing `on_trigger`, `update`, `render`, `is_active`
 2. Register in `src/stimuli/registry.py`
-3. Add `[visual_stimuli.my_stimulus]` section to `visual_stimuli.toml`
+3. Add `[visual_stimuli.my_stimulus]` section to `configs/visual_stimuli.toml`
 
 Heading-to-pixel conversion uses `GeometryUtils` (`src/stimuli/geometry.py`). With `use_empirical_calibration = true`, it interpolates from `calibrations/heading_mapping_model.npz`; otherwise it uses a geometric formula.
 

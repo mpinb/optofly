@@ -1,7 +1,7 @@
 """
 OptoFly Main Experiment Launcher
 
-Config-driven experiment launcher that starts processes based on config.toml settings.
+Config-driven experiment launcher that starts processes based on configs/config.toml settings.
 Automatically enables/disables processes based on their 'active' flags.
 """
 
@@ -146,7 +146,7 @@ def main():
     """Launch OptoFly experiment with config-driven process selection."""
 
     # Configuration file path
-    config_path = "config.toml"
+    config_path = "configs/config.toml"
 
     # Load configuration
     print(f"Loading configuration from {config_path}...")
@@ -180,7 +180,7 @@ def main():
     copy_config_to_braid_folder(config_path, braid_folder)
     if config.get("visual_stimuli", {}).get("active", False):
         copy_config_to_braid_folder(
-            config.get("visual_stimuli", {}).get("config_file", "visual_stimuli.toml"),
+            config.get("visual_stimuli", {}).get("config_file", "configs/visual_stimuli.toml"),
             braid_folder,
         )
 

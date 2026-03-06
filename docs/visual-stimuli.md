@@ -194,7 +194,7 @@ if my_config.get("enabled", False):
 
 ### Step 3: Add config
 
-In `visual_stimuli.toml`:
+In `configs/visual_stimuli.toml`:
 
 ```toml
 [visual_stimuli.my_stimulus]
