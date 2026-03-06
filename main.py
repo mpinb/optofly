@@ -161,7 +161,7 @@ def main():
     )
     braid_url = config.get("braid_publisher", {}).get("url", "http://127.0.0.1:8397")
     braid_folder, braid_proxy = check_braid_folder_exists(
-        experiments_path, braid_url="http://127.0.0.1:12345/", auto_start_recording=True
+        experiments_path, braid_url=braid_url, auto_start_recording=True
     )
     print(f"Experiment data will be saved to: {braid_folder}")
 
@@ -243,7 +243,15 @@ def main():
         # 5. CameraProcess - high-speed video recording
         if config.get("camera", {}).get("active", False):
             print("  ✓ CameraProcess")
-            camera = CameraProcess(config_path=config_path, event=stop_event)
+            # Save videos alongside experiment data: /mnt/data/videos/<braid_name>/
+            video_folder = None
+            if braid_folder:
+                video_folder = str(
+                    Path(braid_folder).parent.parent / "videos" / Path(braid_folder).name
+                )
+            camera = CameraProcess(
+                config_path=config_path, event=stop_event, save_folder=video_folder
+            )
             camera.start()
             processes.append(("CameraProcess", camera))
             active_process_names.append("CameraProcess")

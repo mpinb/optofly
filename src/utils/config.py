@@ -110,47 +110,6 @@ class TriggerHandlerConfig(ConfigBase):
         self.zmq = ZMQConfig(config_path)
 
 
-class CameraConfig(ConfigBase):
-    """Configuration for the Ximea camera system."""
-
-    def __init__(self, config_path: str = "config.toml"):
-        """Initialize Camera configuration.
-
-        Args:
-            config_path: Path to the TOML configuration file
-        """
-        super().__init__(config_path, "camera")
-        config = self._load_config()
-
-        # Camera hardware settings
-        resolution = config.get("resolution", [2016, 2016])
-        self.width: int = int(resolution[0])
-        self.height: int = int(resolution[1])
-        self.fps: float = float(config.get("fps", 500))
-        self.exposure_time: float = float(config.get("exposure_time", 2000))
-
-        # Trigger timing
-        self.pre_trigger_time: float = float(config.get("pre_trigger_time", 0.5))
-        self.post_trigger_time: float = float(config.get("post_trigger_time", 1.5))
-
-        # Camera-specific parameters with defaults
-        self.offset_x: int = int(config.get("offset_x", 1056))
-        self.offset_y: int = int(config.get("offset_y", 170))
-        self.serial: int = int(config.get("serial", 0))
-
-        # Communication settings
-        self.zmq_address: str = config.get("zmq_address", "127.0.0.1")
-        self.zmq_port: str = config.get("zmq_port", "5556")
-
-        # Storage
-        self.save_folder: str = config.get("save_folder", "camera_videos")
-
-        # Binary path
-        self.rust_binary: str = config.get(
-            "rust_binary", "rust/ximea_camera/target/release/ximea_camera"
-        )
-
-
 class LiquidLensConfig(ConfigBase):
     """Configuration for the Liquid Lens hardware control."""
 
@@ -458,9 +417,29 @@ class CameraConfig(ConfigBase):
             raise ValueError("camera.fps is required in the configuration")
         self.fps: float = float(config.get("fps"))
 
+        self.width: int = self.sensor_width_px
+        self.height: int = self.sensor_height_px
+
         self.exposure_time: float = float(config.get("exposure_time", 0.0))
         self.pre_trigger_time: float = float(config.get("pre_trigger_time", 0.0))
         self.post_trigger_time: float = float(config.get("post_trigger_time", 0.0))
+
+        # Camera-specific parameters
+        self.offset_x: int = int(config.get("offset_x", 1312))
+        self.offset_y: int = int(config.get("offset_y", 656))
+        self.serial: int = int(config.get("serial", 0))
+
+        # Communication settings
+        self.zmq_address: str = config.get("zmq_address", "127.0.0.1")
+        self.zmq_port: str = config.get("zmq_port", "5556")
+
+        # Storage
+        self.save_folder: str = config.get("save_folder", "camera_videos")
+
+        # Binary path
+        self.rust_binary: str = config.get(
+            "rust_binary", "rust/ximea_camera/target/release/ximea_camera"
+        )
 
         fov_config = config.get("FOV", {})
         self.fov_x_min: float = float(fov_config.get("x_min", -0.1))

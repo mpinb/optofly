@@ -153,6 +153,7 @@ class CameraProcess(WorkerProcess):
         self,
         config_path: str = "config.toml",
         event: Optional[mp.Event] = None,
+        save_folder: Optional[str] = None,
         process_name: str = "CameraProcess",
         log_level: str = "INFO",
         log_color: str = "CYAN",
@@ -163,6 +164,7 @@ class CameraProcess(WorkerProcess):
         Args:
             config_path: Path to the configuration file
             event: Event to signal process termination (created if None)
+            save_folder: Override save folder path (defaults to config value)
             process_name: Name to display in logs
             log_level: Logging level to use
             log_color: Color for log messages
@@ -177,6 +179,8 @@ class CameraProcess(WorkerProcess):
 
         # Load configuration
         self.config = CameraConfig(config_path)
+        if save_folder is not None:
+            self.config.save_folder = save_folder
         self.config_path = config_path
         self.stop_event = event if event is not None else mp.Event()
         self.is_initialized = False

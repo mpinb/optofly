@@ -272,12 +272,12 @@ class LiquidLens(WorkerProcess):
                     return None
 
                 elif "Death" in message:
-                    # Death events indicate an object is no longer tracked
-                    obj_data = message["Death"]
+                    # Death events contain just the obj_id (int)
+                    obj_id = message["Death"]
                     return {
                         "event": "Death",
-                        "obj_id": obj_data.get("obj_id"),
-                        "frame": obj_data.get("frame"),
+                        "obj_id": obj_id,
+                        "frame": None,
                     }
 
                 elif "Update" in message:
