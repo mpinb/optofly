@@ -5,6 +5,7 @@ Config-driven experiment launcher that starts processes based on config.toml set
 Automatically enables/disables processes based on their 'active' flags.
 """
 
+import logging
 import multiprocessing as mp
 import sys
 import time
@@ -159,9 +160,11 @@ def main():
     experiments_path = config.get("braid_publisher", {}).get(
         "experiments_path", "/mnt/data/experiments/"
     )
-    braid_url = config.get("braid_publisher", {}).get("url", "http://127.0.0.1:8397")
+    braid_host = config.get("braid_publisher", {}).get("host", "127.0.0.1")
+    braid_callback_port = config.get("braid_publisher", {}).get("callback_port", 12345)
+    callback_url = f"http://{braid_host}:{braid_callback_port}"
     braid_folder, braid_proxy = check_braid_folder_exists(
-        experiments_path, braid_url=braid_url, auto_start_recording=True
+        experiments_path, callback_url=callback_url, auto_start_recording=True
     )
     print(f"Experiment data will be saved to: {braid_folder}")
 
@@ -189,6 +192,9 @@ def main():
     active_process_names = []
 
     try:
+        # Suppress log output during startup to keep output clean
+        logging.disable(logging.CRITICAL)
+
         # Core processes (always started)
         print("\nStarting core processes...")
 
@@ -274,6 +280,12 @@ def main():
             processes.append(("LiquidLens", liquid_lens))
             active_process_names.append("LiquidLens")
 
+        # Re-enable logging now that startup output is complete
+        logging.disable(logging.NOTSET)
+
+        # Allow child processes to finish their initialization
+        time.sleep(1)
+
         # Print experiment summary
         print_experiment_config(config, active_process_names)
 
@@ -297,6 +309,9 @@ def main():
         raise
 
     finally:
+        # Ensure logging is re-enabled for shutdown messages
+        logging.disable(logging.NOTSET)
+
         # Graceful shutdown
         print("\nShutting down processes...")
         stop_event.set()

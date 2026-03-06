@@ -299,13 +299,18 @@ class CameraProcess(WorkerProcess):
 
     def _monitor_subprocess_output(self) -> None:
         """Monitor and log output from the camera subprocess."""
+        import select
+
         if self.camera_subprocess and self.camera_subprocess.stdout:
             try:
-                # Non-blocking read
-                line = self.camera_subprocess.stdout.readline()
-                if line:
-                    # Strip newline and log with camera prefix
-                    self.logger.info(f"[Camera] {line.strip()}")
+                # Check if data is available before reading (avoid blocking)
+                ready, _, _ = select.select(
+                    [self.camera_subprocess.stdout], [], [], 0.01
+                )
+                if ready:
+                    line = self.camera_subprocess.stdout.readline()
+                    if line:
+                        self.logger.info(f"[Camera] {line.strip()}")
             except Exception as e:
                 self.logger.error(f"Error reading subprocess output: {e}")
 

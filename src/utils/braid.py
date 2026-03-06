@@ -17,17 +17,21 @@ COOKIE_JAR_FNAME = "braid-cookies.json"
 class BraidProxy:
     """Proxy for controlling Braid recording via HTTP API.
 
-    Based on the Braid Python API (see PYTHON_RECORDING_API.md).
+    Braid exposes two HTTP servers:
+    - Events/SSE endpoint (e.g., port 8397) for streaming tracking data
+    - UI endpoint (e.g., port 12345) with the /callback API for control
+
+    The callback_url should point to the UI endpoint.
     """
 
-    def __init__(self, braid_url: str):
+    def __init__(self, callback_url: str):
         """Initialize Braid proxy.
 
         Args:
-            braid_url: Base URL of Braid server (e.g., http://127.0.0.1:8397/)
+            callback_url: Base URL of Braid UI server (e.g., http://127.0.0.1:12345/)
         """
-        self.braid_url = braid_url
-        self.callback_url = urllib.parse.urljoin(braid_url, "callback")
+        self.base_url = callback_url
+        self.callback_url = urllib.parse.urljoin(callback_url, "callback")
         self.session = requests.session()
 
         # Load cookies if available
@@ -38,16 +42,16 @@ class BraidProxy:
 
         # Connect to Braid (raises exception if not running)
         try:
-            r = self.session.get(braid_url, timeout=5)
+            r = self.session.get(callback_url, timeout=5)
             r.raise_for_status()
         except requests.exceptions.ConnectionError:
             raise ConnectionError(
-                f"Could not connect to Braid at {braid_url}. "
+                f"Could not connect to Braid at {callback_url}. "
                 "Is braid-run running?"
             )
         except requests.exceptions.Timeout:
             raise TimeoutError(
-                f"Connection to Braid at {braid_url} timed out"
+                f"Connection to Braid at {callback_url} timed out"
             )
 
         # Store cookies
@@ -77,7 +81,7 @@ class BraidProxy:
 
 def check_braid_folder_exists(
     root_path: str = "/mnt/data/experiments/",
-    braid_url: Optional[str] = None,
+    callback_url: Optional[str] = None,
     auto_start_recording: bool = True,
 ) -> tuple[str, Optional[BraidProxy]]:
     """
@@ -87,7 +91,7 @@ def check_braid_folder_exists(
     where YYYYMMDD matches today's date.
 
     If no matching folder is found and auto_start_recording is True:
-      1. Connects to Braid via HTTP API
+      1. Connects to Braid UI via HTTP API
       2. Starts CSV recording
       3. Waits for .braid folder to be created
       4. Returns folder path and BraidProxy instance
@@ -96,7 +100,7 @@ def check_braid_folder_exists(
 
     Parameters:
         root_path: Root path to check for braid folders
-        braid_url: URL of Braid server (e.g., http://127.0.0.1:8397/)
+        callback_url: URL of Braid UI server (e.g., http://127.0.0.1:12345/)
         auto_start_recording: If True, automatically start recording if no folder exists
 
     Returns:
@@ -166,20 +170,20 @@ def check_braid_folder_exists(
         print(f"{'='*70}\n")
         sys.exit(1)
 
-    if not braid_url:
+    if not callback_url:
         print(f"\n{'='*70}")
-        print("ERROR: No Braid folder found and no Braid URL provided")
+        print("ERROR: No Braid folder found and no Braid callback URL provided")
         print(f"{'='*70}")
-        print("Cannot start recording without Braid URL.")
+        print("Cannot start recording without Braid callback URL.")
         print(f"{'='*70}\n")
         sys.exit(1)
 
     # Attempt to start recording
     print(f"\nNo existing recording found. Starting Braid recording...")
-    print(f"Connecting to Braid at {braid_url}...")
+    print(f"Connecting to Braid at {callback_url}...")
 
     try:
-        braid = BraidProxy(braid_url)
+        braid = BraidProxy(callback_url)
         print("✓ Connected to Braid")
 
         print("Starting CSV recording...")
@@ -216,7 +220,7 @@ def check_braid_folder_exists(
         print(f"{e}")
         print("\nPlease ensure:")
         print("  1. Braid is running (braid-run ...)")
-        print(f"  2. Braid is accessible at {braid_url}")
+        print(f"  2. Braid is accessible at {callback_url}")
         print(f"{'='*70}\n")
         sys.exit(1)
 

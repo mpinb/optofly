@@ -45,7 +45,9 @@ port = 5000
 
 [braid_publisher]
 # Braid tracking system connection
-url = "http://127.0.0.1:8397"
+host = "127.0.0.1"
+events_port = 8397     # Braid SSE/events endpoint (tracking data)
+callback_port = 12345  # Braid UI endpoint (recording control)
 timeout = 30
 reconnect_delay = 5
 experiments_path = "/mnt/data/experiments/"  # Root path where Braid saves .braid folders
@@ -65,6 +67,9 @@ active = false
 resolution = [2016, 2016]
 fps = 500
 exposure_time = 2000             # Microseconds
+offset_x = 1312                  # Sensor ROI X offset (pixels)
+offset_y = 656                   # Sensor ROI Y offset (pixels)
+serial = 0                       # Camera serial number (0 = first available)
 pre_trigger_time = 0.5           # Recording before trigger (seconds)
 post_trigger_time = 1.5          # Recording after trigger (seconds)
 

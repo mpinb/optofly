@@ -216,12 +216,12 @@ class BraidPublisherConfig(ConfigBase):
         super().__init__(config_path, "braid_publisher")
         config = self._load_config()
 
-        try:
-            self.url: str = config["url"].rstrip("/")
-        except KeyError as exc:
-            raise ValueError(
-                "braid_publisher.url is required in the configuration"
-            ) from exc
+        host = config.get("host", "127.0.0.1")
+        events_port = int(config.get("events_port", 8397))
+        callback_port = int(config.get("callback_port", 12345))
+
+        self.url: str = f"http://{host}:{events_port}"
+        self.callback_url: str = f"http://{host}:{callback_port}"
 
         self.timeout: float = float(config.get("timeout", 30))
         if self.timeout <= 0:

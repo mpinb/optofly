@@ -25,6 +25,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "ipython>=8.38.0",
     "optofly",
     "pytest>=8.4.2",
     "ruff",

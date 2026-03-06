@@ -1,3 +1,4 @@
+import signal
 from multiprocessing import Process, Event
 from src.utils.logger import init_class_logger
 
@@ -16,6 +17,19 @@ class WorkerProcess(Process):
         self.log_level = log_level
         self.log_color = log_color
         self.process_name = process_name
+
+    def start(self):
+        """Start the process, ignoring SIGINT in children.
+
+        Child processes should shut down via the shared stop event,
+        not by receiving KeyboardInterrupt directly.
+        """
+        # Save original handler, ignore SIGINT before fork/spawn so
+        # the child inherits the ignore. Restore in parent immediately.
+        original = signal.getsignal(signal.SIGINT)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        super().start()
+        signal.signal(signal.SIGINT, original)
 
     def _initialize_logger(self):
         self.logger = init_class_logger(
