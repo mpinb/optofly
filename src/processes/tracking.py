@@ -442,8 +442,12 @@ class TriggerHandler(WorkerProcess):
         current_time = time.time()
         x, y, z = tracked_obj.current_x, tracked_obj.current_y, tracked_obj.current_z
 
-        # Check if object is heading toward center
-        if not tracked_obj.is_heading_toward_center(self.config.heading_threshold):
+        # Check global cooldown (cheapest, blocks all objects)
+        if current_time - self.last_trigger_time < self.config.min_trigger_interval:
+            return
+
+        # Check if object is in trigger zone (3 float comparisons)
+        if not self.is_in_trigger_zone(x, y, z):
             return
 
         # Check if object has been tracked long enough
@@ -451,12 +455,8 @@ class TriggerHandler(WorkerProcess):
         if tracking_duration < self.config.min_trajectory_time:
             return
 
-        # Check global cooldown
-        if current_time - self.last_trigger_time < self.config.min_trigger_interval:
-            return
-
-        # Check if object is in trigger zone
-        if self.is_in_trigger_zone(x, y, z):
+        # Check if object is heading toward center (most expensive: circular mean + arctan2)
+        if tracked_obj.is_heading_toward_center(self.config.heading_threshold):
             # Send trigger (all systems activate)
             self._send_trigger(tracked_obj)
             # Update last trigger time (enforces global cooldown)

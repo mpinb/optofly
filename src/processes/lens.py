@@ -429,24 +429,6 @@ class LiquidLens(WorkerProcess):
             self.logger.error(f"Error predicting position for object {obj_id}: {e}")
             return None
 
-    def _is_in_camera_FOV(self, x: float, y: float):
-        """
-        Check if position is within camera field of view.
-
-        Args:
-            x: X coordinate of the object
-            y: Y coordinate of the object
-
-        Returns:
-            Boolean indicating if object is in FOV
-        """
-        # Check if coordinates are within the defined FOV boundaries
-        # FOV boundaries are now directly accessible from the lens_config
-        return (
-            self.lens_config.fov_x_min <= x <= self.lens_config.fov_x_max
-            and self.lens_config.fov_y_min <= y <= self.lens_config.fov_y_max
-        )
-
     def run(self):
         try:
             self.initialize()
@@ -537,8 +519,12 @@ class LiquidLens(WorkerProcess):
                     if self.lens_config.kalman_enabled:
                         self._update_kalman_filter(self.current_tracked_obj, braid_data)
 
-                    # Check if the object is in the camera's field of view
-                    if not self._is_in_camera_FOV(x, y):
+                    # Check if the object is within camera FOV (x/y only)
+                    in_fov = (
+                        self.lens_config.fov_x_min <= x <= self.lens_config.fov_x_max
+                        and self.lens_config.fov_y_min <= y <= self.lens_config.fov_y_max
+                    )
+                    if not in_fov:
                         self.logger.info(
                             f"Object {self.current_tracked_obj} is out of camera FOV at position ({x}, {y})"
                         )
