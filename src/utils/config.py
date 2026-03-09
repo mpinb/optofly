@@ -99,9 +99,8 @@ class TriggerHandlerConfig(ConfigBase):
         self.camera_active: bool = bool(
             root_config.get("camera", {}).get("active", False)
         )
-        self.liquid_lens_active: bool = bool(
-            root_config.get("liquid_lens", {}).get("active", False)
-        )
+        # Liquid lens activates with the camera (they are physically coupled)
+        self.liquid_lens_active: bool = self.camera_active
         self.opto_trigger_active: bool = bool(
             root_config.get("opto_trigger", {}).get("active", False)
         )
@@ -121,9 +120,6 @@ class LiquidLensConfig(ConfigBase):
         """
         super().__init__(config_path, "liquid_lens")
         config = self._load_config()
-
-        # Status flag
-        self.active: bool = config.get("active", False)
 
         # Hardware configuration
         self.port: str = config["port"]

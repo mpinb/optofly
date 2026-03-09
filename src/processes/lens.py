@@ -132,12 +132,6 @@ class LiquidLens(WorkerProcess):
         # Dictionary to store Kalman filters for each tracked object
         self.kalman_filters = {}
 
-        # Check if it's enabled
-        self.is_enabled = self.lens_config.active
-        if not self.is_enabled:
-            self.logger.warning("Liquid Lens process is disabled. Exiting.")
-            return
-
     def initialize(self):
         """
         Initialize the process.
@@ -457,10 +451,6 @@ class LiquidLens(WorkerProcess):
         )
 
     def run(self):
-        if not self.is_enabled:
-            self.logger.warning("Liquid Lens process is disabled. Exiting.")
-            return
-
         try:
             self.initialize()
         except Exception as e:

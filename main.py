@@ -246,7 +246,7 @@ def main():
             processes.append(("VisualStimuliProcess", visual_stimuli))
             active_process_names.append("VisualStimuliProcess")
 
-        # 5. CameraProcess - high-speed video recording
+        # 5. CameraProcess + LiquidLens (lens always accompanies camera)
         if config.get("camera", {}).get("active", False):
             print("  ✓ CameraProcess")
             # Save videos alongside experiment data: /mnt/data/videos/<braid_name>/
@@ -262,6 +262,12 @@ def main():
             processes.append(("CameraProcess", camera))
             active_process_names.append("CameraProcess")
 
+            print("  ✓ LiquidLens")
+            liquid_lens = LiquidLens(event=stop_event, config_path=config_path)
+            liquid_lens.start()
+            processes.append(("LiquidLens", liquid_lens))
+            active_process_names.append("LiquidLens")
+
         # 6. OptoTriggerWorker - optogenetic LED activation
         if config.get("opto_trigger", {}).get("active", False):
             print("  ✓ OptoTriggerWorker")
@@ -271,14 +277,6 @@ def main():
             opto_trigger.start()
             processes.append(("OptoTriggerWorker", opto_trigger))
             active_process_names.append("OptoTriggerWorker")
-
-        # 7. LiquidLens - auto-focus system
-        if config.get("liquid_lens", {}).get("active", False):
-            print("  ✓ LiquidLens")
-            liquid_lens = LiquidLens(event=stop_event, config_path=config_path)
-            liquid_lens.start()
-            processes.append(("LiquidLens", liquid_lens))
-            active_process_names.append("LiquidLens")
 
         # Re-enable logging now that startup output is complete
         logging.disable(logging.NOTSET)

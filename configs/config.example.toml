@@ -104,8 +104,7 @@ color = "red"                    # LED color
 sham_probability = 0.0           # Probability of sham trials (0.0-1.0)
 
 [liquid_lens]
-# Liquid lens auto-focus system
-active = false
+# Liquid lens auto-focus system (activates automatically with camera)
 port = "/dev/ttyUSB1"
 mode = "diopter"
 calibration_file = "calibrations/liquid_lens.csv"

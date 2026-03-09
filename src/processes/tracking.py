@@ -539,7 +539,7 @@ class TriggerHandler(WorkerProcess):
         # PREDICTIVE LENS CHECK (independent of main trigger)
         # Only run if lens is active and predictive tracking is enabled
         if (
-            self.lens_config.active
+            self.config.camera_active
             and self.lens_config.predictive_tracking
             and self.is_in_camera_fov(x, y)
         ):
