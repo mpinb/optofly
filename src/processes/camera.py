@@ -51,8 +51,7 @@ def check_camera_prerequisites(config_path: str = "configs/config.toml") -> dict
     # Check 1: Rust binary exists and is executable
     binary_path = Path(config.rust_binary)
     if not binary_path.is_absolute():
-        config_dir = Path(config_path).parent
-        binary_path = (config_dir / binary_path).resolve()
+        binary_path = Path.cwd() / binary_path
 
     if not binary_path.exists():
         results["errors"].append(f"Camera binary not found: {binary_path}")
@@ -202,9 +201,7 @@ class CameraProcess(WorkerProcess):
         # Get the absolute path to the binary
         binary_path = Path(self.config.rust_binary)
         if not binary_path.is_absolute():
-            # Make it relative to the config file's directory
-            config_dir = Path(self.config_path).parent
-            binary_path = (config_dir / binary_path).resolve()
+            binary_path = Path.cwd() / binary_path
 
         args = [
             str(binary_path),

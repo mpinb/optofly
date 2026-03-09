@@ -526,8 +526,8 @@ class TriggerHandler(WorkerProcess):
 
         try:
             while not self.stop_event.is_set():
-                # Poll for messages with timeout (100ms)
-                socks = dict(poller.poll(100))
+                # Poll for messages with timeout (1ms for low-latency trigger response)
+                socks = dict(poller.poll(1))
 
                 if self.subscriber in socks and socks[self.subscriber] == zmq.POLLIN:
                     # Process incoming message
