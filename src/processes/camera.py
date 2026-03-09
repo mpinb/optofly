@@ -274,21 +274,33 @@ class CameraProcess(WorkerProcess):
                 bufsize=1,  # Line buffered
             )
 
-            # Give it a moment to start
-            time.sleep(0.5)
-
-            # Check if it's still running
-            if self.camera_subprocess.poll() is not None:
-                self.logger.error(
-                    f"Camera subprocess exited immediately with code "
-                    f"{self.camera_subprocess.returncode}"
-                )
-                return False
-
             self.logger.info(
-                f"Camera subprocess started (PID: {self.camera_subprocess.pid})"
+                f"Camera subprocess launched (PID: {self.camera_subprocess.pid}), "
+                "waiting for initialization..."
             )
-            return True
+
+            # Wait for the Rust binary to report ready
+            ready_timeout = 15  # seconds
+            deadline = time.monotonic() + ready_timeout
+            while time.monotonic() < deadline:
+                if self.camera_subprocess.poll() is not None:
+                    self.logger.error(
+                        f"Camera subprocess exited during init with code "
+                        f"{self.camera_subprocess.returncode}"
+                    )
+                    return False
+
+                line = self.camera_subprocess.stdout.readline()
+                if line:
+                    self.logger.info(f"[Camera] {line.strip()}")
+                    if "All processes started" in line:
+                        self.logger.info("Camera initialized and ready")
+                        return True
+
+            self.logger.error(
+                f"Camera subprocess did not become ready within {ready_timeout}s"
+            )
+            return False
 
         except Exception as e:
             self.logger.error(f"Failed to start camera subprocess: {e}")

@@ -289,8 +289,9 @@ class LiquidLens(WorkerProcess):
                         "yvel": obj_data.get("yvel"),
                         "zvel": obj_data.get("zvel"),
                     }
+                elif "CalibrationFlydraXml" in message:
+                    return None
                 else:
-                    # Unknown message type
                     self.logger.warning(f"Unknown BRAID message type: {message}")
                     return None
             else:
