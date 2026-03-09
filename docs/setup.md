@@ -69,8 +69,8 @@ experiments_path = "/mnt/data/experiments/" # Where .braid folders are saved
 [trigger_handler]
 min_trajectory_time = 1.0   # Min tracking duration before triggering (s)
 min_trigger_interval = 10.0 # Cooldown between triggers (s)
-radius = 0.05               # Trigger zone radius (m)
-z_lim = [0.15, 0.25]        # Vertical trigger zone limits (m)
+z_min = 0.15                # Minimum z for trigger (m)
+z_max = 0.25                # Maximum z for trigger (m)
 heading_cone_deg = 30.0     # Heading threshold (degrees from center-directed)
 min_velocity = 0.01         # Min velocity threshold (m/s)
 

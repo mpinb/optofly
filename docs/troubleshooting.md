@@ -35,7 +35,7 @@ netstat -tulpn | grep 5555
 Check trigger handler logs for:
 - Are flies being tracked? (look for "Update" messages)
 - Are flies heading toward center? (check heading values vs. `heading_cone_deg`)
-- Are flies in the trigger zone? (check position vs. `radius` and `z_lim`)
+- Are flies in the trigger zone? (check position vs. camera FOV x/y and `z_min`/`z_max`)
 - Is cooldown expired? (check time since last trigger)
 
 Enable debug logging:

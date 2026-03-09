@@ -63,14 +63,18 @@ class TriggerHandlerConfig(ConfigBase):
             config.get("min_trigger_interval", 10.0)
         )
 
-        # Trigger zone = camera FOV (single source of truth)
+        # Trigger zone x/y = camera FOV (single source of truth)
         camera_config = CameraConfig(config_path)
         self.fov_x_min: float = camera_config.fov_x_min
         self.fov_x_max: float = camera_config.fov_x_max
         self.fov_y_min: float = camera_config.fov_y_min
         self.fov_y_max: float = camera_config.fov_y_max
-        self.fov_z_min: float = camera_config.fov_z_min
-        self.fov_z_max: float = camera_config.fov_z_max
+
+        # Trigger zone z bounds (from trigger_handler section)
+        self.z_min: float = float(config.get("z_min", 0.0))
+        self.z_max: float = float(config.get("z_max", 0.5))
+        if self.z_min >= self.z_max:
+            raise ValueError("trigger_handler.z_min must be less than z_max")
 
         # Heading cone configuration (degrees -> radians)
         self.heading_cone_deg: float = float(config.get("heading_cone_deg", 45.0))
@@ -78,17 +82,6 @@ class TriggerHandlerConfig(ConfigBase):
 
         # Minimum velocity to consider object as "moving" (m/s)
         self.min_velocity: float = float(config.get("min_velocity", 0.01))
-
-        # Linked subsystem state
-        root_config = ConfigBase(config_path)._load_config()
-        self.camera_active: bool = bool(
-            root_config.get("camera", {}).get("active", False)
-        )
-        # Liquid lens activates with the camera (they are physically coupled)
-        self.liquid_lens_active: bool = self.camera_active
-        self.opto_trigger_active: bool = bool(
-            root_config.get("opto_trigger", {}).get("active", False)
-        )
 
         # Communication settings reused across processes
         self.zmq = ZMQConfig(config_path)
@@ -120,14 +113,12 @@ class LiquidLensConfig(ConfigBase):
 
         self.n_elements: int = config.get("n_elements", 1000)
 
-        # Get camera FOV boundaries from CameraConfig
+        # Get camera FOV boundaries from CameraConfig (x/y only — lens uses calibration for z)
         camera_config = CameraConfig(config_path)
         self.fov_x_min = camera_config.fov_x_min
         self.fov_x_max = camera_config.fov_x_max
         self.fov_y_min = camera_config.fov_y_min
         self.fov_y_max = camera_config.fov_y_max
-        self.fov_z_min = camera_config.fov_z_min
-        self.fov_z_max = camera_config.fov_z_max
 
         # Kalman filter settings
         kalman_config = config.get("kalman", {})
@@ -419,15 +410,11 @@ class CameraConfig(ConfigBase):
         self.fov_x_max: float = float(fov_config.get("x_max", 0.1))
         self.fov_y_min: float = float(fov_config.get("y_min", -0.1))
         self.fov_y_max: float = float(fov_config.get("y_max", 0.1))
-        self.fov_z_min: float = float(fov_config.get("z_min", 0.0))
-        self.fov_z_max: float = float(fov_config.get("z_max", 0.5))
 
         if self.fov_x_min >= self.fov_x_max:
             raise ValueError("camera.FOV.x_min must be less than x_max")
         if self.fov_y_min >= self.fov_y_max:
             raise ValueError("camera.FOV.y_min must be less than y_max")
-        if self.fov_z_min >= self.fov_z_max:
-            raise ValueError("camera.FOV.z_min must be less than z_max")
 
     def __str__(self):
         """Return a string representation of the configuration."""

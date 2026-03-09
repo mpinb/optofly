@@ -24,7 +24,7 @@ from typing import List, Optional, Sequence, Tuple
 import numpy as np
 import zmq
 
-from src.utils.config import ConfigBase, TriggerHandlerConfig, ZMQConfig
+from src.utils.config import CameraConfig, TriggerHandlerConfig, ZMQConfig
 
 
 def clamp(value: float, lower: float, upper: float) -> float:
@@ -156,21 +156,12 @@ def load_environment(
 
     zmq_config = ZMQConfig(config_path)
 
-    config_root = ConfigBase(config_path)._load_config()
-    camera_config = config_root.get("camera", {})
-    fov = camera_config.get(
-        "FOV", {"x_min": -0.1, "x_max": 0.1, "y_min": -0.1, "y_max": 0.1}
-    )
-    x_min = float(fov.get("x_min", -0.1))
-    x_max = float(fov.get("x_max", 0.1))
-    y_min = float(fov.get("y_min", -0.1))
-    y_max = float(fov.get("y_max", 0.1))
-
+    camera_config = CameraConfig(config_path)
     corners = [
-        (x_min, y_min),
-        (x_min, y_max),
-        (x_max, y_min),
-        (x_max, y_max),
+        (camera_config.fov_x_min, camera_config.fov_y_min),
+        (camera_config.fov_x_min, camera_config.fov_y_max),
+        (camera_config.fov_x_max, camera_config.fov_y_min),
+        (camera_config.fov_x_max, camera_config.fov_y_max),
     ]
 
     trigger_config = TriggerHandlerConfig(config_path)
@@ -250,8 +241,11 @@ def publish(socket: zmq.Socket, topic: str, payload: dict) -> None:
 
 def run_simulation(args: argparse.Namespace) -> None:
     zmq_config, corners, trigger_config = load_environment(args.config)
-    z_bounds = trigger_config.z_lim
-    trigger_radius = trigger_config.radius
+    z_bounds = (trigger_config.z_min, trigger_config.z_max)
+    fov_x_min = trigger_config.fov_x_min
+    fov_x_max = trigger_config.fov_x_max
+    fov_y_min = trigger_config.fov_y_min
+    fov_y_max = trigger_config.fov_y_max
 
     if args.seed is not None:
         random.seed(args.seed)
@@ -337,17 +331,17 @@ def run_simulation(args: argparse.Namespace) -> None:
                         f"[{now:.3f}] Obj {fly.obj_id} crossed midline at x={position[0]:.3f}"
                     )
 
-                # Trigger zone entry detection
-                distance_xy = float(np.linalg.norm(position[:2]))
+                # Trigger zone entry detection (rectangular FOV + z bounds)
                 in_trigger = (
-                    distance_xy <= trigger_radius
+                    fov_x_min <= position[0] <= fov_x_max
+                    and fov_y_min <= position[1] <= fov_y_max
                     and z_bounds[0] <= position[2] <= z_bounds[1]
                 )
                 if in_trigger and not fly.entered_trigger_zone:
                     fly.entered_trigger_zone = True
                     print(
                         f"[{now:.3f}] Obj {fly.obj_id} entered trigger zone "
-                        f"(r={distance_xy:.3f}, z={position[2]:.3f})"
+                        f"(x={position[0]:.3f}, y={position[1]:.3f}, z={position[2]:.3f})"
                     )
 
                 update_payload = {

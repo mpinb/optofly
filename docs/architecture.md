@@ -10,7 +10,7 @@ Braid Server (100fps 3D tracking)
     v
 TriggerHandler (src/processes/tracking.py)
     Evaluates:
-      - Spatial: fly within cylindrical zone (radius + z_lim)?
+      - Spatial: fly within rectangular FOV (x/y) + z bounds?
       - Heading: moving toward arena center (within heading_cone_deg)?
       - Temporal: tracked continuously for >= min_trajectory_time?
       - Cooldown: >= min_trigger_interval since last trigger?

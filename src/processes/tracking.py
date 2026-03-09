@@ -209,13 +209,13 @@ class TriggerHandler(WorkerProcess):
         self.stop_event = event if event is not None else mp.Event()
         self.is_initialized = False
 
-        # Trigger zone = camera FOV (single source of truth)
+        # Trigger zone = camera FOV (x/y) + z bounds from trigger_handler
         self.fov_x_min = self.config.fov_x_min
         self.fov_x_max = self.config.fov_x_max
         self.fov_y_min = self.config.fov_y_min
         self.fov_y_max = self.config.fov_y_max
-        self.fov_z_min = self.config.fov_z_min
-        self.fov_z_max = self.config.fov_z_max
+        self.z_min = self.config.z_min
+        self.z_max = self.config.z_max
 
         # Track when the last trigger was sent
         self.last_trigger_time = 0.0
@@ -285,24 +285,9 @@ class TriggerHandler(WorkerProcess):
             self.logger.error(f"Unexpected error during ZMQ initialization: {e}")
             raise
 
-    def is_in_camera_fov(self, x: float, y: float) -> bool:
-        """
-        Check if a point is within the camera's field of view.
-
-        Args:
-            x: X-coordinate in meters
-            y: Y-coordinate in meters
-
-        Returns:
-            True if the point is within the FOV
-        """
-        return (self.fov_x_min <= x <= self.fov_x_max) and (
-            self.fov_y_min <= y <= self.fov_y_max
-        )
-
     def is_in_trigger_zone(self, x: float, y: float, z: float) -> bool:
         """
-        Check if a point is within the trigger zone (= camera FOV volume).
+        Check if a point is within the trigger zone (camera FOV x/y + z bounds).
 
         Args:
             x: X-coordinate in meters
@@ -315,7 +300,7 @@ class TriggerHandler(WorkerProcess):
         return (
             self.fov_x_min <= x <= self.fov_x_max
             and self.fov_y_min <= y <= self.fov_y_max
-            and self.fov_z_min <= z <= self.fov_z_max
+            and self.z_min <= z <= self.z_max
         )
 
     def process_message(self, message_data: Dict[str, Any]) -> None:
