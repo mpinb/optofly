@@ -63,29 +63,14 @@ class TriggerHandlerConfig(ConfigBase):
             config.get("min_trigger_interval", 10.0)
         )
 
-        # Spatial trigger zone settings
-        self.radius: float = float(config.get("radius", 0.025))
-        z_lim_config = config.get("z_lim", [0.0, 0.0])
-        try:
-            self.z_lim = (float(z_lim_config[0]), float(z_lim_config[1]))
-        except (TypeError, IndexError, ValueError):
-            raise ValueError(
-                "trigger_handler.z_lim must contain two numeric values"
-            ) from None
-
-        # Validate z_lim bounds
-        if self.z_lim[0] >= self.z_lim[1]:
-            raise ValueError(
-                f"trigger_handler.z_lim[0] must be less than z_lim[1], "
-                f"got z_lim={self.z_lim}"
-            )
-
-        # Validate reasonable bounds for fly tracking arena
-        if self.z_lim[0] < -1.0 or self.z_lim[1] > 2.0:
-            raise ValueError(
-                f"trigger_handler.z_lim values must be within reasonable bounds "
-                f"(-1.0m to 2.0m), got z_lim={self.z_lim}"
-            )
+        # Trigger zone = camera FOV (single source of truth)
+        camera_config = CameraConfig(config_path)
+        self.fov_x_min: float = camera_config.fov_x_min
+        self.fov_x_max: float = camera_config.fov_x_max
+        self.fov_y_min: float = camera_config.fov_y_min
+        self.fov_y_max: float = camera_config.fov_y_max
+        self.fov_z_min: float = camera_config.fov_z_min
+        self.fov_z_max: float = camera_config.fov_z_max
 
         # Heading cone configuration (degrees -> radians)
         self.heading_cone_deg: float = float(config.get("heading_cone_deg", 45.0))
@@ -141,6 +126,8 @@ class LiquidLensConfig(ConfigBase):
         self.fov_x_max = camera_config.fov_x_max
         self.fov_y_min = camera_config.fov_y_min
         self.fov_y_max = camera_config.fov_y_max
+        self.fov_z_min = camera_config.fov_z_min
+        self.fov_z_max = camera_config.fov_z_max
 
         # Kalman filter settings
         kalman_config = config.get("kalman", {})
@@ -156,15 +143,6 @@ class LiquidLensConfig(ConfigBase):
         self.system_latency: float = kalman_config.get("system_latency", 0.05)
         # How far in the future to predict (in seconds) for Kalman filter
         self.prediction_horizon: float = kalman_config.get("prediction_horizon", 0.1)
-
-        # Predictive tracking settings (trajectory-based lens triggering)
-        prediction_config = config.get("prediction", {})
-        # Enable/disable predictive lens tracking
-        self.predictive_tracking: bool = prediction_config.get("enabled", False)
-        # How far ahead to predict trajectory intersection (seconds)
-        self.prediction_horizon_trajectory: float = prediction_config.get("horizon", 1.5)
-        # Time step for trajectory sampling (seconds)
-        self.prediction_time_step: float = prediction_config.get("time_step", 0.1)
 
         # ZMQ configuration
         self.zmq = ZMQConfig(config_path)
@@ -185,7 +163,6 @@ class ZMQConfig(ConfigBase):
         # Topics
         self.braid_topic: str = config["braid_topic"]
         self.trigger_topic: str = config["trigger_topic"]
-        self.lens_topic: str = config["lens_topic"]
 
         # Validate configuration
         self._validate_config()
@@ -442,11 +419,15 @@ class CameraConfig(ConfigBase):
         self.fov_x_max: float = float(fov_config.get("x_max", 0.1))
         self.fov_y_min: float = float(fov_config.get("y_min", -0.1))
         self.fov_y_max: float = float(fov_config.get("y_max", 0.1))
+        self.fov_z_min: float = float(fov_config.get("z_min", 0.0))
+        self.fov_z_max: float = float(fov_config.get("z_max", 0.5))
 
         if self.fov_x_min >= self.fov_x_max:
             raise ValueError("camera.FOV.x_min must be less than x_max")
         if self.fov_y_min >= self.fov_y_max:
             raise ValueError("camera.FOV.y_min must be less than y_max")
+        if self.fov_z_min >= self.fov_z_max:
+            raise ValueError("camera.FOV.z_min must be less than z_max")
 
     def __str__(self):
         """Return a string representation of the configuration."""
