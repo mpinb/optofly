@@ -123,7 +123,7 @@ prediction_horizon = 0.1         # Prediction lookahead time (seconds)
 [liquid_lens.prediction]
 # Predictive lens tracking (trajectory-based triggering)
 enabled = false                  # Enable predictive lens triggering
-horizon = 1.5                    # How far ahead to predict trajectory (seconds)
+horizon = 0.5                    # How far ahead to predict trajectory (seconds)
 time_step = 0.1                  # Time interval for trajectory sampling (seconds)
 
 # ==============================================================================

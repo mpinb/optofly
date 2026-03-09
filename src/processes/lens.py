@@ -214,6 +214,9 @@ class LiquidLens(WorkerProcess):
             self.trigger_socket.setsockopt_string(
                 zmq.SUBSCRIBE, self.zmq_config.trigger_topic
             )
+            self.trigger_socket.setsockopt_string(
+                zmq.SUBSCRIBE, self.zmq_config.lens_topic
+            )
             self.logger.debug("Connected to BraidPublisher and TriggerHandler.")
         except Exception as e:
             self.logger.error(f"Error connecting to ZMQ sockets: {e}")
@@ -221,7 +224,7 @@ class LiquidLens(WorkerProcess):
 
     def _receive_message(
         self, socket: zmq.Socket, message_type: Literal["braid", "trigger"]
-    ) -> Dict:
+    ) -> Tuple[Optional[str], Optional[Dict]]:
         """
         Receive a message from the specified ZMQ socket.
 
@@ -230,18 +233,18 @@ class LiquidLens(WorkerProcess):
             message_type: Type of message ('braid' or 'trigger') for error logging
 
         Returns:
-            The parsed message or None if no message available
+            Tuple of (topic, parsed_message) or (None, None) if no message available
         """
         try:
             topic, message = socket.recv_multipart(flags=zmq.NOBLOCK)
-            topic = topic.decode('utf-8')
-            json_data = message.decode('utf-8')
-            return json.loads(json_data)
+            topic = topic.decode("utf-8")
+            json_data = message.decode("utf-8")
+            return topic, json.loads(json_data)
         except zmq.Again:
-            return None
+            return None, None
         except Exception as e:
             self.logger.error(f"Error receiving {message_type} message: {e}")
-            return None
+            return None, None
 
     def _parse_message(
         self, message: Dict, message_type: Literal["braid", "trigger"]
@@ -469,25 +472,43 @@ class LiquidLens(WorkerProcess):
 
         while self.is_running and not self.stop_event.is_set():
             try:
-                # Check for messages from the TriggerHandler
-                trigger_data = self._parse_message(
-                    self._receive_message(self.trigger_socket, "trigger"), "trigger"
-                )
+                # Check for messages from the TriggerHandler (TRIGGER or LENS topic)
+                topic, raw_msg = self._receive_message(self.trigger_socket, "trigger")
+                trigger_data = self._parse_message(raw_msg, "trigger")
 
-                if trigger_data is not None:
+                if trigger_data is not None and topic is not None:
                     obj_id = trigger_data.get("obj_id")
                     frame = trigger_data.get("frame")
 
                     if obj_id is not None and frame is not None:
-                        self.logger.info(
-                            f"Received trigger for object {obj_id} on frame {frame}"
-                        )
-                        self.is_tracking = True
-                        self.tracking_start_time = time.time()
-                        self.current_tracked_obj = obj_id
-                        self.last_position_time = (
-                            time.time()
-                        )  # Track last time we got position data
+                        is_lens_trigger = topic == self.zmq_config.lens_topic
+                        is_main_trigger = topic == self.zmq_config.trigger_topic
+
+                        if is_lens_trigger and not self.is_tracking:
+                            # LENS trigger: start predictive tracking
+                            self.logger.info(
+                                f"Received LENS trigger for object {obj_id} on frame {frame} — starting predictive tracking"
+                            )
+                            self.is_tracking = True
+                            self.tracking_start_time = time.time()
+                            self.current_tracked_obj = obj_id
+                            self.last_position_time = time.time()
+                        elif is_main_trigger:
+                            if self.is_tracking and self.current_tracked_obj == obj_id:
+                                # Already tracking from LENS trigger — seamless handoff
+                                self.logger.info(
+                                    f"Received TRIGGER for object {obj_id} — continuing lens tracking (handoff)"
+                                )
+                                self.tracking_start_time = time.time()
+                            else:
+                                # Regular trigger, start fresh tracking
+                                self.logger.info(
+                                    f"Received TRIGGER for object {obj_id} on frame {frame}"
+                                )
+                                self.is_tracking = True
+                                self.tracking_start_time = time.time()
+                                self.current_tracked_obj = obj_id
+                                self.last_position_time = time.time()
 
                 # Inner loop for tracking object
                 position_timeout = (
@@ -499,10 +520,24 @@ class LiquidLens(WorkerProcess):
                     and time.time() - self.tracking_start_time
                     < self.lens_config.tracking_timeout
                 ):
-                    # Try to get position data for the tracked object
-                    braid_data = self._parse_message(
-                        self._receive_message(self.braid_socket, "braid"), "braid"
+                    # Check for TRIGGER messages during tracking (for LENS→TRIGGER handoff)
+                    handoff_topic, handoff_raw = self._receive_message(
+                        self.trigger_socket, "trigger"
                     )
+                    handoff_data = self._parse_message(handoff_raw, "trigger")
+                    if (
+                        handoff_data is not None
+                        and handoff_topic == self.zmq_config.trigger_topic
+                        and handoff_data.get("obj_id") == self.current_tracked_obj
+                    ):
+                        self.logger.info(
+                            f"Received TRIGGER for object {self.current_tracked_obj} during predictive tracking — handoff, resetting timeout"
+                        )
+                        self.tracking_start_time = time.time()
+
+                    # Try to get position data for the tracked object
+                    _, braid_raw = self._receive_message(self.braid_socket, "braid")
+                    braid_data = self._parse_message(braid_raw, "braid")
 
                     if braid_data is None:
                         # Check if we've waited too long for position data
@@ -613,8 +648,10 @@ class LiquidLens(WorkerProcess):
                     self.is_tracking = False
 
                 # Drain any stale trigger messages that queued during tracking
-                while self._receive_message(self.trigger_socket, "trigger") is not None:
-                    pass
+                while True:
+                    _, drain_msg = self._receive_message(self.trigger_socket, "trigger")
+                    if drain_msg is None:
+                        break
 
             except Exception as e:
                 self.logger.error(f"Error in Liquid Lens process: {e}")

@@ -286,6 +286,9 @@ class TriggerHandler(WorkerProcess):
         # Dictionary to track objects: {obj_id: TrackedObject}
         self.tracked_objects = {}
 
+        # Track objects that already received a LENS trigger (deduplication)
+        self.lens_triggered_objects: set = set()
+
         # ZMQ connections
         self.context = None
         self.subscriber = None
@@ -504,6 +507,7 @@ class TriggerHandler(WorkerProcess):
             if obj_id in self.tracked_objects:
                 self.logger.debug(f"Stopped tracking object {obj_id}")
                 del self.tracked_objects[obj_id]
+                self.lens_triggered_objects.discard(obj_id)
             else:
                 self.logger.warning(f"Received Death for unknown object {obj_id}")
         except Exception as e:
@@ -547,9 +551,10 @@ class TriggerHandler(WorkerProcess):
                 self.lens_config.prediction_time_step,
             )
 
-            if will_trigger:
-                # Send LENS trigger to start tracking early
+            if will_trigger and tracked_obj.obj_id not in self.lens_triggered_objects:
+                # Send LENS trigger to start tracking early (once per object)
                 self._send_lens_trigger(tracked_obj, time_to_trigger)
+                self.lens_triggered_objects.add(tracked_obj.obj_id)
 
         # Check global cooldown
         if current_time - self.last_trigger_time < self.config.min_trigger_interval:
