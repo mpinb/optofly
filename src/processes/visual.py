@@ -402,7 +402,7 @@ class VisualStimuliProcess(WorkerProcess):
         avg_fps = 1.0 / avg_frame_time if avg_frame_time > 0 else 0
 
         # Warn if performance degraded below 92.5% of target FPS
-        target_fps = self.config.get("target_fps", 240)
+        target_fps = self.config.get("target_fps", 60)
         threshold_frame_time = 1.0 / (target_fps * 0.925)
 
         if avg_frame_time > threshold_frame_time:
