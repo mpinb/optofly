@@ -1,9 +1,9 @@
 """
-Trigger Handler module that processes tracking data and generates stimulation triggers.
+Trigger Handler module that processes tracking data and generates zone events.
 
 This module subscribes to the Braid server's ZMQ feed, processes object tracking data,
-and sends trigger signals for optical stimulation and liquid lens systems based on
-configurable spatial and temporal criteria.
+and emits ZONE_ENTER / ZONE_EXIT events when objects enter or leave the trigger zone
+(camera FOV x/y + z bounds) while heading toward center.
 """
 
 from collections import deque
@@ -51,6 +51,10 @@ class TrackedObject:
     current_z: float = 0.0
     current_frame: int = 0
     current_timestamp: float = 0.0
+
+    # Zone membership tracking
+    in_zone: bool = False
+    zone_enter_time: Optional[float] = None
 
     # Track last time this object was checked
     last_check_time: float = field(default_factory=time.time)
@@ -169,13 +173,14 @@ class TrackedObject:
         mean_vel = np.mean(velocities_array, axis=0)
         return tuple(mean_vel)
 
+
 class TriggerHandler(WorkerProcess):
     """
-    Process that evaluates tracking data and generates stimulation triggers.
+    Process that evaluates tracking data and emits zone enter/exit events.
 
-    This class subscribes to the Braid server ZMQ feed, processes object tracking data,
-    and sends trigger signals for optical stimulation and liquid lens control based
-    on configurable spatial and temporal criteria.
+    Subscribes to the Braid ZMQ feed, tracks objects, and emits ZONE_ENTER when
+    a fly enters the trigger zone (camera FOV + z bounds) while heading toward
+    center. Emits ZONE_EXIT when the fly leaves the zone, dies, or times out.
     """
 
     def __init__(
@@ -186,17 +191,6 @@ class TriggerHandler(WorkerProcess):
         log_level: str = "INFO",
         log_color: str = "MAGENTA",
     ):
-        """
-        Initialize the TriggerHandler.
-
-        Args:
-            config_path: Path to the configuration file
-            event: Event to signal process termination (created if None)
-            process_name: Name to display in logs
-            log_level: Logging level to use
-            log_color: Color for log messages
-        """
-        # Pass parameters to parent class (WorkerProcess)
         super().__init__(
             event=event,
             log_level=log_level,
@@ -204,7 +198,6 @@ class TriggerHandler(WorkerProcess):
             process_name=process_name,
         )
 
-        # Initialize TriggerHandler-specific attributes
         self.config = TriggerHandlerConfig(config_path)
         self.stop_event = event if event is not None else mp.Event()
         self.is_initialized = False
@@ -217,9 +210,6 @@ class TriggerHandler(WorkerProcess):
         self.z_min = self.config.z_min
         self.z_max = self.config.z_max
 
-        # Track when the last trigger was sent
-        self.last_trigger_time = 0.0
-
         # Dictionary to track objects: {obj_id: TrackedObject}
         self.tracked_objects = {}
 
@@ -229,13 +219,7 @@ class TriggerHandler(WorkerProcess):
         self.publisher = None
 
     def initialize(self) -> bool:
-        """
-        Initialize the trigger handler and ZMQ connections.
-
-        Returns:
-            True if initialization was successful, False otherwise
-        """
-        # Initialize logger in child process (after spawn)
+        """Initialize the trigger handler and ZMQ connections."""
         self._initialize_logger()
         self.logger.info("Initializing TriggerHandler")
 
@@ -249,14 +233,11 @@ class TriggerHandler(WorkerProcess):
             return False
 
     def _initialize_zmq(self) -> None:
-        """
-        Initialize ZMQ publisher and subscriber connections.
-        """
+        """Initialize ZMQ publisher and subscriber connections."""
         try:
-            # Create ZMQ context
             self.context = zmq.Context()
 
-            # Set up publisher for triggers
+            # Publisher for zone events (ZONE_ENTER, ZONE_EXIT)
             self.publisher = self.context.socket(zmq.PUB)
             publisher_address = self.config.zmq.get_publisher_address(
                 self.config.zmq.trigger_port
@@ -264,7 +245,7 @@ class TriggerHandler(WorkerProcess):
             self.logger.info(f"Binding ZMQ publisher to {publisher_address}")
             self.publisher.bind(publisher_address)
 
-            # Set up subscriber to receive from Braid
+            # Subscriber for Braid tracking data
             self.subscriber = self.context.socket(zmq.SUB)
             subscriber_address = self.config.zmq.get_subscriber_address(
                 self.config.zmq.braid_port
@@ -272,7 +253,6 @@ class TriggerHandler(WorkerProcess):
             self.logger.info(f"Connecting ZMQ subscriber to {subscriber_address}")
             self.subscriber.connect(subscriber_address)
 
-            # Subscribe to Braid messages
             self.subscriber.setsockopt_string(
                 zmq.SUBSCRIBE, self.config.zmq.braid_topic
             )
@@ -286,17 +266,7 @@ class TriggerHandler(WorkerProcess):
             raise
 
     def is_in_trigger_zone(self, x: float, y: float, z: float) -> bool:
-        """
-        Check if a point is within the trigger zone (camera FOV x/y + z bounds).
-
-        Args:
-            x: X-coordinate in meters
-            y: Y-coordinate in meters
-            z: Z-coordinate in meters
-
-        Returns:
-            True if the point is within the trigger zone
-        """
+        """Check if a point is within the trigger zone (camera FOV x/y + z bounds)."""
         return (
             self.fov_x_min <= x <= self.fov_x_max
             and self.fov_y_min <= y <= self.fov_y_max
@@ -304,14 +274,8 @@ class TriggerHandler(WorkerProcess):
         )
 
     def process_message(self, message_data: Dict[str, Any]) -> None:
-        """
-        Process a message from the Braid server.
-
-        Args:
-            message_data: Parsed message data
-        """
+        """Process a message from the Braid server."""
         try:
-            # Check message type (Birth, Update, Death)
             if "Birth" in message_data:
                 self._process_birth(message_data["Birth"])
             elif "Update" in message_data:
@@ -319,7 +283,6 @@ class TriggerHandler(WorkerProcess):
             elif "Death" in message_data:
                 self._process_death(message_data["Death"])
             elif "CalibrationFlydraXml" in message_data:
-                # TODO: Ignore these types of messages
                 pass
             else:
                 self.logger.warning(f"Unknown message type: {message_data.keys()}")
@@ -327,23 +290,13 @@ class TriggerHandler(WorkerProcess):
             self.logger.error(f"Error processing message: {e}")
 
     def _process_birth(self, data: Dict[str, Any]) -> None:
-        """
-        Process a Birth message for a new tracked object.
-
-        Args:
-            data: Birth message data
-        """
+        """Process a Birth message for a new tracked object."""
         try:
             obj_id = data["obj_id"]
             frame = data["frame"]
-            timestamp = (
-                time.time()
-            )  # Use local timestamp (Braid messages don't include timestamp)
+            timestamp = time.time()
 
-            # Create new tracked object
             tracked_obj = TrackedObject(obj_id=obj_id, first_timestamp=timestamp)
-
-            # Update with initial position and velocity
             tracked_obj.update(
                 x=data["x"],
                 y=data["y"],
@@ -356,7 +309,6 @@ class TriggerHandler(WorkerProcess):
                 min_velocity=self.config.min_velocity,
             )
 
-            # Add to tracked objects
             self.tracked_objects[obj_id] = tracked_obj
             self.logger.debug(
                 f"Started tracking object {obj_id} at position "
@@ -368,28 +320,19 @@ class TriggerHandler(WorkerProcess):
             self.logger.error(f"Error processing Birth message: {e}")
 
     def _process_update(self, data: Dict[str, Any]) -> None:
-        """
-        Process an Update message for an existing tracked object.
-
-        Args:
-            data: Update message data
-        """
+        """Process an Update message for an existing tracked object."""
         try:
             obj_id = data["obj_id"]
             frame = data["frame"]
-            timestamp = (
-                time.time()
-            )  # Use local timestamp (Braid messages don't include timestamp)
+            timestamp = time.time()
 
-            # Check if we're already tracking this object
             if obj_id not in self.tracked_objects:
                 self.logger.debug(
                     f"Received Update for unknown object {obj_id}, creating new tracking entry"
                 )
-                self._process_birth(data)  # Treat as Birth if not already tracking
+                self._process_birth(data)
                 return
 
-            # Update the tracked object
             tracked_obj = self.tracked_objects[obj_id]
             tracked_obj.update(
                 x=data["x"],
@@ -403,8 +346,7 @@ class TriggerHandler(WorkerProcess):
                 min_velocity=self.config.min_velocity,
             )
 
-            # Evaluate triggers based on updated position and trajectory
-            self._evaluate_triggers(tracked_obj)
+            self._evaluate_zone_transitions(tracked_obj)
 
         except KeyError as e:
             self.logger.error(f"Missing field in Update message: {e}")
@@ -412,15 +354,13 @@ class TriggerHandler(WorkerProcess):
             self.logger.error(f"Error processing Update message: {e}")
 
     def _process_death(self, data) -> None:
-        """
-        Process a Death message for a tracked object.
-
-        Args:
-            data: Death message data — either an int (obj_id) or a dict with "obj_id" key
-        """
+        """Process a Death message for a tracked object."""
         try:
             obj_id = data if isinstance(data, int) else data.get("obj_id", data)
             if obj_id in self.tracked_objects:
+                tracked_obj = self.tracked_objects[obj_id]
+                if tracked_obj.in_zone:
+                    self._send_zone_exit(tracked_obj, reason="death")
                 self.logger.debug(f"Stopped tracking object {obj_id}")
                 del self.tracked_objects[obj_id]
             else:
@@ -428,79 +368,95 @@ class TriggerHandler(WorkerProcess):
         except Exception as e:
             self.logger.error(f"Error processing Death message: {e}")
 
-    def _evaluate_triggers(self, tracked_obj: TrackedObject) -> None:
+    def _evaluate_zone_transitions(self, tracked_obj: TrackedObject) -> None:
         """
-        Evaluate whether to send trigger signals based on the object's trajectory.
+        Evaluate zone enter/exit transitions for a tracked object.
 
-        Single-stage trigger system:
-        - Trigger fires when fly enters trigger zone + heading toward center
-        - All systems (camera, opto, visual) activate together
-
-        Args:
-            tracked_obj: The tracked object to evaluate
+        - Enter: object moves into trigger zone AND is heading toward center
+        - Exit: object was in zone and moves out of trigger zone
+        - Once in zone, heading changes do NOT cause exit (only physical departure)
         """
-        current_time = time.time()
         x, y, z = tracked_obj.current_x, tracked_obj.current_y, tracked_obj.current_z
+        in_zone_now = self.is_in_trigger_zone(x, y, z)
 
-        # Check global cooldown (cheapest, blocks all objects)
-        if current_time - self.last_trigger_time < self.config.min_trigger_interval:
-            return
+        if not tracked_obj.in_zone and in_zone_now:
+            # Entering zone — require heading toward center
+            if tracked_obj.is_heading_toward_center(self.config.heading_threshold):
+                tracked_obj.in_zone = True
+                tracked_obj.zone_enter_time = time.time()
+                self._send_zone_enter(tracked_obj)
+        elif tracked_obj.in_zone and not in_zone_now:
+            # Leaving zone
+            self._send_zone_exit(tracked_obj, reason="left_fov")
+            tracked_obj.in_zone = False
+            tracked_obj.zone_enter_time = None
 
-        # Check if object is in trigger zone (3 float comparisons)
-        if not self.is_in_trigger_zone(x, y, z):
-            return
-
-        # Check if object has been tracked long enough
-        tracking_duration = tracked_obj.get_tracking_duration(current_time)
-        if tracking_duration < self.config.min_trajectory_time:
-            return
-
-        # Check if object is heading toward center (most expensive: circular mean + arctan2)
-        if tracked_obj.is_heading_toward_center(self.config.heading_threshold):
-            # Send trigger (all systems activate)
-            self._send_trigger(tracked_obj)
-            # Update last trigger time (enforces global cooldown)
-            self.last_trigger_time = current_time
-
-    def _send_trigger(self, tracked_obj: TrackedObject) -> None:
-        """
-        Send a trigger message for camera recording and optogenetic stimulation.
-
-        Args:
-            tracked_obj: The TrackedObject that triggered the action
-        """
+    def _send_zone_enter(self, tracked_obj: TrackedObject) -> None:
+        """Emit a ZONE_ENTER event."""
         try:
-            # Get mean heading (may be None if not enough data)
             mean_heading = tracked_obj.get_mean_heading()
-
-            # Create message with all relevant fields
             message_data = {
                 "obj_id": tracked_obj.obj_id,
                 "frame": tracked_obj.current_frame,
-                "braid_timestamp": tracked_obj.current_timestamp,
-                "trigger_timestamp": time.time(),
+                "timestamp": time.time(),
+                "x": tracked_obj.current_x,
+                "y": tracked_obj.current_y,
+                "z": tracked_obj.current_z,
                 "mean_heading": mean_heading,
-                # Keep old 'timestamp' field for backward compatibility
-                "timestamp": tracked_obj.current_timestamp,
             }
 
             message = json.dumps(message_data)
-            self.publisher.send_multipart(
-                [self.config.zmq.trigger_topic.encode("utf-8"), message.encode("utf-8")]
-            )
+            topic = self.config.zmq.zone_enter_topic.encode("utf-8")
+            self.publisher.send_multipart([topic, message.encode("utf-8")])
             self.logger.info(
-                f"Sent TRIGGER for object {tracked_obj.obj_id} "
-                f"(frame={tracked_obj.current_frame}, heading={mean_heading})"
+                f"ZONE_ENTER obj={tracked_obj.obj_id} "
+                f"pos=({tracked_obj.current_x:.3f}, {tracked_obj.current_y:.3f}, {tracked_obj.current_z:.3f}) "
+                f"heading={mean_heading}"
             )
         except Exception as e:
-            self.logger.error(f"Error sending trigger: {e}")
+            self.logger.error(f"Error sending ZONE_ENTER: {e}")
+
+    def _send_zone_exit(self, tracked_obj: TrackedObject, reason: str) -> None:
+        """Emit a ZONE_EXIT event."""
+        try:
+            now = time.time()
+            duration = (
+                now - tracked_obj.zone_enter_time
+                if tracked_obj.zone_enter_time
+                else 0.0
+            )
+            message_data = {
+                "obj_id": tracked_obj.obj_id,
+                "reason": reason,
+                "timestamp": now,
+                "duration": duration,
+            }
+
+            message = json.dumps(message_data)
+            topic = self.config.zmq.zone_exit_topic.encode("utf-8")
+            self.publisher.send_multipart([topic, message.encode("utf-8")])
+            self.logger.info(
+                f"ZONE_EXIT obj={tracked_obj.obj_id} reason={reason} "
+                f"duration={duration:.2f}s"
+            )
+        except Exception as e:
+            self.logger.error(f"Error sending ZONE_EXIT: {e}")
 
     def _cleanup_stale_objects(self) -> None:
-        """Remove objects that haven't been updated recently."""
+        """Remove objects that haven't been updated recently.
+        If an in-zone object times out, emit ZONE_EXIT first."""
         current_time = time.time()
         stale_ids = []
 
         for obj_id, obj in self.tracked_objects.items():
+            if (
+                obj.in_zone
+                and current_time - obj.last_check_time > self.config.zone_timeout
+            ):
+                self._send_zone_exit(obj, reason="timeout")
+                obj.in_zone = False
+                obj.zone_enter_time = None
+
             if current_time - obj.last_check_time > MAX_OBJECT_AGE:
                 stale_ids.append(obj_id)
 
@@ -509,16 +465,13 @@ class TriggerHandler(WorkerProcess):
             del self.tracked_objects[obj_id]
 
     def run(self) -> None:
-        """
-        Main process loop for the trigger handler.
-        """
+        """Main process loop for the trigger handler."""
         if not self.is_initialized and not self.initialize():
             self.logger.error("Failed to initialize, exiting process")
             return
 
         self.logger.info("Starting TriggerHandler process")
 
-        # Set up poller for non-blocking receive
         poller = zmq.Poller()
         poller.register(self.subscriber, zmq.POLLIN)
 
@@ -530,19 +483,12 @@ class TriggerHandler(WorkerProcess):
                 socks = dict(poller.poll(1))
 
                 if self.subscriber in socks and socks[self.subscriber] == zmq.POLLIN:
-                    # Process incoming message
                     try:
-                        # Receive multipart message (topic, content)
                         topic, message = self.subscriber.recv_multipart()
                         topic = topic.decode("utf-8")
                         json_str = message.decode("utf-8")
-
-                        # Parse JSON message
                         message_data = json.loads(json_str)
-
-                        # Process the message
                         self.process_message(message_data)
-
                     except json.JSONDecodeError as e:
                         self.logger.error(f"Error decoding JSON message: {e}")
                     except Exception as e:
@@ -550,14 +496,13 @@ class TriggerHandler(WorkerProcess):
 
                 # Periodically clean up stale objects
                 current_time = time.time()
-                if current_time - cleanup_timer > 5.0:  # Clean up every 5 seconds
+                if current_time - cleanup_timer > 5.0:
                     self._cleanup_stale_objects()
                     cleanup_timer = current_time
 
         except KeyboardInterrupt:
-            pass  # Graceful shutdown via stop_event
+            pass
 
-        # Clean up
         self.logger.info("Stopping TriggerHandler")
         self._cleanup()
 
@@ -579,7 +524,6 @@ class TriggerHandler(WorkerProcess):
 if __name__ == "__main__":
     import argparse
 
-    # Parse command line arguments
     parser = argparse.ArgumentParser(description="TriggerHandler Process")
     parser.add_argument(
         "--config", "-c", default="configs/config.toml", help="Path to config file"
@@ -593,14 +537,12 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    # Configure logging
     logger = init_class_logger(
         instance=None,
         log_level=args.log_level,
         process_name="TriggerHandler",
         init_message="Starting TriggerHandler process",
     )
-    # Create and run trigger handler
     stop_event = mp.Event()
     handler = TriggerHandler(config_path=args.config, event=stop_event)
 
@@ -608,8 +550,6 @@ if __name__ == "__main__":
         if handler.initialize():
             handler.start()
             logger.info("Press Ctrl+C to stop")
-
-            # Wait for process to complete
             handler.join()
         else:
             logger.error("Failed to initialize handler")

@@ -24,18 +24,18 @@ trigger_queue = queue.Queue()
 
 
 def zmq_listener(zmq_address="tcp://localhost:23456"):
-    """Listen for TRIGGER messages over ZMQ and update trigger_data."""
+    """Listen for ZONE_ENTER messages over ZMQ and update trigger_data."""
     context = zmq.Context()
     subscriber = context.socket(zmq.SUB)
     subscriber.connect(zmq_address)
-    subscriber.setsockopt_string(zmq.SUBSCRIBE, "TRIGGER")
+    subscriber.setsockopt_string(zmq.SUBSCRIBE, "ZONE_ENTER")
 
     while True:
         topic, message = subscriber.recv_multipart()
         topic = topic.decode("utf-8")
         json_data = message.decode("utf-8")
 
-        if topic == "TRIGGER":
+        if topic == "ZONE_ENTER":
             data = json.loads(json_data)
 
             with trigger_lock:
@@ -74,7 +74,7 @@ def stream():
 
                 # Add current time HHMMSS to the trigger data as the first key
                 trigger["time"] = datetime.datetime.now().strftime("%H%M%S")
-                
+
                 data = json.dumps({"count": trigger_data["count"], "trigger": trigger})
 
                 yield f"data: {data}\n\n"

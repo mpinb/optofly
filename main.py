@@ -22,6 +22,7 @@ from src.processes.lens import LiquidLens
 from src.utils.braid import check_braid_folder_exists, copy_csv_files_to_braid
 from src.monitoring.server import run_server
 
+import serial
 
 def load_config(config_path: str) -> dict:
     """Load configuration from TOML file.
@@ -198,6 +199,11 @@ def main():
         # Core processes (always started)
         print("\nStarting core processes...")
 
+        # 0. BacklightController - turn on the backlight
+        # backlight_ser = serial.Serial("/dev/ttyUSB1", baudrate=115200, timeout=1)
+        # time.sleep(2.0) # wait for the arduino to reset
+        # backlight_ser.write(b"255\n")
+
         # 1. BraidPublisher - connects to Braid tracking and publishes to ZMQ
         print("  ✓ BraidPublisher")
         braid_publisher = BraidPublisher(config_path=config_path, event=stop_event)
@@ -263,7 +269,9 @@ def main():
             active_process_names.append("CameraProcess")
 
             print("  ✓ LiquidLens")
-            liquid_lens = LiquidLens(event=stop_event, config_path=config_path)
+            liquid_lens = LiquidLens(
+                event=stop_event, config_path=config_path, braid_folder=braid_folder
+            )
             liquid_lens.start()
             processes.append(("LiquidLens", liquid_lens))
             active_process_names.append("LiquidLens")
@@ -313,6 +321,11 @@ def main():
         # Graceful shutdown
         print("\nShutting down processes...")
         stop_event.set()
+
+        # Turn off backlight, disconnect
+        # backlight_ser.write(b"0\n")
+        # backlight_ser.flush()
+        # backlight_ser.close()
 
         # Give processes time to cleanup
         time.sleep(1)

@@ -1,4 +1,5 @@
 import multiprocessing as mp
+import os
 from typing import Optional, Dict, Tuple, Literal
 
 import time
@@ -11,6 +12,7 @@ from sklearn.preprocessing import PolynomialFeatures
 import json
 
 from src.utils.config import LiquidLensConfig, ZMQConfig, CameraConfig
+from src.utils.csv_writer import CSVWriter
 from src.utils.worker import WorkerProcess
 from src.utils.kalman_filter import KalmanFilter
 from src.hardware.lens import LensDriver
@@ -94,23 +96,24 @@ class LiquidLens(WorkerProcess):
         self,
         event: mp.Event,
         config_path: str = "configs/config.toml",
+        braid_folder: Optional[str] = None,
         process_name: str = "LiquidLens",
         log_level: str = "INFO",
-        log_color: str = "GREEN",  # Use uppercase for consistency
+        log_color: str = "GREEN",
     ):
         """
-        Initialize the BraidSubscriber.
+        Initialize the LiquidLens process.
 
         Args:
-            config_path: Path to the configuration file
             event: Event to signal process termination
+            config_path: Path to the configuration file
+            braid_folder: Path to braid experiment folder for CSV logging
+            process_name: Name to display in logs
             log_level: Logging level to use
             log_color: Color for log messages
-            process_name: Name to display in logs
         """
         if event is None:
             raise ValueError("LiquidLens requires an external stop event.")
-        # Pass parameters to parent class
         super().__init__(
             event=event,
             log_level=log_level,
@@ -118,10 +121,8 @@ class LiquidLens(WorkerProcess):
             process_name=process_name,
         )
 
-        # Initialize logger before any log calls
         self._initialize_logger()
 
-        # Initialize our specific attributes
         self.lens_config = LiquidLensConfig(config_path)
         self.zmq_config = ZMQConfig(config_path)
         self.camera_config = CameraConfig(config_path)
@@ -129,7 +130,8 @@ class LiquidLens(WorkerProcess):
         self.is_running = False
         self.is_tracking = False
         self.current_tracked_obj = None
-        # Dictionary to store Kalman filters for each tracked object
+        self.braid_folder = braid_folder
+        self.csv_writer = None
         self.kalman_filters = {}
 
     def initialize(self):
@@ -147,6 +149,9 @@ class LiquidLens(WorkerProcess):
 
         # initialize the lens
         self._initialize_lens()
+
+        # initialize CSV writer for debug logging
+        self._initialize_csv()
 
         # Log the Kalman filter configuration
         if self.lens_config.kalman_enabled:
@@ -174,6 +179,23 @@ class LiquidLens(WorkerProcess):
             self.logger.error(f"Error initializing lens driver: {e}")
             raise
 
+    def _initialize_csv(self):
+        """Initialize CSV writer for lens debug logging."""
+        if self.braid_folder:
+            csv_path = os.path.join(self.braid_folder, "liquid_lens.csv")
+        else:
+            csv_path = "liquid_lens.csv"
+        self.csv_writer = CSVWriter(csv_path, strict=False)
+        self.logger.info(f"CSV logging to: {csv_path}")
+
+    def _log_csv(self, event: str, **kwargs):
+        """Append a row to the lens CSV log."""
+        if self.csv_writer is None:
+            return
+        row = {"timestamp": time.time(), "event": event}
+        row.update(kwargs)
+        self.csv_writer.append(row)
+
     def _initialize_calibration_model(self):
         """
         Initialize the lens calibration model.
@@ -200,15 +222,20 @@ class LiquidLens(WorkerProcess):
                 zmq.SUBSCRIBE, self.zmq_config.braid_topic
             )
 
-            # Connect to the TriggerHandler
+            # Connect to the TriggerHandler for zone events
             self.trigger_socket = self.context.socket(zmq.SUB)
             self.trigger_socket.connect(
                 self.zmq_config.get_subscriber_address(self.zmq_config.trigger_port)
             )
             self.trigger_socket.setsockopt_string(
-                zmq.SUBSCRIBE, self.zmq_config.trigger_topic
+                zmq.SUBSCRIBE, self.zmq_config.zone_enter_topic
             )
-            self.logger.debug("Connected to BraidPublisher and TriggerHandler.")
+            self.trigger_socket.setsockopt_string(
+                zmq.SUBSCRIBE, self.zmq_config.zone_exit_topic
+            )
+            self.logger.debug(
+                "Connected to BraidPublisher and TriggerHandler (zone events)."
+            )
         except Exception as e:
             self.logger.error(f"Error connecting to ZMQ sockets: {e}")
             raise
@@ -440,50 +467,64 @@ class LiquidLens(WorkerProcess):
         self.is_running = True
         self.logger.info("Liquid Lens process started.")
 
+        # Safety timeout: stop tracking if no position updates for this long
+        position_timeout = 0.5
+
         while self.is_running and not self.stop_event.is_set():
             try:
-                # Check for TRIGGER messages from the TriggerHandler
+                # --- Poll trigger socket for ZONE_ENTER / ZONE_EXIT ---
                 topic, raw_msg = self._receive_message(self.trigger_socket, "trigger")
-                trigger_data = self._parse_message(raw_msg, "trigger")
+                if topic is not None and raw_msg is not None:
+                    if (
+                        topic == self.zmq_config.zone_enter_topic
+                        and not self.is_tracking
+                    ):
+                        obj_id = raw_msg.get("obj_id")
+                        if obj_id is not None:
+                            self.logger.info(
+                                f"ZONE_ENTER: start tracking object {obj_id}"
+                            )
+                            self.is_tracking = True
+                            self.current_tracked_obj = obj_id
+                            self.last_position_time = time.time()
+                            self._log_csv("zone_enter", obj_id=obj_id)
+                    elif topic == self.zmq_config.zone_exit_topic and self.is_tracking:
+                        if raw_msg.get("obj_id") == self.current_tracked_obj:
+                            reason = raw_msg.get("reason", "unknown")
+                            self.logger.info(
+                                f"ZONE_EXIT: stop tracking object {self.current_tracked_obj} "
+                                f"reason={reason}"
+                            )
+                            self._log_csv(
+                                "zone_exit",
+                                obj_id=self.current_tracked_obj,
+                                reason=reason,
+                            )
+                            self._clear_kalman_filter(self.current_tracked_obj)
+                            self.is_tracking = False
+                            self.current_tracked_obj = None
 
-                if trigger_data is not None and topic is not None:
-                    obj_id = trigger_data.get("obj_id")
-                    frame = trigger_data.get("frame")
-
-                    if obj_id is not None and frame is not None:
-                        self.logger.info(
-                            f"Received TRIGGER for object {obj_id} on frame {frame}"
-                        )
-                        self.is_tracking = True
-                        self.tracking_start_time = time.time()
-                        self.current_tracked_obj = obj_id
-                        self.last_position_time = time.time()
-
-                # Inner loop for tracking object
-                position_timeout = (
-                    0.5  # Time to wait for position data before giving up (seconds)
-                )
-
-                while (
-                    self.is_tracking
-                    and time.time() - self.tracking_start_time
-                    < self.lens_config.tracking_timeout
-                ):
-                    # Try to get position data for the tracked object
+                # --- If tracking, process BRAID updates for lens adjustment ---
+                if self.is_tracking:
                     _, braid_raw = self._receive_message(self.braid_socket, "braid")
                     braid_data = self._parse_message(braid_raw, "braid")
 
                     if braid_data is None:
-                        # Check if we've waited too long for position data
+                        # Check position timeout safety
                         if time.time() - self.last_position_time > position_timeout:
                             self.logger.warning(
-                                f"No position data received for {position_timeout}s, stopping tracking"
+                                f"No position data for {position_timeout}s, stopping tracking"
                             )
-                            if self.current_tracked_obj is not None:
-                                self._clear_kalman_filter(self.current_tracked_obj)
+                            self._log_csv(
+                                "timeout",
+                                obj_id=self.current_tracked_obj,
+                                reason="position_timeout",
+                            )
+                            self._clear_kalman_filter(self.current_tracked_obj)
                             self.is_tracking = False
-                            break
-                        time.sleep(0.01)  # Short sleep to avoid busy waiting
+                            self.current_tracked_obj = None
+                        else:
+                            time.sleep(0.001)
                         continue
 
                     # Check for Death messages
@@ -492,55 +533,38 @@ class LiquidLens(WorkerProcess):
                         and braid_data.get("obj_id") == self.current_tracked_obj
                     ):
                         self.logger.info(
-                            f"Tracked object {self.current_tracked_obj} is no longer visible"
+                            f"Tracked object {self.current_tracked_obj} died"
                         )
-                        if self.current_tracked_obj is not None:
-                            self._clear_kalman_filter(self.current_tracked_obj)
+                        self._log_csv(
+                            "death",
+                            obj_id=self.current_tracked_obj,
+                            reason="object_death",
+                        )
+                        self._clear_kalman_filter(self.current_tracked_obj)
                         self.is_tracking = False
-                        break
+                        self.current_tracked_obj = None
+                        continue
 
                     # Skip messages for other objects
                     if braid_data.get("obj_id") != self.current_tracked_obj:
                         continue
 
-                    # Update time of last received position
                     self.last_position_time = time.time()
 
-                    # Get the position of the object
                     position = self._get_position(braid_data)
                     if position is None:
-                        self.logger.warning(
-                            f"Received message for obj {self.current_tracked_obj} but couldn't extract position"
-                        )
                         continue
 
                     x, y, z = position
 
-                    # Update the Kalman filter with the new measurement
+                    # Update Kalman filter
                     if self.lens_config.kalman_enabled:
                         self._update_kalman_filter(self.current_tracked_obj, braid_data)
 
-                    # Check if the object is within camera FOV (x/y only)
-                    in_fov = (
-                        self.lens_config.fov_x_min <= x <= self.lens_config.fov_x_max
-                        and self.lens_config.fov_y_min <= y <= self.lens_config.fov_y_max
-                    )
-                    if not in_fov:
-                        self.logger.info(
-                            f"Object {self.current_tracked_obj} is out of camera FOV at position ({x}, {y})"
-                        )
-                        if self.current_tracked_obj is not None:
-                            self._clear_kalman_filter(self.current_tracked_obj)
-                        self.is_tracking = False
-                        break
-
-                    # Set the lens focus based on current or predicted position
+                    # Adjust lens focus
                     try:
-                        # Use Kalman filter to predict the future position if enabled
                         focus_position = None
                         if self.lens_config.kalman_enabled:
-                            # Get predicted position with latency compensation
-                            # This combines both the system latency and the prediction horizon
                             prediction_time = (
                                 self.lens_config.system_latency
                                 + self.lens_config.prediction_horizon
@@ -548,60 +572,41 @@ class LiquidLens(WorkerProcess):
                             predicted_position = self._predict_position(
                                 self.current_tracked_obj, prediction_time
                             )
-
                             if predicted_position is not None:
-                                # Use the predicted z-coordinate for focus
                                 focus_position = predicted_position[2]
                                 self.logger.debug(
-                                    f"Using predicted position for object {self.current_tracked_obj}: "
-                                    f"current z={z:.3f}, predicted z={focus_position:.3f}, "
-                                    f"prediction_time={prediction_time:.3f}s"
+                                    f"Predicted z={focus_position:.3f} (current z={z:.3f})"
                                 )
 
-                        # If prediction failed or Kalman filter is disabled, use the current position
                         if focus_position is None:
                             focus_position = z
 
-                        # Get the diopter value from the calibration model and set the lens
                         dpt = self.lens_calibration.get_dpt(focus_position)
                         self.lens_driver.set_focal_power(dpt)
                         self.logger.debug(
                             f"Setting lens to {dpt} diopters for z={focus_position}"
                         )
+                        self._log_csv(
+                            "focus",
+                            obj_id=self.current_tracked_obj,
+                            x=x,
+                            y=y,
+                            z=z,
+                            focus_z=focus_position,
+                            diopter=dpt,
+                            kalman=self.lens_config.kalman_enabled,
+                        )
                     except Exception as e:
                         self.logger.error(f"Error adjusting lens: {e}")
-                        # Continue tracking even if lens adjustment fails
 
-                # Check if tracking timed out
-                if (
-                    self.is_tracking
-                    and time.time() - self.tracking_start_time
-                    >= self.lens_config.tracking_timeout
-                ):
-                    self.logger.info(
-                        f"Tracking timeout reached for object {self.current_tracked_obj}"
-                    )
-                    if self.current_tracked_obj is not None:
-                        self._clear_kalman_filter(self.current_tracked_obj)
-                    self.is_tracking = False
-
-                # Drain any stale trigger messages that queued during tracking
-                while True:
-                    _, drain_msg = self._receive_message(self.trigger_socket, "trigger")
-                    if drain_msg is None:
-                        break
+                else:
+                    # Not tracking — short sleep to avoid busy waiting
+                    time.sleep(0.01)
 
             except Exception as e:
                 self.logger.error(f"Error in Liquid Lens process: {e}")
-                # Continue running despite errors, only exit if stop event is set
-
-            finally:
-                # Sleep to avoid busy waiting in the outer loop
-                time.sleep(0.01)
 
         self.logger.info("Liquid Lens process stopped.")
-
-        # Close the lens driver and sockets
         self.close()
         self.logger.info("Liquid Lens process closed.")
 
@@ -609,6 +614,14 @@ class LiquidLens(WorkerProcess):
         """Close all resources and connections."""
         self.is_running = False
         self.is_tracking = False
+
+        # Close CSV writer
+        if self.csv_writer:
+            try:
+                self.csv_writer.close()
+                self.logger.debug("CSV writer closed successfully")
+            except Exception as e:
+                self.logger.error(f"Error closing CSV writer: {e}")
 
         # Clean up Kalman filters
         if hasattr(self, "kalman_filters") and self.kalman_filters:

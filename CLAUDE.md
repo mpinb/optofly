@@ -51,12 +51,12 @@ Braid HTTP SSE (http://host:8397/events)
     ↓
 BraidPublisher  →  ZMQ PUB  topic=BRAID  port=5555
     ↓
-TriggerHandler  →  ZMQ PUB  topic=TRIGGER  port=5556
+TriggerHandler  →  ZMQ PUB  topics=ZONE_ENTER/ZONE_EXIT  port=5556
     ↓
-    ├── CameraProcess       (records 500fps video via ximea-py + ffmpeg)
-    ├── OptoTriggerWorker   (fires LED via Arduino serial)
-    ├── VisualStimuliProcess (renders stimuli at 240Hz via pyglet)
-    └── LiquidLens          (adjusts Optotune focus via serial)
+    ├── CameraProcess       (records while fly is in zone, via ximea-py + ffmpeg)
+    ├── OptoTriggerWorker   (fires LED on ZONE_ENTER, one-shot)
+    ├── VisualStimuliProcess (renders stimuli on ZONE_ENTER, one-shot)
+    └── LiquidLens          (tracks focus ZONE_ENTER→ZONE_EXIT via BRAID)
 ```
 
 The ZMQ BRAID feed is only live when the full stack is running. Standalone tools (calibration, simulators) that need tracking data must connect directly to the Braid HTTP SSE endpoint (`/events`).
@@ -77,9 +77,14 @@ All processes inherit `WorkerProcess` (`src/utils/worker.py`) and run as `multip
 {"Death": {"obj_id": 1}}
 ```
 
-**TRIGGER** (from TriggerHandler):
+**ZONE_ENTER** (from TriggerHandler):
 ```json
-{"obj_id": 1, "frame": 12345, "timestamp": 1234.56, "heading": 0.52}
+{"obj_id": 1, "frame": 12345, "timestamp": 1234.56, "x": 0.01, "y": -0.02, "z": 0.18, "mean_heading": 0.52}
+```
+
+**ZONE_EXIT** (from TriggerHandler):
+```json
+{"obj_id": 1, "reason": "left_fov", "timestamp": 1234.78, "duration": 0.22}
 ```
 
 ### Configuration Loading
@@ -101,4 +106,4 @@ Heading-to-pixel conversion uses `GeometryUtils` (`src/stimuli/geometry.py`). Wi
 
 ### Camera
 
-`CameraProcess` (`src/processes/camera.py`) captures frames in-process using ximea-py with `ctypes.memmove` zero-copy into a pre-allocated circular double-buffer. On TRIGGER, the active buffer is handed to a background encoder thread that pipes raw frames to ffmpeg (NVENC with x264 fallback). Requires `ffmpeg` on PATH and the XIMEA SDK.
+`CameraProcess` (`src/processes/camera.py`) captures frames in-process using ximea-py with `ctypes.memmove` zero-copy into a pre-allocated linear double-buffer. On ZONE_ENTER, recording starts; on ZONE_EXIT (or buffer full), the active buffer is handed to a background encoder thread that pipes raw frames to ffmpeg (NVENC with x264 fallback). Requires `ffmpeg` on PATH and the XIMEA SDK.

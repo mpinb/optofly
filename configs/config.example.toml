@@ -27,7 +27,8 @@ braid_port = 5555
 trigger_port = 5556
 
 braid_topic = "BRAID"
-trigger_topic = "TRIGGER"
+zone_enter_topic = "ZONE_ENTER"
+zone_exit_topic = "ZONE_EXIT"
 
 [logging]
 # Global logging level
@@ -52,25 +53,20 @@ reconnect_delay = 5
 experiments_path = "/mnt/data/experiments/"  # Root path where Braid saves .braid folders
 
 [trigger_handler]
-# Trigger detection criteria
-min_trajectory_time = 1.0        # Minimum tracking time before triggering (seconds)
-min_trigger_interval = 10.0      # Minimum time between triggers (seconds)
-z_min = 0.15                     # Minimum z for trigger (meters)
-z_max = 0.25                     # Maximum z for trigger (meters)
+# Zone-based trigger detection
+z_min = 0.15                     # Minimum z for trigger zone (meters)
+z_max = 0.25                     # Maximum z for trigger zone (meters)
 heading_cone_deg = 45.0          # Angular tolerance for heading alignment (degrees)
 min_velocity = 0.01              # Minimum velocity to consider object "moving" (m/s)
+zone_timeout = 2.0               # Auto ZONE_EXIT if no updates for this long (seconds)
 
 [camera]
 # High-speed camera settings
 active = false
-resolution = [2016, 2016]
+resolution = [2112, 2112]
 fps = 500
 exposure_time = 2000             # Microseconds
-offset_x = 1312                  # Sensor ROI X offset (pixels)
-offset_y = 656                   # Sensor ROI Y offset (pixels)
-serial = 0                       # Camera serial number (0 = first available)
-pre_trigger_time = 0.5           # Recording before trigger (seconds)
-post_trigger_time = 1.5          # Recording after trigger (seconds)
+# Buffer sized automatically from trigger_handler.zone_timeout
 
 [camera.FOV]
 # Camera field of view in tracking coordinates (meters)

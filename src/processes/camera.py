@@ -27,14 +27,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import zmq
 
-from src.utils.config import CameraConfig, ZMQConfig
+from src.utils.config import CameraConfig, TriggerHandlerConfig, ZMQConfig
 from src.utils.worker import WorkerProcess
 
 log = logging.getLogger(__name__)
 
 # State machine constants
 IDLE = 0
-TRIGGERED = 1
+RECORDING = 1
 
 # Rolling FPS reporting window
 FPS_WINDOW = 500
@@ -150,7 +150,8 @@ def _build_ffmpeg_cmd(
         "-y",
         "-loglevel",
         "warning",
-        # Input: raw gray8 frames on stdin
+        "-thread_queue_size",
+        "512",
         "-f",
         "rawvideo",
         "-pix_fmt",
@@ -167,24 +168,30 @@ def _build_ffmpeg_cmd(
             "-c:v",
             "h264_nvenc",
             "-preset",
-            "p7",
-            "-tune",
-            "hq",
+            "p4",
+            "-bf",
+            "0",
             "-rc",
             "constqp",
             "-qp",
-            "16",
-            "-level",
-            "5.2",
+            "18",
+            "-rc-lookahead",
+            "32",
+            "-spatial-aq",
+            "1",
+            "-pix_fmt",
+            "nv12",
+            "-profile:v",
+            "high",
         ]
     else:
         cmd += [
             "-c:v",
             "libx264",
             "-preset",
-            "fast",
+            "ultrafast",
             "-crf",
-            "16",
+            "18",
         ]
     cmd.append(video_path)
     return cmd
@@ -199,18 +206,15 @@ def encoder_loop(
 ) -> None:
     """Persistent encoder thread.
 
-    Pulls (buf, meta, buf_size, n_filled, ring_start, base_name) from queue.
-    Pipes raw frames to ffmpeg stdin in ring-buffer order (two contiguous
-    writes, no reorder copy).
+    Pulls (buf, meta, n_filled, base_name) from queue.
+    Pipes raw frames to ffmpeg stdin (linear buffer, no ring indexing).
     """
     use_nvenc = _detect_nvenc()
     log.info("Encoder: using %s", "h264_nvenc" if use_nvenc else "libx264")
 
     while not done_event.is_set() or not q.empty():
         try:
-            buf, metadata, buf_size, n_filled, ring_start, base_name = q.get(
-                timeout=0.5
-            )
+            buf, metadata, n_filled, base_name = q.get(timeout=0.5)
         except queue.Empty:
             continue
 
@@ -228,24 +232,17 @@ def encoder_loop(
             stderr=subprocess.PIPE,
         )
 
-        # Write frames in ring-buffer order as two contiguous slices
-        # — no reorder copy needed
-        try:
-            if n_filled == buf_size and ring_start > 0:
-                proc.stdin.write(buf[ring_start:].tobytes())
-                proc.stdin.write(buf[:ring_start].tobytes())
-            else:
-                proc.stdin.write(buf[:n_filled].tobytes())
-            proc.stdin.close()
-        except BrokenPipeError:
-            log.error("ffmpeg pipe broke during write")
+        # memoryview avoids duplicating the ~2GB buffer in RAM
+        input_data = memoryview(buf[:n_filled])
 
-        stderr = proc.stderr.read()
-        proc.wait()
+        # communicate() drains stderr while writing stdin concurrently,
+        # preventing deadlock when ffmpeg fills the stderr pipe buffer
+        _, stderr_bytes = proc.communicate(input=input_data)
 
         if proc.returncode != 0:
-            log.error("ffmpeg exited %d: %s", proc.returncode, stderr.decode().strip())
-            # Try fallback if NVENC failed
+            log.error(
+                "ffmpeg exited %d: %s", proc.returncode, stderr_bytes.decode().strip()
+            )
             if use_nvenc:
                 log.warning("Retrying with libx264")
                 cmd = _build_ffmpeg_cmd(video_path, width, height, fps, False)
@@ -255,37 +252,22 @@ def encoder_loop(
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.PIPE,
                 )
-                try:
-                    if n_filled == buf_size and ring_start > 0:
-                        proc.stdin.write(buf[ring_start:].tobytes())
-                        proc.stdin.write(buf[:ring_start].tobytes())
-                    else:
-                        proc.stdin.write(buf[:n_filled].tobytes())
-                    proc.stdin.close()
-                except BrokenPipeError:
-                    log.error("ffmpeg fallback pipe broke during write")
-                proc.wait()
+                _, stderr_bytes = proc.communicate(input=input_data)
                 if proc.returncode != 0:
-                    log.error("libx264 fallback also failed, skipping this trigger")
+                    log.error("libx264 fallback also failed, skipping this recording")
                     q.task_done()
                     continue
-                # Disable NVENC for remaining encodes
                 use_nvenc = False
 
-        # Write CSV metadata in ring-buffer order
+        # Write CSV metadata (linear order)
         with open(csv_path, "w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(["frame_idx", "nframe", "ts_sec", "ts_usec", "cam_time_ns"])
             for i in range(n_filled):
-                idx = (ring_start + i) % buf_size
-                row = metadata[idx]
+                row = metadata[i]
                 writer.writerow([i, row[0], row[1], row[2], row[3]])
 
-        # Debug histograms — build sequential metadata here
-        ordered_meta = np.empty((n_filled, 4), dtype=np.int64)
-        for i in range(n_filled):
-            ordered_meta[i] = metadata[(ring_start + i) % buf_size]
-        save_debug_histograms(ordered_meta, n_filled, base_name)
+        save_debug_histograms(metadata, n_filled, base_name)
 
         elapsed = time.perf_counter() - t0
         size_mb = os.path.getsize(video_path) / (1024 * 1024)
@@ -453,10 +435,14 @@ class CameraProcess(WorkerProcess):
         zmq_ctx = zmq.Context()
         zmq_sub = zmq_ctx.socket(zmq.SUB)
         zmq_sub.connect(zmq_config.get_subscriber_address(zmq_config.trigger_port))
-        zmq_sub.setsockopt_string(zmq.SUBSCRIBE, zmq_config.trigger_topic)
+        zmq_sub.setsockopt_string(zmq.SUBSCRIBE, zmq_config.zone_enter_topic)
+        zmq_sub.setsockopt_string(zmq.SUBSCRIBE, zmq_config.zone_exit_topic)
         zmq_sub.setsockopt_string(zmq.SUBSCRIBE, "kill")
         self.logger.info(
-            "ZMQ SUB connected to trigger port %d", zmq_config.trigger_port
+            "ZMQ SUB connected to trigger port %d (topics: %s, %s, kill)",
+            zmq_config.trigger_port,
+            zmq_config.zone_enter_topic,
+            zmq_config.zone_exit_topic,
         )
 
         # --- Camera setup ---
@@ -465,11 +451,37 @@ class CameraProcess(WorkerProcess):
         cam.set_imgdataformat("XI_MONO8")
         cam.set_exposure(int(self.config.exposure_time))
 
-        # ROI
+        # Sensor corrections
+        cam.enable_bpc()
+        cam.set_column_fpn_correction("XI_ON")
+
+        # ROI — set dimensions first, then center on sensor
         cam.set_width(self.config.width)
         cam.set_height(self.config.height)
-        cam.set_offsetX(self.config.offset_x)
-        cam.set_offsetY(self.config.offset_y)
+
+        # Auto-center: compute offset to place ROI in the middle of the sensor
+        sensor_w = cam.get_width_maximum()
+        sensor_h = cam.get_height_maximum()
+        offset_x = (sensor_w - self.config.width) // 2
+        offset_y = (sensor_h - self.config.height) // 2
+
+        # Snap to increment (Ximea sensors require aligned offsets)
+        inc_x = cam.get_offsetX_increment()
+        inc_y = cam.get_offsetY_increment()
+        offset_x = (offset_x // inc_x) * inc_x
+        offset_y = (offset_y // inc_y) * inc_y
+
+        cam.set_offsetX(offset_x)
+        cam.set_offsetY(offset_y)
+        self.logger.info(
+            "Sensor %dx%d, ROI %dx%d, offset (%d, %d)",
+            sensor_w,
+            sensor_h,
+            self.config.width,
+            self.config.height,
+            offset_x,
+            offset_y,
+        )
 
         # Frame rate
         cam.set_acq_timing_mode("XI_ACQ_TIMING_MODE_FRAME_RATE_LIMIT")
@@ -482,16 +494,17 @@ class CameraProcess(WorkerProcess):
 
         self.logger.info("Resolution: %dx%d @ %d fps", width, height, fps)
 
-        # --- Allocate double buffers ---
-        n_before = int(fps * self.config.pre_trigger_time)
-        n_after = int(fps * self.config.post_trigger_time)
-        buf_size = n_before + n_after
+        # --- Allocate double buffers (linear, no ring) ---
+        # Buffer sized from zone_timeout (+1s margin for message latency)
+        trigger_config = TriggerHandlerConfig(self.config_path)
+        max_recording_time = trigger_config.zone_timeout + 1.0
+        buf_size = int(fps * max_recording_time)
 
         self.logger.info(
-            "Buffer: %d pre + %d post = %d frames (%.1f MB x2)",
-            n_before,
-            n_after,
+            "Buffer: %d frames (%.1f s from zone_timeout=%.1f, %.1f MB x2)",
             buf_size,
+            max_recording_time,
+            trigger_config.zone_timeout,
             buf_size * frame_bytes / (1024**2),
         )
 
@@ -504,7 +517,6 @@ class CameraProcess(WorkerProcess):
             np.zeros((buf_size, 4), dtype=np.int64),
         ]
         active_idx = 0
-        buf_idx = 0
 
         # --- Encoder thread ---
         encode_queue: queue.Queue = queue.Queue(maxsize=2)
@@ -519,9 +531,9 @@ class CameraProcess(WorkerProcess):
         # --- Capture state ---
         img = Image()
         state = IDLE
-        post_trigger_remaining = 0
-        trigger_obj_id = None
-        trigger_frame = None
+        buf_idx = 0  # current write index in active buffer (reset on each recording)
+        recording_obj_id = None
+        recording_frame = None
         dropped = 0
         prev_nframe = None
         total_frames = 0
@@ -532,26 +544,45 @@ class CameraProcess(WorkerProcess):
         _memmove = ctypes.memmove
         _debug = self.logger.isEnabledFor(logging.DEBUG)
 
+        def _finish_recording():
+            """Flush current buffer to encoder and swap to standby."""
+            nonlocal active_idx, buf_idx, state, recording_obj_id, recording_frame
+            n_filled = buf_idx
+            if n_filled == 0:
+                self.logger.warning("Recording ended with 0 frames, skipping encode")
+                state = IDLE
+                recording_obj_id = None
+                recording_frame = None
+                return
+
+            base_name = str(
+                save_path / f"obj_id_{recording_obj_id}_frame_{recording_frame}"
+            )
+            if encode_queue.full():
+                self.logger.warning("Encoder busy, skipping this recording")
+            else:
+                encode_queue.put(
+                    (buffers[active_idx], meta_buffers[active_idx], n_filled, base_name)
+                )
+
+            # Swap to standby buffer
+            active_idx = 1 - active_idx
+            buf_idx = 0
+            state = IDLE
+            self.logger.info(
+                "Recording done: %d frames, back to IDLE (dropped so far: %d)",
+                n_filled,
+                dropped,
+            )
+            recording_obj_id = None
+            recording_frame = None
+
         try:
             cam.start_acquisition()
             self.logger.info("Acquisition started — entering capture loop")
 
             while not self.stop_event.is_set():
                 cam.get_image(img, timeout=5000)
-
-                # Copy frame into active buffer
-                slot = buf_idx % buf_size
-                _memmove(buffers[active_idx][slot].ctypes.data, img.bp, frame_bytes)
-
-                # Record metadata (camera timestamps only, no syscall)
-                meta_buffers[active_idx][slot] = (
-                    img.nframe,
-                    img.tsSec,
-                    img.tsUSec,
-                    img.tsSec * 1_000_000_000 + img.tsUSec * 1000,
-                )
-
-                buf_idx += 1
                 total_frames += 1
 
                 # Dropped frame tracking
@@ -563,62 +594,68 @@ class CameraProcess(WorkerProcess):
 
                 # --- State machine ---
                 if state == IDLE:
-                    # Poll ZMQ every 10 frames to reduce overhead
-                    if total_frames % 10 == 0:
-                        try:
-                            topic, message = zmq_sub.recv_multipart(flags=zmq.NOBLOCK)
-                            topic_str = topic.decode()
-                            if topic_str == "kill":
-                                self.logger.info("Received kill signal")
-                                break
-                            elif topic_str == zmq_config.trigger_topic:
-                                msg = json.loads(message.decode())
-                                trigger_obj_id = msg["obj_id"]
-                                trigger_frame = msg["frame"]
-                                state = TRIGGERED
-                                post_trigger_remaining = n_after
-                                self.logger.info(
-                                    "TRIGGERED obj_id=%s frame=%s, recording %d post-trigger frames",
-                                    trigger_obj_id,
-                                    trigger_frame,
-                                    n_after,
-                                )
-                        except zmq.Again:
-                            pass
-
-                elif state == TRIGGERED:
-                    post_trigger_remaining -= 1
-                    if post_trigger_remaining <= 0:
-                        n_filled = min(buf_idx, buf_size)
-                        # Oldest frame index in the ring buffer
-                        ring_start = buf_idx % buf_size if n_filled == buf_size else 0
-
-                        # Enqueue for encoding — pass the buffer directly,
-                        # the encoder reads in ring order (no copy here)
-                        base_name = str(
-                            save_path / f"obj_id_{trigger_obj_id}_frame_{trigger_frame}"
-                        )
-                        if encode_queue.full():
-                            self.logger.warning("Encoder busy, skipping this trigger")
-                        else:
-                            encode_queue.put(
-                                (
-                                    buffers[active_idx],
-                                    meta_buffers[active_idx],
-                                    buf_size,
-                                    n_filled,
-                                    ring_start,
-                                    base_name,
-                                )
+                    # Not recording — poll ZMQ for ZONE_ENTER (every frame is fine,
+                    # no buffer write overhead while idle)
+                    try:
+                        topic, message = zmq_sub.recv_multipart(flags=zmq.NOBLOCK)
+                        topic_str = topic.decode()
+                        if topic_str == "kill":
+                            self.logger.info("Received kill signal")
+                            break
+                        elif topic_str == zmq_config.zone_enter_topic:
+                            msg = json.loads(message.decode())
+                            recording_obj_id = msg["obj_id"]
+                            recording_frame = msg.get("frame", 0)
+                            buf_idx = 0
+                            state = RECORDING
+                            self.logger.info(
+                                "ZONE_ENTER obj_id=%s — started recording (max %d frames)",
+                                recording_obj_id,
+                                buf_size,
                             )
+                    except zmq.Again:
+                        pass
 
-                        # Swap to standby buffer
-                        active_idx = 1 - active_idx
-                        buf_idx = 0
-                        state = IDLE
-                        self.logger.info(
-                            "Buffer swapped, back to IDLE (dropped so far: %d)", dropped
+                elif state == RECORDING:
+                    # Write frame into linear buffer
+                    _memmove(
+                        buffers[active_idx][buf_idx].ctypes.data, img.bp, frame_bytes
+                    )
+                    meta_buffers[active_idx][buf_idx] = (
+                        img.nframe,
+                        img.tsSec,
+                        img.tsUSec,
+                        img.tsSec * 1_000_000_000 + img.tsUSec * 1000,
+                    )
+                    buf_idx += 1
+
+                    # Poll ZMQ every frame — need to catch ZONE_EXIT promptly
+                    try:
+                        topic, message = zmq_sub.recv_multipart(flags=zmq.NOBLOCK)
+                        topic_str = topic.decode()
+                        if topic_str == "kill":
+                            _finish_recording()
+                            self.logger.info("Received kill signal during recording")
+                            break
+                        elif topic_str == zmq_config.zone_exit_topic:
+                            msg = json.loads(message.decode())
+                            if msg["obj_id"] == recording_obj_id:
+                                self.logger.info(
+                                    "ZONE_EXIT obj_id=%s reason=%s — stopping recording",
+                                    msg["obj_id"],
+                                    msg.get("reason", "unknown"),
+                                )
+                                _finish_recording()
+                    except zmq.Again:
+                        pass
+
+                    # Safety: buffer full (fly stayed > max_recording_time)
+                    if state == RECORDING and buf_idx >= buf_size:
+                        self.logger.warning(
+                            "Buffer full (%d frames), forcing recording stop",
+                            buf_size,
                         )
+                        _finish_recording()
 
                 # Periodic FPS reporting (only when debug logging is active)
                 if _debug and total_frames % FPS_WINDOW == 0:
@@ -630,7 +667,7 @@ class CameraProcess(WorkerProcess):
                             "[%s] frames=%d fps=%.1f dropped=%d",
                             "IDLE"
                             if state == IDLE
-                            else f"TRIGGERED ({post_trigger_remaining} remaining)",
+                            else f"RECORDING ({buf_idx}/{buf_size})",
                             total_frames,
                             rolling_fps,
                             dropped,
@@ -641,6 +678,10 @@ class CameraProcess(WorkerProcess):
         except Exception as e:
             self.logger.error("Capture loop error: %s", e, exc_info=True)
         finally:
+            # If we were recording, flush the buffer
+            if state == RECORDING and buf_idx > 0:
+                _finish_recording()
+
             cam.stop_acquisition()
             cam.close_device()
             self.logger.info(

@@ -98,7 +98,7 @@ class OptoTriggerWorker(WorkerProcess):
         self.logger.info("OptoTriggerWorker process initialized.")
 
     def _initialize_zmq(self):
-        """Initialize ZMQ socket for receiving TRIGGER messages."""
+        """Initialize ZMQ socket for receiving ZONE_ENTER messages."""
         try:
             self.context = zmq.Context()
             self.trigger_socket = self.context.socket(zmq.SUB)
@@ -106,10 +106,11 @@ class OptoTriggerWorker(WorkerProcess):
                 self.zmq_config.get_subscriber_address(self.zmq_config.trigger_port)
             )
             self.trigger_socket.setsockopt_string(
-                zmq.SUBSCRIBE, self.zmq_config.trigger_topic
+                zmq.SUBSCRIBE, self.zmq_config.zone_enter_topic
             )
             self.logger.debug(
-                f"Connected to TriggerHandler on port {self.zmq_config.trigger_port}"
+                f"Connected to TriggerHandler on port {self.zmq_config.trigger_port} "
+                f"(topic: {self.zmq_config.zone_enter_topic})"
             )
         except Exception as e:
             self.logger.error(f"Error connecting to ZMQ socket: {e}")
@@ -153,8 +154,8 @@ class OptoTriggerWorker(WorkerProcess):
         """
         try:
             topic, message = self.trigger_socket.recv_multipart(flags=zmq.NOBLOCK)
-            topic = topic.decode('utf-8')
-            json_data = message.decode('utf-8')
+            topic = topic.decode("utf-8")
+            json_data = message.decode("utf-8")
             return json.loads(json_data)
         except zmq.Again:
             return None
@@ -193,9 +194,7 @@ class OptoTriggerWorker(WorkerProcess):
             mean_heading = trigger_data.get("mean_heading")
 
             if obj_id is None or frame is None:
-                self.logger.warning(
-                    f"Incomplete trigger data received: {trigger_data}"
-                )
+                self.logger.warning(f"Incomplete trigger data received: {trigger_data}")
                 return False
 
             self.logger.info(

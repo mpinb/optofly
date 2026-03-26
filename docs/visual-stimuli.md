@@ -27,8 +27,8 @@ VisualStimuliProcess (main process)
 4. Start 240Hz rendering loop
 
 **Per-frame loop (240x/second):**
-1. Check for TRIGGER messages from ZMQ
-2. If TRIGGER received → `StimulusRegistry.on_trigger(data)`
+1. Check for ZONE_ENTER messages from ZMQ
+2. If ZONE_ENTER received → `StimulusRegistry.on_trigger(data)`
 3. `StimulusRegistry.update_all(dt)` → update stimulus state
 4. `StimulusRegistry.render_all(batch)` → update shapes in batch
 5. `window.on_draw()` → `batch.draw()` → GPU renders
