@@ -973,6 +973,7 @@ dependencies = [
     { name = "scipy" },
     { name = "tomli" },
     { name = "tomli-w" },
+    { name = "ximea" },
 ]
 
 [package.dev-dependencies]
@@ -1003,6 +1004,7 @@ requires-dist = [
     { name = "scipy", specifier = ">=1.15.3" },
     { name = "tomli", specifier = ">=2.2.2" },
     { name = "tomli-w", specifier = ">=1.1.0" },
+    { name = "ximea", git = "https://github.com/elhananby/ximea-py.git" },
 ]
 
 [package.metadata.requires-dev]
@@ -1725,3 +1727,8 @@ sdist = { url = "https://files.pythonhosted.org/packages/b3/8f/705086c9d734d3b66
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e1/07/c6fe3ad3e685340704d314d765b7912993bcb8dc198f0e7a89382d37974b/win32_setctime-1.2.0-py3-none-any.whl", hash = "sha256:95d644c4e708aba81dc3704a116d8cbc974d70b3bdb8be1d150e36be6e9d1390", size = 4083, upload-time = "2024-12-07T15:28:26.465Z" },
 ]
+
+[[package]]
+name = "ximea"
+version = "4.33.14"
+source = { git = "https://github.com/elhananby/ximea-py.git#63dd642ca744a7fb31b8c61f53a48b488589282a" }

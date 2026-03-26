@@ -16,35 +16,17 @@ mamba env create -f environment.yml
 conda activate optofly
 ```
 
-**Rust toolchain** (for camera binary)
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source "$HOME/.cargo/env"
-```
-
 **System dependencies** (Ubuntu/Debian)
 ```bash
 sudo apt-get install -y \
     build-essential \
-    libclang-dev \
     libzmq3-dev \
-    ffmpeg \
-    libavutil-dev \
-    libavformat-dev \
-    libavfilter-dev \
-    libavcodec-dev \
-    libswscale-dev
+    ffmpeg
 ```
 
-## Build Camera Binary
+**XIMEA SDK** (for camera support)
 
-```bash
-cd rust/ximea_camera
-cargo build --release
-cd ../..
-```
-
-Binary will be at `rust/ximea_camera/target/release/ximea_camera`.
+Install from [ximea.com/support/wiki/apis/XIMEA_Linux_Software_Package](https://www.ximea.com/support/wiki/apis/XIMEA_Linux_Software_Package).
 
 ## Configuration
 
@@ -149,6 +131,4 @@ python tests/test_camera_integration.py
 # Visual stimuli standalone (no hardware)
 python -m src.processes.visual --standalone
 
-# Rust tests
-cd rust/ximea_camera && cargo test
 ```

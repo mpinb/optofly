@@ -400,11 +400,6 @@ class CameraConfig(ConfigBase):
         # Storage
         self.save_folder: str = config.get("save_folder", "camera_videos")
 
-        # Binary path
-        self.rust_binary: str = config.get(
-            "rust_binary", "rust/ximea_camera/target/release/ximea_camera"
-        )
-
         fov_config = config.get("FOV", {})
         self.fov_x_min: float = float(fov_config.get("x_min", -0.1))
         self.fov_x_max: float = float(fov_config.get("x_max", 0.1))
