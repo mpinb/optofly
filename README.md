@@ -26,9 +26,6 @@ uv sync
 cp configs/config.example.toml configs/config.toml
 cp configs/visual_stimuli.example.toml configs/visual_stimuli.toml
 
-# Build camera binary
-cd rust/ximea_camera && cargo build --release && cd ../..
-
 # Run experiment (start Braid recording first)
 uv run python main.py
 ```

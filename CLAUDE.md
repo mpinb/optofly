@@ -20,10 +20,6 @@ uv run pytest tests/test_config.py -v   # single file
 uv run ruff check .
 uv run ruff format .
 
-# Build Rust camera binary
-cd rust/ximea_camera && cargo build --release
-# Binary: rust/ximea_camera/target/release/ximea_camera
-
 # Visual stimuli calibration
 python -m src.processes.visual --calibrate           # identify screens
 python -m src.processes.visual --calibrate-mapping   # heading → pixel mapping (manual x,y input)
@@ -57,7 +53,7 @@ BraidPublisher  →  ZMQ PUB  topic=BRAID  port=5555
     ↓
 TriggerHandler  →  ZMQ PUB  topic=TRIGGER  port=5556
     ↓
-    ├── CameraProcess       (records 500fps video via Rust binary)
+    ├── CameraProcess       (records 500fps video via ximea-py + ffmpeg)
     ├── OptoTriggerWorker   (fires LED via Arduino serial)
     ├── VisualStimuliProcess (renders stimuli at 240Hz via pyglet)
     └── LiquidLens          (adjusts Optotune focus via serial)
@@ -103,6 +99,6 @@ Heading-to-pixel conversion uses `GeometryUtils` (`src/stimuli/geometry.py`). Wi
 
 `calibrations/liquid_lens.csv` maps `z` (meters) → `dpt` (diopters). Create it manually by stepping through z-heights and finding the in-focus diopter value with `src/hardware/lens.py:LensDriver`. See `calibrations/LIQUID_LENS_CALIBRATION.md`.
 
-### Rust Camera
+### Camera
 
-Three concurrent threads coordinated via crossbeam channels: Camera Reader → Buffer Manager → Video Writer. Uses double-buffer ownership transfer (no `unsafe`). See `rust/ximea_camera/CLAUDE.md` for full details.
+`CameraProcess` (`src/processes/camera.py`) captures frames in-process using ximea-py with `ctypes.memmove` zero-copy into a pre-allocated circular double-buffer. On TRIGGER, the active buffer is handed to a background encoder thread that pipes raw frames to ffmpeg (NVENC with x264 fallback). Requires `ffmpeg` on PATH and the XIMEA SDK.

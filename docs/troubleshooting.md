@@ -2,13 +2,6 @@
 
 ## Setup
 
-**Camera binary not found:**
-```bash
-cd rust/ximea_camera
-cargo build --release
-ls target/release/ximea_camera
-```
-
 **Config files missing:**
 ```bash
 cp configs/config.example.toml configs/config.toml
@@ -56,7 +49,7 @@ results = check_camera_prerequisites("configs/config.toml")
 print(results)
 ```
 
-Common causes: camera not detected (`lsusb | grep Ximea`), binary not built, user not in `video` group, insufficient disk space.
+Common causes: camera not detected (`lsusb | grep Ximea`), ximea-py not installed, user not in `video` group, insufficient disk space.
 
 **Video encoding slow:**
 ```bash

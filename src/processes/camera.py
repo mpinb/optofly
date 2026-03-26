@@ -2,7 +2,7 @@
 Ximea Camera Process module for triggered video recording.
 
 Uses ximea-py for in-process capture with a circular double-buffer
-and a background encoder thread (PyAV with NVENC/x264 fallback).
+and a background encoder thread (ffmpeg pipe with NVENC/x264 fallback).
 """
 
 import csv
@@ -12,13 +12,14 @@ import logging
 import multiprocessing as mp
 import os
 import queue
+import shutil
 import socket
+import subprocess
 import threading
 import time
 from pathlib import Path
 from typing import Optional
 
-import av
 import matplotlib
 
 matplotlib.use("Agg")
@@ -122,6 +123,73 @@ def save_debug_histograms(metadata: np.ndarray, n_frames: int, base_path: str) -
 # ---------------------------------------------------------------------------
 
 
+def _detect_nvenc() -> bool:
+    """Check once whether h264_nvenc is available via ffmpeg."""
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-encoders"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return "h264_nvenc" in result.stdout
+    except Exception:
+        return False
+
+
+def _build_ffmpeg_cmd(
+    video_path: str,
+    width: int,
+    height: int,
+    fps: int,
+    use_nvenc: bool,
+) -> list[str]:
+    """Build the ffmpeg command for encoding grayscale frames from stdin."""
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-loglevel",
+        "warning",
+        # Input: raw gray8 frames on stdin
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "gray",
+        "-s",
+        f"{width}x{height}",
+        "-r",
+        str(fps),
+        "-i",
+        "pipe:0",
+    ]
+    if use_nvenc:
+        cmd += [
+            "-c:v",
+            "h264_nvenc",
+            "-preset",
+            "p7",
+            "-tune",
+            "hq",
+            "-rc",
+            "constqp",
+            "-qp",
+            "16",
+            "-level",
+            "5.2",
+        ]
+    else:
+        cmd += [
+            "-c:v",
+            "libx264",
+            "-preset",
+            "fast",
+            "-crf",
+            "16",
+        ]
+    cmd.append(video_path)
+    return cmd
+
+
 def encoder_loop(
     q: queue.Queue,
     fps: int,
@@ -132,8 +200,12 @@ def encoder_loop(
     """Persistent encoder thread.
 
     Pulls (buf, meta, buf_size, n_filled, ring_start, base_name) from queue.
-    Reads frames in ring-buffer order without requiring a pre-sorted copy.
+    Pipes raw frames to ffmpeg stdin in ring-buffer order (two contiguous
+    writes, no reorder copy).
     """
+    use_nvenc = _detect_nvenc()
+    log.info("Encoder: using %s", "h264_nvenc" if use_nvenc else "libx264")
+
     while not done_event.is_set() or not q.empty():
         try:
             buf, metadata, buf_size, n_filled, ring_start, base_name = q.get(
@@ -148,32 +220,59 @@ def encoder_loop(
 
         t0 = time.perf_counter()
 
-        # Try NVENC first, fall back to libx264
-        container = av.open(video_path, mode="w")
+        cmd = _build_ffmpeg_cmd(video_path, width, height, fps, use_nvenc)
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+
+        # Write frames in ring-buffer order as two contiguous slices
+        # — no reorder copy needed
         try:
-            stream = container.add_stream("h264_nvenc", rate=fps)
-        except Exception:
-            log.warning("h264_nvenc unavailable, falling back to libx264")
-            container.close()
-            os.remove(video_path)
-            container = av.open(video_path, mode="w")
-            stream = container.add_stream("libx264", rate=fps)
+            if n_filled == buf_size and ring_start > 0:
+                proc.stdin.write(buf[ring_start:].tobytes())
+                proc.stdin.write(buf[:ring_start].tobytes())
+            else:
+                proc.stdin.write(buf[:n_filled].tobytes())
+            proc.stdin.close()
+        except BrokenPipeError:
+            log.error("ffmpeg pipe broke during write")
 
-        stream.width = width
-        stream.height = height
-        stream.pix_fmt = "yuv420p"
+        stderr = proc.stderr.read()
+        proc.wait()
 
-        for i in range(n_filled):
-            idx = (ring_start + i) % buf_size
-            frame = av.VideoFrame.from_ndarray(buf[idx], format="gray8")
-            for packet in stream.encode(frame):
-                container.mux(packet)
+        if proc.returncode != 0:
+            log.error("ffmpeg exited %d: %s", proc.returncode, stderr.decode().strip())
+            # Try fallback if NVENC failed
+            if use_nvenc:
+                log.warning("Retrying with libx264")
+                cmd = _build_ffmpeg_cmd(video_path, width, height, fps, False)
+                proc = subprocess.Popen(
+                    cmd,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                )
+                try:
+                    if n_filled == buf_size and ring_start > 0:
+                        proc.stdin.write(buf[ring_start:].tobytes())
+                        proc.stdin.write(buf[:ring_start].tobytes())
+                    else:
+                        proc.stdin.write(buf[:n_filled].tobytes())
+                    proc.stdin.close()
+                except BrokenPipeError:
+                    log.error("ffmpeg fallback pipe broke during write")
+                proc.wait()
+                if proc.returncode != 0:
+                    log.error("libx264 fallback also failed, skipping this trigger")
+                    q.task_done()
+                    continue
+                # Disable NVENC for remaining encodes
+                use_nvenc = False
 
-        for packet in stream.encode():
-            container.mux(packet)
-        container.close()
-
-        # Write CSV metadata
+        # Write CSV metadata in ring-buffer order
         with open(csv_path, "w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(["frame_idx", "nframe", "ts_sec", "ts_usec", "cam_time_ns"])
@@ -182,7 +281,7 @@ def encoder_loop(
                 row = metadata[idx]
                 writer.writerow([i, row[0], row[1], row[2], row[3]])
 
-        # Write debug histograms — needs sequential metadata, build it here
+        # Debug histograms — build sequential metadata here
         ordered_meta = np.empty((n_filled, 4), dtype=np.int64)
         for i in range(n_filled):
             ordered_meta[i] = metadata[(ring_start + i) % buf_size]
@@ -215,7 +314,7 @@ def check_camera_prerequisites(config_path: str = "configs/config.toml") -> dict
     config = CameraConfig(config_path)
     results = {
         "ximea": False,
-        "pyav": False,
+        "ffmpeg": False,
         "save_folder": False,
         "zmq_port": False,
         "overall": False,
@@ -231,17 +330,21 @@ def check_camera_prerequisites(config_path: str = "configs/config.toml") -> dict
     except ImportError as e:
         results["errors"].append(f"ximea-py not importable: {e}")
         results["errors"].append(
-            "Install: uv add 'ximea-py @ git+https://github.com/elhananby/ximea-py.git'"
+            "Install: uv add 'ximea @ git+https://github.com/elhananby/ximea-py.git'"
         )
 
-    # Check 2: PyAV importable
-    try:
-        import av as _av  # noqa: F401
-
-        results["pyav"] = True
-    except ImportError as e:
-        results["errors"].append(f"PyAV not importable: {e}")
-        results["errors"].append("Install: uv add 'av>=12.0.0'")
+    # Check 2: ffmpeg available
+    if shutil.which("ffmpeg"):
+        results["ffmpeg"] = True
+        if _detect_nvenc():
+            log.info("h264_nvenc available")
+        else:
+            results["warnings"].append(
+                "h264_nvenc not available — will fall back to libx264 (slower)"
+            )
+    else:
+        results["errors"].append("ffmpeg not found in PATH")
+        results["errors"].append("Install: sudo apt-get install ffmpeg")
 
     # Check 3: Save folder is writable
     save_path = Path(config.save_folder)
@@ -275,7 +378,7 @@ def check_camera_prerequisites(config_path: str = "configs/config.toml") -> dict
 
     results["overall"] = (
         results["ximea"]
-        and results["pyav"]
+        and results["ffmpeg"]
         and results["save_folder"]
         and results["zmq_port"]
     )
@@ -358,7 +461,7 @@ class CameraProcess(WorkerProcess):
 
         # --- Camera setup ---
         cam = Camera()
-        cam.open()
+        cam.open_device()
         cam.set_imgdataformat("XI_MONO8")
         cam.set_exposure(int(self.config.exposure_time))
 
@@ -539,7 +642,7 @@ class CameraProcess(WorkerProcess):
             self.logger.error("Capture loop error: %s", e, exc_info=True)
         finally:
             cam.stop_acquisition()
-            cam.close()
+            cam.close_device()
             self.logger.info(
                 "Camera stopped. Total frames: %d, dropped: %d", total_frames, dropped
             )

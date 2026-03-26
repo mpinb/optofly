@@ -38,7 +38,7 @@ def test_prerequisites(config_path: str = "configs/config.toml") -> bool:
 
     print("\nResults:")
     print(f"  ximea-py:    {'OK' if results['ximea'] else 'FAIL'}")
-    print(f"  PyAV:        {'OK' if results['pyav'] else 'FAIL'}")
+    print(f"  ffmpeg:      {'OK' if results['ffmpeg'] else 'FAIL'}")
     print(f"  Save Folder: {'OK' if results['save_folder'] else 'FAIL'}")
     print(f"  ZMQ Port:    {'OK' if results['zmq_port'] else 'FAIL'}")
     print(f"  Overall:     {'OK' if results['overall'] else 'FAIL'}")

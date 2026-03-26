@@ -22,7 +22,6 @@ dependencies = [
     "tomli>=2.2.2",
     "tomli-w>=1.1.0",
     "ximea @ git+https://github.com/elhananby/ximea-py.git",
-    "av>=12.0.0",
 ]
 
 [dependency-groups]
