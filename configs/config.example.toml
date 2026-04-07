@@ -58,9 +58,10 @@ z_min = 0.15                     # Minimum z for trigger zone (meters)
 z_max = 0.25                     # Maximum z for trigger zone (meters)
 heading_cone_deg = 45.0          # Angular tolerance for heading alignment (degrees)
 min_velocity = 0.01              # Minimum velocity to consider object "moving" (m/s)
+max_velocity = 2.0               # Maximum velocity to filter noise (m/s)
+min_tracking_age = 0.1           # Object must exist this long before triggering (seconds)
 zone_timeout = 2.0               # Auto ZONE_EXIT if no updates for this long (seconds)
 refractory_period = 10.0         # Global cooldown between ZONE_ENTER events (seconds)
-zone_dwell_time = 0.05           # Min time in zone before ZONE_ENTER fires (seconds)
 
 [camera]
 # High-speed camera settings

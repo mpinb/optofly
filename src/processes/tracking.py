@@ -53,9 +53,7 @@ class TrackedObject:
     current_timestamp: float = 0.0
 
     # Zone membership tracking
-    in_zone: bool = False           # physically inside the trigger zone
-    zone_entered: bool = False      # ZONE_ENTER has been emitted
-    zone_first_seen: Optional[float] = None   # when object first entered zone
+    in_zone: bool = False           # ZONE_ENTER has been emitted for this object
     zone_enter_time: Optional[float] = None   # when ZONE_ENTER was emitted
 
     # Track last time this object was checked
@@ -369,7 +367,7 @@ class TriggerHandler(WorkerProcess):
             obj_id = data if isinstance(data, int) else data.get("obj_id", data)
             if obj_id in self.tracked_objects:
                 tracked_obj = self.tracked_objects[obj_id]
-                if tracked_obj.zone_entered:
+                if tracked_obj.in_zone:
                     self._send_zone_exit(tracked_obj, reason="death")
                 self.logger.debug(f"Stopped tracking object {obj_id}")
                 del self.tracked_objects[obj_id]
@@ -382,46 +380,60 @@ class TriggerHandler(WorkerProcess):
         """
         Evaluate zone enter/exit transitions for a tracked object.
 
-        - Enter: object moves into trigger zone AND is heading toward center
-        - Exit: object was in zone and moves out of trigger zone
-        - Once in zone, heading changes do NOT cause exit (only physical departure)
+        Entry gates (all must pass to emit ZONE_ENTER):
+        1. Object has existed long enough (min_tracking_age) — not transient noise
+        2. Refractory period elapsed since last ZONE_ENTER
+        3. Object is inside trigger zone (FOV x/y + z bounds)
+        4. Velocity is reasonable (between min_velocity and max_velocity)
+        5. Heading toward center of volume
+
+        Exit: ZONE_EXIT emitted immediately when object leaves zone.
         """
         x, y, z = tracked_obj.current_x, tracked_obj.current_y, tracked_obj.current_z
         in_zone_now = self.is_in_trigger_zone(x, y, z)
 
-        now = time.time()
+        if not tracked_obj.in_zone and in_zone_now:
+            # Object just entered the zone — check all entry gates
 
-        if in_zone_now and tracked_obj.is_heading_toward_center(self.config.heading_threshold):
-            if not tracked_obj.in_zone:
-                # Just entered the zone — start dwell timer
-                tracked_obj.in_zone = True
-                tracked_obj.zone_first_seen = now
+            # Gate 1: object must have existed long enough
+            age = tracked_obj.get_tracking_duration()
+            if age < self.config.min_tracking_age:
+                return
 
-            # Check if dwell time has been met and ZONE_ENTER not yet emitted
-            if (
-                not tracked_obj.zone_entered
-                and tracked_obj.zone_first_seen is not None
-                and (now - tracked_obj.zone_first_seen) >= self.config.zone_dwell_time
-            ):
-                # Enforce global refractory period
-                elapsed = now - self._last_zone_enter_time
-                if elapsed < self.refractory_period:
-                    self.logger.debug(
-                        f"ZONE_ENTER suppressed for obj={tracked_obj.obj_id} "
-                        f"(refractory: {elapsed:.1f}s / {self.refractory_period:.1f}s)"
-                    )
-                else:
-                    tracked_obj.zone_entered = True
-                    tracked_obj.zone_enter_time = now
-                    self._send_zone_enter(tracked_obj)
+            # Gate 2: refractory period
+            now = time.time()
+            elapsed = now - self._last_zone_enter_time
+            if elapsed < self.refractory_period:
+                self.logger.debug(
+                    f"ZONE_ENTER suppressed for obj={tracked_obj.obj_id} "
+                    f"(refractory: {elapsed:.1f}s / {self.refractory_period:.1f}s)"
+                )
+                return
+
+            # Gate 3: already satisfied by in_zone_now check above
+
+            # Gate 4: velocity must be reasonable
+            mean_vel = tracked_obj.get_mean_velocity()
+            if mean_vel is not None:
+                speed = np.sqrt(mean_vel[0] ** 2 + mean_vel[1] ** 2)
+                if speed < self.config.min_velocity:
+                    return
+                if speed > self.config.max_velocity:
+                    return
+
+            # Gate 5: heading toward center
+            if not tracked_obj.is_heading_toward_center(self.config.heading_threshold):
+                return
+
+            # All gates passed — emit ZONE_ENTER
+            tracked_obj.in_zone = True
+            tracked_obj.zone_enter_time = time.time()
+            self._send_zone_enter(tracked_obj)
 
         elif tracked_obj.in_zone and not in_zone_now:
-            # Left the zone
-            if tracked_obj.zone_entered:
-                self._send_zone_exit(tracked_obj, reason="left_fov")
+            # Left the zone — emit ZONE_EXIT immediately
+            self._send_zone_exit(tracked_obj, reason="left_fov")
             tracked_obj.in_zone = False
-            tracked_obj.zone_entered = False
-            tracked_obj.zone_first_seen = None
             tracked_obj.zone_enter_time = None
 
     def _send_zone_enter(self, tracked_obj: TrackedObject) -> None:
@@ -487,11 +499,8 @@ class TriggerHandler(WorkerProcess):
                 obj.in_zone
                 and current_time - obj.last_check_time > self.config.zone_timeout
             ):
-                if obj.zone_entered:
-                    self._send_zone_exit(obj, reason="timeout")
+                self._send_zone_exit(obj, reason="timeout")
                 obj.in_zone = False
-                obj.zone_entered = False
-                obj.zone_first_seen = None
                 obj.zone_enter_time = None
 
             if current_time - obj.last_check_time > MAX_OBJECT_AGE:

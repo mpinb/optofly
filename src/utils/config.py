@@ -64,9 +64,6 @@ class TriggerHandlerConfig(ConfigBase):
         # after the last one, regardless of object identity.
         self.refractory_period: float = float(config.get("refractory_period", 10.0))
 
-        # Minimum dwell time: object must stay in zone for this long before
-        # ZONE_ENTER is emitted (filters transient boundary crossings).
-        self.zone_dwell_time: float = float(config.get("zone_dwell_time", 0.05))
 
         # Trigger zone x/y = camera FOV (single source of truth)
         camera_config = CameraConfig(config_path)
@@ -85,8 +82,13 @@ class TriggerHandlerConfig(ConfigBase):
         self.heading_cone_deg: float = float(config.get("heading_cone_deg", 45.0))
         self.heading_threshold: float = math.radians(self.heading_cone_deg)
 
-        # Minimum velocity to consider object as "moving" (m/s)
+        # Velocity bounds (m/s) — object must be moving but not unrealistically fast
         self.min_velocity: float = float(config.get("min_velocity", 0.01))
+        self.max_velocity: float = float(config.get("max_velocity", 2.0))
+
+        # Minimum tracking age: object must exist for this long before it can
+        # trigger ZONE_ENTER (filters transient noise detections).
+        self.min_tracking_age: float = float(config.get("min_tracking_age", 0.1))
 
         # Communication settings reused across processes
         self.zmq = ZMQConfig(config_path)

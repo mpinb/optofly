@@ -72,6 +72,9 @@ def _annotate_hist(ax: plt.Axes, diffs: np.ndarray) -> None:
 
 def save_debug_histograms(metadata: np.ndarray, n_frames: int, base_path: str) -> None:
     """Save debug histograms: nframe diffs, inter-frame time, jitter, and timeline."""
+    if n_frames < 2:
+        log.warning("Skipping debug histograms: need ≥2 frames, got %d", n_frames)
+        return
     meta = metadata[:n_frames]
     cam_time_us = meta[:, 1] * 1_000_000 + meta[:, 2]
     ifi_us = np.diff(cam_time_us).astype(np.float64)
