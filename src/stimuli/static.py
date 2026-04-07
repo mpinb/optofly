@@ -54,9 +54,9 @@ class StaticPatternStimulus(BaseStimulus):
         upscale with nearest-neighbor via np.repeat, and hand the bytes
         to pyglet.
         """
-        # Calculate working resolution
-        working_width = self.screen_width // self.downscale_factor
-        working_height = self.screen_height // self.downscale_factor
+        # Calculate working resolution (ceil so np.repeat always covers the target)
+        working_width = -(-self.screen_width // self.downscale_factor)
+        working_height = -(-self.screen_height // self.downscale_factor)
 
         # Set random seed for reproducibility
         rng = np.random.default_rng(self.random_seed)

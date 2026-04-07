@@ -39,6 +39,11 @@ class WorkerProcess(Process):
         # Reset global logging.disable inherited from parent fork
         logging.disable(logging.NOTSET)
 
+        # After fork the module-level _file_handler guard is stale
+        # (copied from parent); reset it so the child opens its own handle.
+        import src.utils.logger as _logger_mod
+        _logger_mod._file_handler = None
+
         # Set up file logging if a path was configured
         if WorkerProcess._log_path:
             setup_file_logging(WorkerProcess._log_path)
