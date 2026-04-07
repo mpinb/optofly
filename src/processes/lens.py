@@ -582,7 +582,7 @@ class LiquidLens(WorkerProcess):
                             focus_position = z
 
                         dpt = self.lens_calibration.get_dpt(focus_position)
-                        self.lens_driver.set_focal_power(dpt)
+                        self.lens_driver.set_diopter(dpt)
                         self.logger.debug(
                             f"Setting lens to {dpt} diopters for z={focus_position}"
                         )
