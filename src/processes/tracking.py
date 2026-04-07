@@ -210,6 +210,11 @@ class TriggerHandler(WorkerProcess):
         self.z_min = self.config.z_min
         self.z_max = self.config.z_max
 
+        # Global refractory period — suppress ZONE_ENTER for this many seconds
+        # after the last one was sent, regardless of object identity.
+        self.refractory_period: float = self.config.refractory_period
+        self._last_zone_enter_time: float = 0.0
+
         # Dictionary to track objects: {obj_id: TrackedObject}
         self.tracked_objects = {}
 
@@ -226,7 +231,10 @@ class TriggerHandler(WorkerProcess):
         try:
             self._initialize_zmq()
             self.is_initialized = True
-            self.logger.info("TriggerHandler initialized successfully")
+            self.logger.info(
+                f"TriggerHandler initialized successfully "
+                f"(refractory_period={self.refractory_period}s)"
+            )
             return True
         except Exception as e:
             self.logger.error(f"Failed to initialize TriggerHandler: {e}")
@@ -384,7 +392,17 @@ class TriggerHandler(WorkerProcess):
             if tracked_obj.is_heading_toward_center(self.config.heading_threshold):
                 tracked_obj.in_zone = True
                 tracked_obj.zone_enter_time = time.time()
-                self._send_zone_enter(tracked_obj)
+
+                # Enforce global refractory period
+                now = time.time()
+                elapsed = now - self._last_zone_enter_time
+                if elapsed < self.refractory_period:
+                    self.logger.debug(
+                        f"ZONE_ENTER suppressed for obj={tracked_obj.obj_id} "
+                        f"(refractory: {elapsed:.1f}s / {self.refractory_period:.1f}s)"
+                    )
+                else:
+                    self._send_zone_enter(tracked_obj)
         elif tracked_obj.in_zone and not in_zone_now:
             # Leaving zone
             self._send_zone_exit(tracked_obj, reason="left_fov")
@@ -408,6 +426,7 @@ class TriggerHandler(WorkerProcess):
             message = json.dumps(message_data)
             topic = self.config.zmq.zone_enter_topic.encode("utf-8")
             self.publisher.send_multipart([topic, message.encode("utf-8")])
+            self._last_zone_enter_time = time.time()
             self.logger.info(
                 f"ZONE_ENTER obj={tracked_obj.obj_id} "
                 f"pos=({tracked_obj.current_x:.3f}, {tracked_obj.current_y:.3f}, {tracked_obj.current_z:.3f}) "

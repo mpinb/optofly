@@ -59,6 +59,7 @@ z_max = 0.25                     # Maximum z for trigger zone (meters)
 heading_cone_deg = 45.0          # Angular tolerance for heading alignment (degrees)
 min_velocity = 0.01              # Minimum velocity to consider object "moving" (m/s)
 zone_timeout = 2.0               # Auto ZONE_EXIT if no updates for this long (seconds)
+refractory_period = 10.0         # Global cooldown between ZONE_ENTER events (seconds)
 
 [camera]
 # High-speed camera settings
