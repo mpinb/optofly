@@ -368,7 +368,7 @@ class VisualStimuliProcess(WorkerProcess):
                 message_str = message.decode("utf-8")
                 trigger_data = json.loads(message_str)
 
-                self.logger.info(
+                self.logger.debug(
                     f"Received {topic_str}: obj_id={trigger_data.get('obj_id')}"
                 )
 

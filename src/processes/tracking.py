@@ -427,7 +427,7 @@ class TriggerHandler(WorkerProcess):
             topic = self.config.zmq.zone_enter_topic.encode("utf-8")
             self.publisher.send_multipart([topic, message.encode("utf-8")])
             self._last_zone_enter_time = time.time()
-            self.logger.info(
+            self.logger.debug(
                 f"ZONE_ENTER obj={tracked_obj.obj_id} "
                 f"pos=({tracked_obj.current_x:.3f}, {tracked_obj.current_y:.3f}, {tracked_obj.current_z:.3f}) "
                 f"heading={mean_heading}"
@@ -454,7 +454,7 @@ class TriggerHandler(WorkerProcess):
             message = json.dumps(message_data)
             topic = self.config.zmq.zone_exit_topic.encode("utf-8")
             self.publisher.send_multipart([topic, message.encode("utf-8")])
-            self.logger.info(
+            self.logger.debug(
                 f"ZONE_EXIT obj={tracked_obj.obj_id} reason={reason} "
                 f"duration={duration:.2f}s"
             )
