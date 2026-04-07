@@ -82,22 +82,16 @@ class DisplayManager:
             # Center on main screen (don't move to experimental screens)
             # Window will open at default position
         else:
-            # Production mode: fullscreen on experimental screens
+            # Production mode: borderless window on experimental screens
             self.window = pyglet.window.Window(
                 width=self.window_width,
                 height=self.window_height,
                 caption=caption,
                 resizable=False,
-                vsync=True  # Enable VSync for 240Hz
+                vsync=True,
             )
-
-            # Set window position (move to experimental screens)
+            self.window.set_decorated(False)
             self.window.set_location(self.window_x_offset, 0)
-
-            # Set fullscreen on experimental displays
-            # Note: This may need adjustment based on window manager
-            # For now, we'll use borderless window at correct position
-            self.window.set_fullscreen(False)  # Windowed mode
 
         # Set background clear color
         r, g, b, a = self.background_color

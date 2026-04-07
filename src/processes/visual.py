@@ -117,17 +117,14 @@ class VisualStimuliProcess(WorkerProcess):
         Returns:
             Dictionary containing visual_stimuli configuration
         """
-        # Get the directory of the main config
-        config_dir = Path(main_config_path).parent
-
         # Check if visual_stimuli section in main config specifies a config_file
         visual_stimuli_section = self.config_base.get("visual_stimuli", {})
         visual_config_file = visual_stimuli_section.get(
             "config_file", "configs/visual_stimuli.toml"
         )
 
-        # Construct full path to visual stimuli config
-        visual_config_path = config_dir / visual_config_file
+        # config_file is relative to project root, not to the config directory
+        visual_config_path = Path(visual_config_file)
 
         # Try to load from separate file first
         if visual_config_path.exists():
@@ -311,7 +308,11 @@ class VisualStimuliProcess(WorkerProcess):
         # Register static pattern if enabled
         static_config = self.config.get("static", {})
         if static_config.get("enabled", False):
-            static_stimulus = StaticPatternStimulus(static_config)
+            static_stimulus = StaticPatternStimulus(
+                static_config,
+                screen_width=self.config.get("window_width", 7680),
+                screen_height=self.config.get("window_height", 1080),
+            )
             self.registry.register("static", static_stimulus)
             self.logger.info("Static pattern stimulus registered")
 
