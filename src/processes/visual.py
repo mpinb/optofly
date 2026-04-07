@@ -357,15 +357,19 @@ class VisualStimuliProcess(WorkerProcess):
         self.logger.info("Standalone controller initialized")
 
     def _check_trigger_messages(self) -> None:
-        """Poll ZMQ for TRIGGER messages (non-blocking)."""
+        """Poll ZMQ for ZONE_ENTER messages (non-blocking)."""
         try:
             # Non-blocking receive
             if self.subscriber.poll(timeout=0):
                 # Receive multipart message (topic, content)
                 topic, message = self.subscriber.recv_multipart(flags=zmq.NOBLOCK)
-                topic = topic.decode("utf-8")
+                topic_str = topic.decode("utf-8")
                 message_str = message.decode("utf-8")
                 trigger_data = json.loads(message_str)
+
+                self.logger.info(
+                    f"Received {topic_str}: obj_id={trigger_data.get('obj_id')}"
+                )
 
                 # Dispatch to stimuli
                 self.registry.on_trigger(trigger_data)
@@ -373,9 +377,9 @@ class VisualStimuliProcess(WorkerProcess):
         except zmq.Again:
             pass  # No message available
         except json.JSONDecodeError as e:
-            self.logger.error(f"Error decoding TRIGGER message: {e}")
+            self.logger.error(f"Error decoding trigger message: {e}")
         except Exception as e:
-            self.logger.error(f"Error processing TRIGGER message: {e}")
+            self.logger.error(f"Error processing trigger message: {e}")
 
     def _render_loop(self, dt: float) -> None:
         """Main rendering loop called at 240Hz.

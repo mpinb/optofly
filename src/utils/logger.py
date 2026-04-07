@@ -1,5 +1,9 @@
 import logging
+import os
 import sys
+
+# Global file handler shared across all loggers in a process
+_file_handler: logging.FileHandler | None = None
 
 # ANSI color codes for terminal output
 COLORS = {
@@ -29,6 +33,31 @@ class ColoredFormatter(logging.Formatter):
         formatted_message = super().format(record)
         # Add color
         return f"{self.color_code}{formatted_message}{COLORS['RESET']}"
+
+
+def setup_file_logging(log_path: str) -> None:
+    """Configure the root logger to also write to a file.
+
+    Call once per process (parent or child) before any get_logger calls.
+    The file handler is plain text (no ANSI colors) so the log file is
+    readable in any editor.  Safe to call multiple times — only the first
+    call per process has effect.
+    """
+    global _file_handler
+    if _file_handler is not None:
+        return
+
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    _file_handler = logging.FileHandler(log_path, mode="a")
+    _file_handler.setLevel(logging.DEBUG)
+    _file_handler.setFormatter(
+        logging.Formatter(
+            "[%(asctime)s - %(processName)s - %(name)s] %(levelname)s: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    )
+    logging.getLogger().addHandler(_file_handler)
+    logging.getLogger().setLevel(logging.DEBUG)
 
 
 def get_logger(module_name, process_name=None, color=None, log_level=None):
