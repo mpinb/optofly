@@ -53,8 +53,10 @@ class TrackedObject:
     current_timestamp: float = 0.0
 
     # Zone membership tracking
-    in_zone: bool = False
-    zone_enter_time: Optional[float] = None
+    in_zone: bool = False           # physically inside the trigger zone
+    zone_entered: bool = False      # ZONE_ENTER has been emitted
+    zone_first_seen: Optional[float] = None   # when object first entered zone
+    zone_enter_time: Optional[float] = None   # when ZONE_ENTER was emitted
 
     # Track last time this object was checked
     last_check_time: float = field(default_factory=time.time)
@@ -367,7 +369,7 @@ class TriggerHandler(WorkerProcess):
             obj_id = data if isinstance(data, int) else data.get("obj_id", data)
             if obj_id in self.tracked_objects:
                 tracked_obj = self.tracked_objects[obj_id]
-                if tracked_obj.in_zone:
+                if tracked_obj.zone_entered:
                     self._send_zone_exit(tracked_obj, reason="death")
                 self.logger.debug(f"Stopped tracking object {obj_id}")
                 del self.tracked_objects[obj_id]
@@ -387,14 +389,21 @@ class TriggerHandler(WorkerProcess):
         x, y, z = tracked_obj.current_x, tracked_obj.current_y, tracked_obj.current_z
         in_zone_now = self.is_in_trigger_zone(x, y, z)
 
-        if not tracked_obj.in_zone and in_zone_now:
-            # Entering zone — require heading toward center
-            if tracked_obj.is_heading_toward_center(self.config.heading_threshold):
-                tracked_obj.in_zone = True
-                tracked_obj.zone_enter_time = time.time()
+        now = time.time()
 
+        if in_zone_now and tracked_obj.is_heading_toward_center(self.config.heading_threshold):
+            if not tracked_obj.in_zone:
+                # Just entered the zone — start dwell timer
+                tracked_obj.in_zone = True
+                tracked_obj.zone_first_seen = now
+
+            # Check if dwell time has been met and ZONE_ENTER not yet emitted
+            if (
+                not tracked_obj.zone_entered
+                and tracked_obj.zone_first_seen is not None
+                and (now - tracked_obj.zone_first_seen) >= self.config.zone_dwell_time
+            ):
                 # Enforce global refractory period
-                now = time.time()
                 elapsed = now - self._last_zone_enter_time
                 if elapsed < self.refractory_period:
                     self.logger.debug(
@@ -402,11 +411,17 @@ class TriggerHandler(WorkerProcess):
                         f"(refractory: {elapsed:.1f}s / {self.refractory_period:.1f}s)"
                     )
                 else:
+                    tracked_obj.zone_entered = True
+                    tracked_obj.zone_enter_time = now
                     self._send_zone_enter(tracked_obj)
+
         elif tracked_obj.in_zone and not in_zone_now:
-            # Leaving zone
-            self._send_zone_exit(tracked_obj, reason="left_fov")
+            # Left the zone
+            if tracked_obj.zone_entered:
+                self._send_zone_exit(tracked_obj, reason="left_fov")
             tracked_obj.in_zone = False
+            tracked_obj.zone_entered = False
+            tracked_obj.zone_first_seen = None
             tracked_obj.zone_enter_time = None
 
     def _send_zone_enter(self, tracked_obj: TrackedObject) -> None:
@@ -472,8 +487,11 @@ class TriggerHandler(WorkerProcess):
                 obj.in_zone
                 and current_time - obj.last_check_time > self.config.zone_timeout
             ):
-                self._send_zone_exit(obj, reason="timeout")
+                if obj.zone_entered:
+                    self._send_zone_exit(obj, reason="timeout")
                 obj.in_zone = False
+                obj.zone_entered = False
+                obj.zone_first_seen = None
                 obj.zone_enter_time = None
 
             if current_time - obj.last_check_time > MAX_OBJECT_AGE:

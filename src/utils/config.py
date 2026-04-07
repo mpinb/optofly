@@ -64,6 +64,10 @@ class TriggerHandlerConfig(ConfigBase):
         # after the last one, regardless of object identity.
         self.refractory_period: float = float(config.get("refractory_period", 10.0))
 
+        # Minimum dwell time: object must stay in zone for this long before
+        # ZONE_ENTER is emitted (filters transient boundary crossings).
+        self.zone_dwell_time: float = float(config.get("zone_dwell_time", 0.05))
+
         # Trigger zone x/y = camera FOV (single source of truth)
         camera_config = CameraConfig(config_path)
         self.fov_x_min: float = camera_config.fov_x_min
