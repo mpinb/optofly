@@ -19,7 +19,7 @@ class DisplayManager:
         standalone: bool = False,
         standalone_width: int = 1280,
         standalone_height: int = 720,
-        use_experimental_display: bool = False
+        use_experimental_display: bool = False,
     ):
         """Initialize display manager.
 
@@ -43,7 +43,9 @@ class DisplayManager:
         self.use_experimental_display = use_experimental_display
         self.window = None
 
-    def create_window(self, caption: str = "OptoFly Visual Stimuli") -> pyglet.window.Window:
+    def create_window(
+        self, caption: str = "OptoFly Visual Stimuli"
+    ) -> pyglet.window.Window:
         """Create window for visual stimuli display.
 
         Creates either:
@@ -65,7 +67,7 @@ class DisplayManager:
                 height=self.window_height,
                 caption=f"{caption} - Standalone (Experimental Display)",
                 resizable=False,
-                vsync=True
+                vsync=True,
             )
             # Set window position (move to experimental screens)
             self.window.set_location(self.window_x_offset, 0)
@@ -77,7 +79,7 @@ class DisplayManager:
                 height=self.standalone_height,
                 caption=f"{caption} - Standalone Testing",
                 resizable=False,
-                vsync=True
+                vsync=True,
             )
             # Center on main screen (don't move to experimental screens)
             # Window will open at default position
@@ -88,14 +90,14 @@ class DisplayManager:
                 height=self.window_height,
                 caption=caption,
                 resizable=False,
+                style=pyglet.window.Window.WINDOW_STYLE_BORDERLESS,
                 vsync=True,
             )
-            self.window.set_decorated(False)
             self.window.set_location(self.window_x_offset, 0)
 
         # Set background clear color
         r, g, b, a = self.background_color
-        pyglet.gl.glClearColor(r/255, g/255, b/255, a/255)
+        pyglet.gl.glClearColor(r / 255, g / 255, b / 255, a / 255)
 
         return self.window
 

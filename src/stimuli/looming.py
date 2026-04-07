@@ -22,11 +22,7 @@ class LoomingStimulusRenderer(BaseStimulus):
     HOLDING = 2
 
     def __init__(
-        self,
-        config: Dict[str, Any],
-        geometry_utils: GeometryUtils,
-        logger,
-        csv_writer
+        self, config: Dict[str, Any], geometry_utils: GeometryUtils, logger, csv_writer
     ):
         """Initialize looming stimulus.
 
@@ -46,20 +42,16 @@ class LoomingStimulusRenderer(BaseStimulus):
 
         # Parse parameters - can be single value or list of options
         self.initial_size_deg_options = self._parse_parameter(
-            config.get("initial_size_deg", 5.0),
-            "initial_size_deg"
+            config.get("initial_size_deg", 5.0), "initial_size_deg"
         )
         self.final_size_deg_options = self._parse_parameter(
-            config.get("final_size_deg", 80.0),
-            "final_size_deg"
+            config.get("final_size_deg", 80.0), "final_size_deg"
         )
         self.expansion_duration_ms_options = self._parse_parameter(
-            config.get("expansion_duration_ms", 500),
-            "expansion_duration_ms"
+            config.get("expansion_duration_ms", 500), "expansion_duration_ms"
         )
         self.hold_time_ms_options = self._parse_parameter(
-            config.get("hold_time_ms", 200),
-            "hold_time_ms"
+            config.get("hold_time_ms", 200), "hold_time_ms"
         )
 
         # Currently selected values (set when triggered)
@@ -146,14 +138,15 @@ class LoomingStimulusRenderer(BaseStimulus):
         # Randomly select parameters from options
         self.initial_size_deg = np.random.choice(self.initial_size_deg_options)
         self.final_size_deg = np.random.choice(self.final_size_deg_options)
-        self.expansion_duration_ms = np.random.choice(self.expansion_duration_ms_options)
+        self.expansion_duration_ms = np.random.choice(
+            self.expansion_duration_ms_options
+        )
         self.hold_time_ms = np.random.choice(self.hold_time_ms_options)
 
         # Calculate screen position
-        fly_heading_rad = trigger_data['mean_heading']
+        fly_heading_rad = trigger_data["mean_heading"]
         self.center_x = self.geometry.heading_to_pixel_x(
-            fly_heading_rad,
-            self.selected_position_deg
+            fly_heading_rad, self.selected_position_deg
         )
 
         # Initialize expansion
@@ -165,7 +158,9 @@ class LoomingStimulusRenderer(BaseStimulus):
         self.current_radius_px = self.geometry.degrees_to_pixels(self.initial_size_deg)
 
         # Log event to CSV
-        self._log_stimulus_event(trigger_data, self.selected_position_deg, fly_heading_rad)
+        self._log_stimulus_event(
+            trigger_data, self.selected_position_deg, fly_heading_rad
+        )
 
         self.logger.info(
             f"Looming started: obj_id={trigger_data['obj_id']}, "
@@ -190,13 +185,19 @@ class LoomingStimulusRenderer(BaseStimulus):
             if self.elapsed_time >= self.expansion_duration_ms / 1000.0:
                 self.state = self.HOLDING
                 self.elapsed_time = 0.0
-                self.current_radius_px = self.geometry.degrees_to_pixels(self.final_size_deg)
+                self.current_radius_px = self.geometry.degrees_to_pixels(
+                    self.final_size_deg
+                )
             else:
                 # Calculate current radius
                 if self.expansion_type == "lv_ratio":
-                    self.current_radius_px = self._calculate_lv_radius(self.elapsed_time)
+                    self.current_radius_px = self._calculate_lv_radius(
+                        self.elapsed_time
+                    )
                 else:
-                    self.current_radius_px = self._calculate_exponential_radius(self.elapsed_time)
+                    self.current_radius_px = self._calculate_exponential_radius(
+                        self.elapsed_time
+                    )
 
         elif self.state == self.HOLDING:
             # Check if hold complete
@@ -222,7 +223,7 @@ class LoomingStimulusRenderer(BaseStimulus):
                 y=self.center_y,
                 radius=self.current_radius_px,
                 color=self.circle_color,
-                batch=batch
+                batch=batch,
             )
         else:
             # Update existing circle properties instead of recreating
@@ -239,7 +240,7 @@ class LoomingStimulusRenderer(BaseStimulus):
                     y=self.center_y,
                     radius=self.current_radius_px,
                     color=self.circle_color,
-                    batch=batch
+                    batch=batch,
                 )
             else:
                 # Update wrapped circle properties
@@ -280,8 +281,7 @@ class LoomingStimulusRenderer(BaseStimulus):
         """
         min_count = min(self.position_counts.values())
         candidates = [
-            pos for pos, count in self.position_counts.items()
-            if count == min_count
+            pos for pos, count in self.position_counts.items() if count == min_count
         ]
         selected = np.random.choice(candidates)
         self.position_counts[selected] += 1
@@ -289,19 +289,19 @@ class LoomingStimulusRenderer(BaseStimulus):
 
     def _calculate_lv_radius(self, t: float) -> int:
         """Calculate radius using L/V ratio equation.
-        
+
         Standard equation: θ(t) = 2 * arctan(l / (2v*t))
         Where t is time UNTIL collision (not elapsed time).
-        
+
         Args:
             t: Time since expansion started (seconds)
-        
+
         Returns:
             Radius in pixels
         """
-        # Time remaining until "collision" 
+        # Time remaining until "collision"
         time_to_collision = (self.expansion_duration_ms / 1000.0) - t
-        
+
         if time_to_collision < 0.001:  # Avoid division by zero near collision
             angular_size_deg = self.final_size_deg
         else:
@@ -309,7 +309,7 @@ class LoomingStimulusRenderer(BaseStimulus):
             # t here is time-to-collision
             angular_size_rad = 2 * np.arctan(lv_seconds / (2 * time_to_collision))
             angular_size_deg = np.rad2deg(angular_size_rad)
-        
+
         return self.geometry.degrees_to_pixels(angular_size_deg)
 
     def _calculate_exponential_radius(self, t: float) -> int:
@@ -326,8 +326,8 @@ class LoomingStimulusRenderer(BaseStimulus):
         progress = np.clip(progress, 0, 1)
 
         current_size_deg = (
-            self.initial_size_deg +
-            (self.final_size_deg - self.initial_size_deg) * progress
+            self.initial_size_deg
+            + (self.final_size_deg - self.initial_size_deg) * progress
         )
         return self.geometry.degrees_to_pixels(current_size_deg)
 
@@ -338,9 +338,8 @@ class LoomingStimulusRenderer(BaseStimulus):
             True if circle needs wrapping
         """
         screen_width = self.geometry.screen_width
-        return (
-            (self.center_x - self.current_radius_px < 0) or
-            (self.center_x + self.current_radius_px > screen_width)
+        return (self.center_x - self.current_radius_px < 0) or (
+            self.center_x + self.current_radius_px > screen_width
         )
 
     def _get_wrapped_x(self) -> int:
@@ -361,7 +360,7 @@ class LoomingStimulusRenderer(BaseStimulus):
         self,
         trigger_data: Dict[str, Any],
         selected_position_deg: float,
-        fly_heading_rad: float
+        fly_heading_rad: float,
     ) -> None:
         """Log complete stimulus parameters to CSV.
 
@@ -376,9 +375,8 @@ class LoomingStimulusRenderer(BaseStimulus):
         log_data = {
             "timestamp": time.time(),
             "obj_id": trigger_data["obj_id"],
-            "frame": trigger_data["frame"],
-            "braid_timestamp": trigger_data["braid_timestamp"],
-            "trigger_timestamp": trigger_data["trigger_timestamp"],
+            "frame": trigger_data.get("frame"),
+            "trigger_timestamp": trigger_data.get("timestamp"),
             "stimulus_type": "looming",
             "fly_heading_rad": fly_heading_rad,
             "fly_heading_deg": fly_heading_deg,
@@ -392,7 +390,7 @@ class LoomingStimulusRenderer(BaseStimulus):
             "hold_time_ms": self.hold_time_ms,
             "expansion_type": self.expansion_type,
             "lv_ratio_ms": self.lv_ratio_ms,
-            "circle_color": str(self.circle_color)
+            "circle_color": str(self.circle_color),
         }
 
         self.csv_writer.append(log_data)
@@ -412,7 +410,7 @@ class LoomingStimulusRenderer(BaseStimulus):
                 "white": (255, 255, 255),
                 "red": (255, 0, 0),
                 "green": (0, 255, 0),
-                "blue": (0, 0, 255)
+                "blue": (0, 0, 255),
             }
             return color_map.get(color.lower(), (0, 0, 0))
         else:
