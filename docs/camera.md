@@ -12,14 +12,14 @@ High-speed triggered video recording using ximea-py and ffmpeg.
 
 Single-process design with a background encoder thread:
 
-1. **Capture loop** (in `CameraProcess.run()`) — captures frames at 500fps via ximea-py, writes into a circular double-buffer using `ctypes.memmove`
-2. **State machine** — polls ZMQ for TRIGGER messages; on trigger, collects post-trigger frames then hands the buffer to the encoder
-3. **Encoder thread** — pipes raw frames to ffmpeg stdin (two contiguous writes in ring-buffer order, no reorder copy), writes CSV metadata and debug histograms
+1. **Capture loop** (in `CameraProcess.run()`) — captures frames at 500fps via ximea-py, writes into a linear double-buffer using `ctypes.memmove`
+2. **State machine** — IDLE polls ZMQ for ZONE_ENTER; on enter, transitions to RECORDING. In RECORDING, captures frames linearly and polls for ZONE_EXIT. On exit (or buffer full), hands buffer to encoder
+3. **Encoder thread** — pipes raw frames to ffmpeg stdin (single contiguous write), writes CSV metadata and debug histograms
 
-**Double-buffer pattern:** Two pre-allocated numpy arrays. On TRIGGER completion, the active buffer reference is enqueued for encoding and the standby buffer becomes active. The encoder reads the old buffer while capture continues into the new one.
+**Double-buffer pattern:** Two pre-allocated numpy arrays sized for `zone_timeout + 1s`. On recording completion, the active buffer is enqueued for encoding and the standby buffer becomes active. The encoder reads the old buffer while capture continues into the new one.
 
-**Memory:** `2 x (pre_trigger + post_trigger) x fps x width x height`
-Default settings (1000 frames x 2112x2112): ~8GB.
+**Memory:** `2 x (zone_timeout + 1s) x fps x width x height`
+Default settings (3s x 500fps x 2016x2016): ~5.7GB.
 
 ## Dependencies
 
@@ -48,9 +48,10 @@ if not results["overall"]:
 
 ## ZMQ Protocol
 
-Subscribes to topic `TRIGGER` on port 5556 (multipart):
+Subscribes to topics `ZONE_ENTER` and `ZONE_EXIT` on port 5556 (multipart):
 ```
-[b"TRIGGER", b'{"obj_id": 123, "frame": 4567}']
+[b"ZONE_ENTER", b'{"obj_id": 123, "frame": 4567, "x": 0.01, "y": -0.02, "z": 0.18, "mean_heading": 0.52}']
+[b"ZONE_EXIT", b'{"obj_id": 123, "reason": "left_fov", "timestamp": 1234.78, "duration": 0.22}']
 ```
 
 Kill signal: `[b"kill", b""]`

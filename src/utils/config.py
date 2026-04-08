@@ -57,11 +57,13 @@ class TriggerHandlerConfig(ConfigBase):
         super().__init__(config_path, "trigger_handler")
         config = self._load_config()
 
-        # Temporal gating parameters
-        self.min_trajectory_time: float = float(config.get("min_trajectory_time", 1.0))
-        self.min_trigger_interval: float = float(
-            config.get("min_trigger_interval", 10.0)
-        )
+        # Zone timeout: emit ZONE_EXIT if no updates received for this long
+        self.zone_timeout: float = float(config.get("zone_timeout", 2.0))
+
+        # Global refractory period: suppress ZONE_ENTER for this many seconds
+        # after the last one, regardless of object identity.
+        self.refractory_period: float = float(config.get("refractory_period", 10.0))
+
 
         # Trigger zone x/y = camera FOV (single source of truth)
         camera_config = CameraConfig(config_path)
@@ -80,8 +82,13 @@ class TriggerHandlerConfig(ConfigBase):
         self.heading_cone_deg: float = float(config.get("heading_cone_deg", 45.0))
         self.heading_threshold: float = math.radians(self.heading_cone_deg)
 
-        # Minimum velocity to consider object as "moving" (m/s)
+        # Velocity bounds (m/s) — object must be moving but not unrealistically fast
         self.min_velocity: float = float(config.get("min_velocity", 0.01))
+        self.max_velocity: float = float(config.get("max_velocity", 2.0))
+
+        # Minimum tracking age: object must exist for this long before it can
+        # trigger ZONE_ENTER (filters transient noise detections).
+        self.min_tracking_age: float = float(config.get("min_tracking_age", 0.1))
 
         # Communication settings reused across processes
         self.zmq = ZMQConfig(config_path)
@@ -153,7 +160,8 @@ class ZMQConfig(ConfigBase):
 
         # Topics
         self.braid_topic: str = config["braid_topic"]
-        self.trigger_topic: str = config["trigger_topic"]
+        self.zone_enter_topic: str = config.get("zone_enter_topic", "ZONE_ENTER")
+        self.zone_exit_topic: str = config.get("zone_exit_topic", "ZONE_EXIT")
 
         # Validate configuration
         self._validate_config()
@@ -272,16 +280,13 @@ class OptoTriggerConfig(ConfigBase):
 
         # Stimulation parameters - store as option lists
         self.duration_options: list = self._parse_parameter(
-            config.get("duration", 0),
-            "duration"
+            config.get("duration", 0), "duration"
         )
         self.intensity_options: list = self._parse_parameter(
-            config.get("intensity", 0),
-            "intensity"
+            config.get("intensity", 0), "intensity"
         )
         self.frequency_options: list = self._parse_parameter(
-            config.get("frequency", 0),
-            "frequency"
+            config.get("frequency", 0), "frequency"
         )
 
         # Currently selected values (set when triggered)
@@ -385,13 +390,6 @@ class CameraConfig(ConfigBase):
         self.height: int = self.sensor_height_px
 
         self.exposure_time: float = float(config.get("exposure_time", 0.0))
-        self.pre_trigger_time: float = float(config.get("pre_trigger_time", 0.0))
-        self.post_trigger_time: float = float(config.get("post_trigger_time", 0.0))
-
-        # Camera-specific parameters
-        self.offset_x: int = int(config.get("offset_x", 1312))
-        self.offset_y: int = int(config.get("offset_y", 656))
-        self.serial: int = int(config.get("serial", 0))
 
         # Communication settings
         self.zmq_address: str = config.get("zmq_address", "127.0.0.1")
@@ -421,7 +419,6 @@ class CameraConfig(ConfigBase):
             f"  Resolution: {self.sensor_width_px} x {self.sensor_height_px} px\n"
             f"  Frame Rate: {self.fps} fps\n"
             f"  Exposure Time: {self.exposure_time} µs\n"
-            f"  Trigger Window: pre {self.pre_trigger_time}s / post {self.post_trigger_time}s\n"
             f"  Field of View: {fov_width_mm:.2f} x {fov_height_mm:.2f} mm\n"
             f"  FOV Boundaries: [{self.fov_x_min}, {self.fov_x_max}] x [{self.fov_y_min}, {self.fov_y_max}] m"
         )

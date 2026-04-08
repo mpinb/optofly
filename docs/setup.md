@@ -58,10 +58,9 @@ min_velocity = 0.01         # Min velocity threshold (m/s)
 
 [camera]
 active = true
-resolution = [2016, 2016]
+resolution = [2112, 2112]
 fps = 500
-pre_trigger_time = 0.5
-post_trigger_time = 1.5
+# Buffer sized automatically from trigger_handler.zone_timeout
 
 [opto_trigger]
 active = true

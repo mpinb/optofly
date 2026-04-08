@@ -1,9 +1,13 @@
+import logging
 import signal
 from multiprocessing import Process, Event
-from src.utils.logger import init_class_logger
+from src.utils.logger import init_class_logger, setup_file_logging
 
 
 class WorkerProcess(Process):
+    # Class-level log path set by main before any process starts
+    _log_path: str | None = None
+
     def __init__(
         self,
         event: Event,
@@ -32,11 +36,22 @@ class WorkerProcess(Process):
         signal.signal(signal.SIGINT, original)
 
     def _initialize_logger(self):
+        # Reset global logging.disable inherited from parent fork
+        logging.disable(logging.NOTSET)
+
+        # After fork the module-level _file_handler guard is stale
+        # (copied from parent); reset it so the child opens its own handle.
+        import src.utils.logger as _logger_mod
+        _logger_mod._file_handler = None
+
+        # Set up file logging if a path was configured
+        if WorkerProcess._log_path:
+            setup_file_logging(WorkerProcess._log_path)
+
         self.logger = init_class_logger(
             instance=self,
             log_level=self.log_level,
             log_color=self.log_color,
             process_name=self.process_name,
-            # init_message suppressed to reduce startup noise
         )
         return self.logger

@@ -5,14 +5,12 @@ Config-driven experiment launcher that starts processes based on configs/config.
 Automatically enables/disables processes based on their 'active' flags.
 """
 
-import logging
 import multiprocessing as mp
 import sys
 import time
 import tomllib
 from datetime import datetime
 from pathlib import Path
-import serial
 
 from src.processes.braid import BraidPublisher
 from src.processes.tracking import TriggerHandler
@@ -21,7 +19,11 @@ from src.processes.led import OptoTriggerWorker
 from src.processes.camera import CameraProcess
 from src.processes.lens import LiquidLens
 from src.utils.braid import check_braid_folder_exists, copy_csv_files_to_braid
+from src.utils.logger import setup_file_logging
+from src.utils.worker import WorkerProcess
 from src.monitoring.server import run_server
+
+import serial
 
 
 def load_config(config_path: str) -> dict:
@@ -181,9 +183,17 @@ def main():
     copy_config_to_braid_folder(config_path, braid_folder)
     if config.get("visual_stimuli", {}).get("active", False):
         copy_config_to_braid_folder(
-            config.get("visual_stimuli", {}).get("config_file", "configs/visual_stimuli.toml"),
+            config.get("visual_stimuli", {}).get(
+                "config_file", "configs/visual_stimuli.toml"
+            ),
             braid_folder,
         )
+
+    # Set up file logging — all processes write to a shared log file
+    log_path = str(Path(braid_folder) / "optofly.log")
+    setup_file_logging(log_path)
+    WorkerProcess._log_path = log_path
+    print(f"Logging to: {log_path}")
 
     # Create shared stop event for coordinated shutdown
     stop_event = mp.Event()
@@ -193,16 +203,13 @@ def main():
     active_process_names = []
 
     try:
-        # Suppress log output during startup to keep output clean
-        logging.disable(logging.CRITICAL)
-
         # Core processes (always started)
         print("\nStarting core processes...")
 
-        # 0. Turn on the backlight
-        backlight_controller = serial.Serial('/dev/ttyUSB1', 115200, timeout=1)
-        time.sleep(2)
-        backlight_controller.write(b"255\n")
+        # 0. BacklightController - turn on the backlight
+        backlight_ser = serial.Serial("/dev/ttyUSB1", baudrate=9600, timeout=1)
+        time.sleep(2.0)  # wait for the arduino to reset
+        backlight_ser.write(b"1.0\n")
 
         # 1. BraidPublisher - connects to Braid tracking and publishes to ZMQ
         print("  ✓ BraidPublisher")
@@ -235,7 +242,7 @@ def main():
             monitoring_process = mp.Process(
                 target=run_server,
                 args=(zmq_address, monitoring_host, monitoring_port),
-                daemon=True
+                daemon=True,
             )
             monitoring_process.start()
             processes.append(("Monitoring Server", monitoring_process))
@@ -259,7 +266,9 @@ def main():
             video_folder = None
             if braid_folder:
                 video_folder = str(
-                    Path(braid_folder).parent.parent / "videos" / Path(braid_folder).name
+                    Path(braid_folder).parent.parent
+                    / "videos"
+                    / Path(braid_folder).name
                 )
             camera = CameraProcess(
                 config_path=config_path, event=stop_event, save_folder=video_folder
@@ -269,7 +278,9 @@ def main():
             active_process_names.append("CameraProcess")
 
             print("  ✓ LiquidLens")
-            liquid_lens = LiquidLens(event=stop_event, config_path=config_path)
+            liquid_lens = LiquidLens(
+                event=stop_event, config_path=config_path, braid_folder=braid_folder
+            )
             liquid_lens.start()
             processes.append(("LiquidLens", liquid_lens))
             active_process_names.append("LiquidLens")
@@ -283,9 +294,6 @@ def main():
             opto_trigger.start()
             processes.append(("OptoTriggerWorker", opto_trigger))
             active_process_names.append("OptoTriggerWorker")
-
-        # Re-enable logging now that startup output is complete
-        logging.disable(logging.NOTSET)
 
         # Allow child processes to finish their initialization
         time.sleep(1)
@@ -313,14 +321,14 @@ def main():
         raise
 
     finally:
-        # Ensure logging is re-enabled for shutdown messages
-        logging.disable(logging.NOTSET)
-
         # Graceful shutdown
         print("\nShutting down processes...")
         stop_event.set()
-        backlight_controller.write(b"0\n")
-        backlight_controller.close()
+
+        # Turn off backlight, disconnect
+        backlight_ser.write(b"0.0\n")
+        backlight_ser.flush()
+        backlight_ser.close()
 
         # Give processes time to cleanup
         time.sleep(1)

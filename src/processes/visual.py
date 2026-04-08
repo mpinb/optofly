@@ -117,17 +117,14 @@ class VisualStimuliProcess(WorkerProcess):
         Returns:
             Dictionary containing visual_stimuli configuration
         """
-        # Get the directory of the main config
-        config_dir = Path(main_config_path).parent
-
         # Check if visual_stimuli section in main config specifies a config_file
         visual_stimuli_section = self.config_base.get("visual_stimuli", {})
         visual_config_file = visual_stimuli_section.get(
             "config_file", "configs/visual_stimuli.toml"
         )
 
-        # Construct full path to visual stimuli config
-        visual_config_path = config_dir / visual_config_file
+        # config_file is relative to project root, not to the config directory
+        visual_config_path = Path(visual_config_file)
 
         # Try to load from separate file first
         if visual_config_path.exists():
@@ -190,21 +187,20 @@ class VisualStimuliProcess(WorkerProcess):
             return False
 
     def _initialize_zmq(self) -> None:
-        """Initialize ZMQ subscriber to TRIGGER messages."""
+        """Initialize ZMQ subscriber to ZONE_ENTER messages."""
         zmq_config = self.config_base.get("zmq", {})
         trigger_port = zmq_config.get("trigger_port", 5556)
-        trigger_topic = zmq_config.get("trigger_topic", "TRIGGER")
+        zone_enter_topic = zmq_config.get("zone_enter_topic", "ZONE_ENTER")
 
         self.context = zmq.Context()
         self.subscriber = self.context.socket(zmq.SUB)
 
         subscriber_address = f"tcp://localhost:{trigger_port}"
-        self.logger.info(f"Connecting to TRIGGER messages at {subscriber_address}")
+        self.logger.info(f"Connecting to ZONE_ENTER messages at {subscriber_address}")
         self.subscriber.connect(subscriber_address)
 
-        # Subscribe to TRIGGER topic
-        self.subscriber.setsockopt_string(zmq.SUBSCRIBE, trigger_topic)
-        self.logger.info(f"Subscribed to topic: {trigger_topic}")
+        self.subscriber.setsockopt_string(zmq.SUBSCRIBE, zone_enter_topic)
+        self.logger.info(f"Subscribed to topic: {zone_enter_topic}")
 
     def _initialize_geometry(self) -> None:
         """Initialize geometry utilities for coordinate conversion."""
@@ -312,7 +308,11 @@ class VisualStimuliProcess(WorkerProcess):
         # Register static pattern if enabled
         static_config = self.config.get("static", {})
         if static_config.get("enabled", False):
-            static_stimulus = StaticPatternStimulus(static_config)
+            static_stimulus = StaticPatternStimulus(
+                static_config,
+                screen_width=self.config.get("window_width", 7680),
+                screen_height=self.config.get("window_height", 1080),
+            )
             self.registry.register("static", static_stimulus)
             self.logger.info("Static pattern stimulus registered")
 
@@ -358,15 +358,19 @@ class VisualStimuliProcess(WorkerProcess):
         self.logger.info("Standalone controller initialized")
 
     def _check_trigger_messages(self) -> None:
-        """Poll ZMQ for TRIGGER messages (non-blocking)."""
+        """Poll ZMQ for ZONE_ENTER messages (non-blocking)."""
         try:
             # Non-blocking receive
             if self.subscriber.poll(timeout=0):
                 # Receive multipart message (topic, content)
                 topic, message = self.subscriber.recv_multipart(flags=zmq.NOBLOCK)
-                topic = topic.decode("utf-8")
+                topic_str = topic.decode("utf-8")
                 message_str = message.decode("utf-8")
                 trigger_data = json.loads(message_str)
+
+                self.logger.debug(
+                    f"Received {topic_str}: obj_id={trigger_data.get('obj_id')}"
+                )
 
                 # Dispatch to stimuli
                 self.registry.on_trigger(trigger_data)
@@ -374,9 +378,9 @@ class VisualStimuliProcess(WorkerProcess):
         except zmq.Again:
             pass  # No message available
         except json.JSONDecodeError as e:
-            self.logger.error(f"Error decoding TRIGGER message: {e}")
+            self.logger.error(f"Error decoding trigger message: {e}")
         except Exception as e:
-            self.logger.error(f"Error processing TRIGGER message: {e}")
+            self.logger.error(f"Error processing trigger message: {e}")
 
     def _render_loop(self, dt: float) -> None:
         """Main rendering loop called at 240Hz.
