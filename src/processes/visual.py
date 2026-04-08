@@ -41,7 +41,7 @@ class VisualStimuliProcess(WorkerProcess):
         log_level: str = "INFO",
         log_color: str = "CYAN",
         standalone: bool = False,
-        braid_folder: Optional[str] = None
+        braid_folder: Optional[str] = None,
     ):
         """Initialize VisualStimuliProcess.
 
@@ -59,13 +59,15 @@ class VisualStimuliProcess(WorkerProcess):
             event=event,
             log_level=log_level,
             log_color=log_color,
-            process_name=process_name
+            process_name=process_name,
         )
 
         # Initialize logger
         self._initialize_logger()
         mode_str = " (STANDALONE MODE)" if standalone else ""
-        self.logger.info(f"Initializing VisualStimuliProcess{mode_str} with config: {config_path}")
+        self.logger.info(
+            f"Initializing VisualStimuliProcess{mode_str} with config: {config_path}"
+        )
 
         # Load configuration
         self.config_base = ConfigBase(config_path)._load_config()
@@ -120,7 +122,9 @@ class VisualStimuliProcess(WorkerProcess):
 
         # Check if visual_stimuli section in main config specifies a config_file
         visual_stimuli_section = self.config_base.get("visual_stimuli", {})
-        visual_config_file = visual_stimuli_section.get("config_file", "configs/visual_stimuli.toml")
+        visual_config_file = visual_stimuli_section.get(
+            "config_file", "configs/visual_stimuli.toml"
+        )
 
         # Construct full path to visual stimuli config
         visual_config_path = config_dir / visual_config_file
@@ -130,7 +134,9 @@ class VisualStimuliProcess(WorkerProcess):
             try:
                 with open(visual_config_path, "rb") as f:
                     config = tomllib.load(f)
-                    self.logger.info(f"Loaded visual stimuli config from: {visual_config_path}")
+                    self.logger.info(
+                        f"Loaded visual stimuli config from: {visual_config_path}"
+                    )
                     return config
             except Exception as e:
                 self.logger.warning(
@@ -139,7 +145,9 @@ class VisualStimuliProcess(WorkerProcess):
                 )
 
         # Fall back to main config file
-        self.logger.info(f"Loading visual stimuli config from main config: {main_config_path}")
+        self.logger.info(
+            f"Loading visual stimuli config from main config: {main_config_path}"
+        )
         return self.config_base
 
     def initialize(self) -> bool:
@@ -203,7 +211,9 @@ class VisualStimuliProcess(WorkerProcess):
         # Get scale factor for standalone mode
         # Only use scale factor if in standalone mode AND not using experimental display
         standalone_config = self.config.get("standalone", {})
-        use_experimental_display = standalone_config.get("use_experimental_display", False)
+        use_experimental_display = standalone_config.get(
+            "use_experimental_display", False
+        )
 
         if self.standalone and not use_experimental_display:
             scale_factor = standalone_config.get("scale_factor", 6.0)
@@ -215,15 +225,20 @@ class VisualStimuliProcess(WorkerProcess):
             screen_height=self.config.get("window_height", 1080),
             viewing_distance_cm=self.config.get("arena_center_to_screen_cm", 25.0),
             calibration_file=self.config.get("calibration_mapping_file"),
-            use_empirical_calibration=self.config.get("use_empirical_calibration", False),
+            use_empirical_calibration=self.config.get(
+                "use_empirical_calibration", False
+            ),
             heading_offset_deg=self.config.get("heading_offset_deg", 0.0),
-            scale_factor=scale_factor
+            scale_factor=scale_factor,
         )
-        self.logger.info(f"Geometry utilities initialized (scale_factor={scale_factor})")
+        self.logger.info(
+            f"Geometry utilities initialized (scale_factor={scale_factor})"
+        )
 
     def _initialize_csv(self) -> None:
         """Initialize CSV writer for stimulus event logging."""
         import os
+
         log_file = self.config.get("log_file", "stim.csv")
 
         # If braid_folder is specified, write CSV there
@@ -237,7 +252,9 @@ class VisualStimuliProcess(WorkerProcess):
         """Initialize pyglet display window."""
         # Get standalone settings
         standalone_config = self.config.get("standalone", {})
-        use_experimental_display = standalone_config.get("use_experimental_display", False)
+        use_experimental_display = standalone_config.get(
+            "use_experimental_display", False
+        )
 
         self.display_manager = DisplayManager(
             window_x_offset=self.config.get("window_x_offset", 3840),
@@ -247,7 +264,7 @@ class VisualStimuliProcess(WorkerProcess):
             standalone=self.standalone,
             standalone_width=standalone_config.get("window_width", 1280),
             standalone_height=standalone_config.get("window_height", 720),
-            use_experimental_display=use_experimental_display
+            use_experimental_display=use_experimental_display,
         )
 
         self.window = self.display_manager.create_window()
@@ -283,7 +300,9 @@ class VisualStimuliProcess(WorkerProcess):
         # In standalone mode with small window, use the smaller standalone window height
         # In standalone mode with experimental display OR normal mode, use the full window height
         standalone_config = self.config.get("standalone", {})
-        use_experimental_display = standalone_config.get("use_experimental_display", False)
+        use_experimental_display = standalone_config.get(
+            "use_experimental_display", False
+        )
 
         if self.standalone and not use_experimental_display:
             window_height = standalone_config.get("window_height", 720)
@@ -304,7 +323,7 @@ class VisualStimuliProcess(WorkerProcess):
                 config=looming_config,
                 geometry_utils=self.geometry,
                 logger=self.logger,
-                csv_writer=self.csv_writer
+                csv_writer=self.csv_writer,
             )
             self.registry.register("looming", looming_stimulus)
             self.logger.info("Looming stimulus registered")
@@ -317,7 +336,7 @@ class VisualStimuliProcess(WorkerProcess):
                 geometry_utils=self.geometry,
                 logger=self.logger,
                 csv_writer=self.csv_writer,
-                window_height=window_height
+                window_height=window_height,
             )
             self.registry.register("vertical_bar", vertical_bar_stimulus)
             self.logger.info("Vertical bar stimulus registered")
@@ -325,8 +344,6 @@ class VisualStimuliProcess(WorkerProcess):
         # Initialize rendering after all stimuli registered
         self.registry.initialize_all_rendering(self.batch)
         self.logger.info("Stimulus rendering initialized")
-
-        
 
     def _initialize_standalone_controller(self) -> None:
         """Initialize standalone controller for manual testing."""
@@ -336,7 +353,7 @@ class VisualStimuliProcess(WorkerProcess):
             window=self.window,
             registry=self.registry,
             geometry=self.geometry,
-            logger=self.logger
+            logger=self.logger,
         )
         self.logger.info("Standalone controller initialized")
 
@@ -347,8 +364,8 @@ class VisualStimuliProcess(WorkerProcess):
             if self.subscriber.poll(timeout=0):
                 # Receive multipart message (topic, content)
                 topic, message = self.subscriber.recv_multipart(flags=zmq.NOBLOCK)
-                topic = topic.decode('utf-8')
-                message_str = message.decode('utf-8')
+                topic = topic.decode("utf-8")
+                message_str = message.decode("utf-8")
                 trigger_data = json.loads(message_str)
 
                 # Dispatch to stimuli
@@ -396,6 +413,7 @@ class VisualStimuliProcess(WorkerProcess):
             return
 
         import numpy as np
+
         avg_frame_time = np.mean(self.frame_times)
         max_frame_time = np.max(self.frame_times)
 
@@ -408,13 +426,13 @@ class VisualStimuliProcess(WorkerProcess):
         if avg_frame_time > threshold_frame_time:
             self.logger.warning(
                 f"Performance: {avg_fps:.1f} fps "
-                f"(avg: {avg_frame_time*1000:.2f}ms, max: {max_frame_time*1000:.2f}ms) "
+                f"(avg: {avg_frame_time * 1000:.2f}ms, max: {max_frame_time * 1000:.2f}ms) "
                 f"[target: {target_fps} fps]"
             )
         else:
             self.logger.debug(
                 f"Performance: {avg_fps:.1f} fps "
-                f"(avg: {avg_frame_time*1000:.2f}ms, max: {max_frame_time*1000:.2f}ms)"
+                f"(avg: {avg_frame_time * 1000:.2f}ms, max: {max_frame_time * 1000:.2f}ms)"
             )
 
     def run(self) -> None:
@@ -475,51 +493,48 @@ class VisualStimuliProcess(WorkerProcess):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Visual Stimuli Display Process")
     parser.add_argument(
-        "--config", "-c",
-        default="configs/config.toml",
-        help="Path to config file"
+        "--config", "-c", default="configs/config.toml", help="Path to config file"
     )
     parser.add_argument(
-        "--log-level", "-l",
+        "--log-level",
+        "-l",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-        help="Logging level"
+        help="Logging level",
     )
     parser.add_argument(
         "--calibrate",
         action="store_true",
-        help="Run screen identification calibration mode"
+        help="Run screen identification calibration mode",
     )
     parser.add_argument(
         "--calibrate-mapping",
         action="store_true",
-        help="Run heading-to-pixel calibration mode"
+        help="Run heading-to-pixel calibration mode",
     )
     parser.add_argument(
         "--standalone",
         action="store_true",
-        help="Standalone testing mode with manual triggers (no ZMQ, small window)"
+        help="Standalone testing mode with manual triggers (no ZMQ, small window)",
     )
     parser.add_argument(
-        "--test",
-        action="store_true",
-        help="Test mode (simulate triggers)"
+        "--test", action="store_true", help="Test mode (simulate triggers)"
     )
     parser.add_argument(
         "--test-calibration",
         action="store_true",
-        help="Test screen arrangement and wrapping with a sweeping circle"
+        help="Test screen arrangement and wrapping with a sweeping circle",
     )
     parser.add_argument(
         "--test-mapping",
         action="store_true",
-        help="Test calibration mapping by entering Braid coordinates"
+        help="Test calibration mapping by entering Braid coordinates",
     )
     parser.add_argument(
         "--braid-folder",
         type=str,
         default=None,
-        help="Path to .braid folder for CSV output"
+        help="Path to .braid folder for CSV output",
     )
 
     args = parser.parse_args()
@@ -527,21 +542,25 @@ if __name__ == "__main__":
     # Handle calibration modes
     if args.calibrate:
         from src.stimuli.calibration import run_screen_identification
+
         run_screen_identification()
         exit(0)
 
     if args.calibrate_mapping:
         from src.stimuli.calibration import run_heading_calibration
+
         run_heading_calibration()
         exit(0)
 
     if args.test_calibration:
         from src.stimuli.calibration import run_calibration_test
+
         run_calibration_test()
         exit(0)
 
     if args.test_mapping:
         from src.stimuli.calibration import run_mapping_test
+
         run_mapping_test()
         exit(0)
 
@@ -554,7 +573,7 @@ if __name__ == "__main__":
         event=stop_event,
         log_level=args.log_level,
         standalone=args.standalone,
-        braid_folder=args.braid_folder
+        braid_folder=args.braid_folder,
     )
 
     try:

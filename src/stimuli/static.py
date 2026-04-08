@@ -24,7 +24,9 @@ class StaticPatternStimulus(BaseStimulus):
         # Parse configuration
         self.enabled = config.get("enabled", True)
         self.square_color = self._parse_color(config.get("square_color", "black"))
-        self.background_color = self._parse_color(config.get("background_color", "white"))
+        self.background_color = self._parse_color(
+            config.get("background_color", "white")
+        )
         self.pattern_density = max(0.0, min(1.0, config.get("pattern_density", 0.3)))
         self.downscale_factor = max(1, config.get("downscale_factor", 2))
         self.random_seed = config.get("random_seed", None)
@@ -32,10 +34,16 @@ class StaticPatternStimulus(BaseStimulus):
         # Log warning if values were clamped
         if config.get("pattern_density", 0.3) != self.pattern_density:
             import logging
-            logging.warning(f"pattern_density clamped to valid range [0.0, 1.0]: {self.pattern_density}")
+
+            logging.warning(
+                f"pattern_density clamped to valid range [0.0, 1.0]: {self.pattern_density}"
+            )
         if config.get("downscale_factor", 2) != self.downscale_factor:
             import logging
-            logging.warning(f"downscale_factor must be >=1, set to: {self.downscale_factor}")
+
+            logging.warning(
+                f"downscale_factor must be >=1, set to: {self.downscale_factor}"
+            )
 
         # Screen dimensions (full experimental display)
         self.screen_width = 7680
@@ -74,7 +82,7 @@ class StaticPatternStimulus(BaseStimulus):
         binary_matrix = (random_values < self.pattern_density).astype(np.uint8)
 
         # Create PIL image and apply color mapping
-        pil_image = Image.new('RGB', (working_width, working_height))
+        pil_image = Image.new("RGB", (working_width, working_height))
         pixels = pil_image.load()
 
         # Map binary values to colors
@@ -88,8 +96,7 @@ class StaticPatternStimulus(BaseStimulus):
         # Upscale to full resolution using nearest neighbor (blocky)
         if self.downscale_factor > 1:
             pil_image = pil_image.resize(
-                (self.screen_width, self.screen_height),
-                Image.NEAREST
+                (self.screen_width, self.screen_height), Image.NEAREST
             )
 
         # Convert PIL Image to pyglet ImageData
@@ -97,17 +104,13 @@ class StaticPatternStimulus(BaseStimulus):
         self.image_data = pyglet.image.ImageData(
             width=self.screen_width,
             height=self.screen_height,
-            fmt='RGB',
+            fmt="RGB",
             data=raw_image,
-            pitch=-self.screen_width * 3  # Negative pitch for top-to-bottom
+            pitch=-self.screen_width * 3,  # Negative pitch for top-to-bottom
         )
 
         # Create sprite (batch will be set during initialize_rendering)
-        self.sprite = pyglet.sprite.Sprite(
-            img=self.image_data,
-            x=0,
-            y=0
-        )
+        self.sprite = pyglet.sprite.Sprite(img=self.image_data, x=0, y=0)
 
     def initialize_rendering(self, batch: pyglet.graphics.Batch) -> None:
         """Add sprite to batch once (called during setup).
@@ -165,7 +168,7 @@ class StaticPatternStimulus(BaseStimulus):
                 "gray": (128, 128, 128),
                 "red": (255, 0, 0),
                 "green": (0, 255, 0),
-                "blue": (0, 0, 255)
+                "blue": (0, 0, 255),
             }
             return color_map.get(color.lower(), (0, 0, 0))
         else:

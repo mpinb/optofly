@@ -12,6 +12,7 @@ import time
 import tomllib
 from datetime import datetime
 from pathlib import Path
+import serial
 
 from src.processes.braid import BraidPublisher
 from src.processes.tracking import TriggerHandler
@@ -198,6 +199,11 @@ def main():
         # Core processes (always started)
         print("\nStarting core processes...")
 
+        # 0. Turn on the backlight
+        backlight_controller = serial.Serial('/dev/ttyUSB1', 115200, timeout=1)
+        time.sleep(2)
+        backlight_controller.write(b"255\n")
+
         # 1. BraidPublisher - connects to Braid tracking and publishes to ZMQ
         print("  ✓ BraidPublisher")
         braid_publisher = BraidPublisher(config_path=config_path, event=stop_event)
@@ -313,6 +319,8 @@ def main():
         # Graceful shutdown
         print("\nShutting down processes...")
         stop_event.set()
+        backlight_controller.write(b"0\n")
+        backlight_controller.close()
 
         # Give processes time to cleanup
         time.sleep(1)
