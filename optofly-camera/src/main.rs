@@ -32,11 +32,15 @@ fn main() {
 
     let cfg = config::AppConfig::load(&args.config, args.save_folder.as_deref())
         .expect("Failed to load config");
-    log::info!("Config loaded: {}x{} @ {}fps, buffer {:.1}s",
-        cfg.width, cfg.height, cfg.fps, cfg.max_recording_time);
+    log::info!(
+        "Config loaded: {}x{} @ {}fps, buffer {:.1}s, save to: {}",
+        cfg.width, cfg.height, cfg.fps, cfg.max_recording_time, cfg.save_folder
+    );
 
     if let Err(e) = capture::run(cfg) {
         log::error!("Capture failed: {}", e);
         std::process::exit(1);
     }
+
+    log::info!("optofly-camera exiting cleanly");
 }
