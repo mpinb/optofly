@@ -5,6 +5,7 @@ Config-driven experiment launcher that starts processes based on configs/config.
 Automatically enables/disables processes based on their 'active' flags.
 """
 
+import argparse
 import multiprocessing as mp
 import sys
 import time
@@ -20,6 +21,7 @@ from src.processes.camera import RustCameraProcess as CameraProcess
 from src.processes.lens import LiquidLens
 from src.utils.braid import check_braid_folder_exists, copy_csv_files_to_braid
 from src.utils.logger import setup_file_logging
+from src.utils.metadata import collect_metadata, write_metadata
 from src.utils.worker import WorkerProcess
 from src.monitoring.server import run_server
 
@@ -148,12 +150,30 @@ def copy_config_to_braid_folder(config_path: str, braid_folder: str):
 def main():
     """Launch OptoFly experiment with config-driven process selection."""
 
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description="OptoFly experiment launcher")
+    parser.add_argument(
+        "--skip-metadata",
+        action="store_true",
+        help="Skip experiment metadata prompt (for quick tests)",
+    )
+    args = parser.parse_args()
+
     # Configuration file path
     config_path = "configs/config.toml"
 
     # Load configuration
     print(f"Loading configuration from {config_path}...")
     config = load_config(config_path)
+
+    # Collect experiment metadata
+    metadata = None
+    if not args.skip_metadata:
+        metadata = collect_metadata()
+        experiment_duration = float(metadata.get("experiment_duration", 24))
+    else:
+        experiment_duration = 24.0
+        print("⚠ Skipping metadata collection (--skip-metadata flag set)")
 
     # Initialize variables for cleanup
     braid_folder = None
@@ -171,7 +191,9 @@ def main():
     )
     print(f"Experiment data will be saved to: {braid_folder}")
 
-    experiment_duration = config.get("experiment_duration", 24)  # hours
+    # Write metadata to braid folder if it was collected
+    if metadata is not None:
+        write_metadata(metadata, braid_folder)
     experiment_end_time = datetime.now().timestamp() + experiment_duration * 3600
     print(f"Experiment duration set to {experiment_duration} hours.")
     print(
