@@ -110,8 +110,9 @@ frame_idx,nframe,ts_sec,ts_usec,cam_time_ns
 0,100,1234,567890,1234567890000
 ```
 
-**Debug histograms:** `{save_folder}/obj_id_{obj_id}_frame_{frame}_debug.png`
-- Frame counter diffs, inter-frame interval, jitter, timeline
+**Debug histograms:** Generate offline with `src/tools/generate_camera_histograms.py`
+- Reads CSV files and produces PNG histograms showing frame counter diffs, inter-frame interval, jitter, timeline
+- Usage: `python src/tools/generate_camera_histograms.py /path/to/videos/`
 
 ## Troubleshooting
 

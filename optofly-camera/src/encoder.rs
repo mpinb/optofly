@@ -146,10 +146,6 @@ pub fn spawn() -> (mpsc::SyncSender<EncodeJob>, mpsc::Receiver<FrameBuffer>) {
                     log::error!("CSV write failed: {}", e);
                 }
 
-                if let Err(e) = metadata::save_debug_histogram(&job.buffer, &job.base_name) {
-                    log::warn!("Debug histogram failed (non-fatal): {}", e);
-                }
-
                 let elapsed = t0.elapsed().as_secs_f64();
                 let size_mb = std::fs::metadata(&video_path)
                     .map(|m| m.len() as f64 / (1024.0 * 1024.0))
