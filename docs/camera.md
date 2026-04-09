@@ -78,8 +78,7 @@ The Rust binary reads from the shared `configs/config.toml`:
 ```toml
 [camera]
 active = true
-width = 2016
-height = 2016
+resolution = [2112, 2112]
 fps = 500
 exposure_time = 900
 max_recording_time = 3.0   # seconds, controls buffer size

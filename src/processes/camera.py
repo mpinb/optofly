@@ -770,8 +770,8 @@ class RustCameraProcess(WorkerProcess):
 
         self._proc = subprocess.Popen(
             cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
 
         # Wait for either stop_event or process exit
@@ -779,11 +779,9 @@ class RustCameraProcess(WorkerProcess):
             try:
                 self._proc.wait(timeout=0.5)
                 if self._proc.returncode != 0:
-                    stderr = self._proc.stderr.read().decode() if self._proc.stderr else ""
                     self.logger.error(
-                        "optofly-camera exited with code %d: %s",
+                        "optofly-camera exited with code %d",
                         self._proc.returncode,
-                        stderr.strip(),
                     )
                 else:
                     self.logger.info("optofly-camera exited cleanly")
@@ -791,31 +789,15 @@ class RustCameraProcess(WorkerProcess):
             except subprocess.TimeoutExpired:
                 continue
 
-        # Stop event set — send kill ZMQ message then SIGTERM
-        self.logger.info("Sending kill signal to optofly-camera")
+        # Stop event set — send SIGTERM for graceful shutdown
+        self.logger.info("Sending SIGTERM to optofly-camera")
+        self._proc.terminate()
         try:
-            zmq_config = ZMQConfig(self.config_path)
-            ctx = zmq.Context()
-            pub_sock = ctx.socket(zmq.PUB)
-            pub_sock.connect(f"tcp://localhost:{zmq_config.trigger_port}")
-            time.sleep(0.1)  # ZMQ slow-joiner
-            pub_sock.send_multipart([b"kill", b""])
-            pub_sock.close()
-            ctx.term()
-        except Exception as e:
-            self.logger.warning("Failed to send ZMQ kill: %s", e)
-
-        # Give it a moment to exit cleanly, then SIGTERM
-        try:
-            self._proc.wait(timeout=3.0)
+            self._proc.wait(timeout=5.0)
+            self.logger.info("optofly-camera exited after SIGTERM")
         except subprocess.TimeoutExpired:
-            self.logger.warning("optofly-camera did not exit, sending SIGTERM")
-            self._proc.terminate()
-            try:
-                self._proc.wait(timeout=5.0)
-            except subprocess.TimeoutExpired:
-                self.logger.error("optofly-camera did not exit after SIGTERM, killing")
-                self._proc.kill()
+            self.logger.error("optofly-camera did not exit after SIGTERM, killing")
+            self._proc.kill()
 
 
 # Allow running as standalone module for testing

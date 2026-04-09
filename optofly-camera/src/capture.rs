@@ -1,4 +1,6 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::SyncSender;
+use std::sync::Arc;
 
 use crate::buffer::{FrameBuffer, FrameMeta};
 use crate::config::AppConfig;
@@ -11,6 +13,13 @@ enum State {
 }
 
 pub fn run(cfg: AppConfig) -> Result<(), String> {
+    // --- SIGTERM handler ---
+    let shutdown = Arc::new(AtomicBool::new(false));
+    signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&shutdown))
+        .map_err(|e| format!("Failed to register SIGTERM handler: {}", e))?;
+    signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&shutdown))
+        .map_err(|e| format!("Failed to register SIGINT handler: {}", e))?;
+
     // --- ZMQ subscriber ---
     let zmq_ctx = zmq::Context::new();
     let zmq_sub = zmq_ctx
@@ -37,6 +46,12 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
 
     cam.set_exposure(cfg.exposure_us)
         .map_err(|e| format!("Set exposure error: {}", e))?;
+
+    // Enable sensor corrections (matches Python CameraProcess behavior)
+    // Note: BPC (bad pixel correction) is not exposed by the xiapi Rust crate;
+    // the XIMEA SDK typically enables it by default.
+    cam.set_column_fpn_correction(xiapi::XI_SWITCH::XI_ON)
+        .map_err(|e| format!("Set column FPN correction error: {}", e))?;
 
     // Set ROI (centered on sensor)
     let sensor_w = cam.width().map_err(|e| format!("Get width error: {}", e))?;
@@ -106,10 +121,10 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
         .map_err(|e| format!("Start acquisition error: {}", e))?;
     log::info!("Acquisition started — entering capture loop");
 
-    let mut should_exit = false;
-
     loop {
-        if should_exit {
+        // Check for SIGTERM/SIGINT
+        if shutdown.load(Ordering::Relaxed) {
+            log::info!("Received shutdown signal");
             break;
         }
 
@@ -140,7 +155,7 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                         let topic = String::from_utf8_lossy(&parts[0]);
                         if topic == "kill" {
                             log::info!("Received kill signal");
-                            should_exit = true;
+                            break;
                         } else if topic.as_ref() == cfg.zmq_zone_enter_topic
                             && parts.len() >= 2
                         {
@@ -197,7 +212,7 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                                 dropped,
                             );
                             log::info!("Received kill signal during recording");
-                            should_exit = true;
+                            break;
                         } else if topic.as_ref() == cfg.zmq_zone_exit_topic && parts.len() >= 2 {
                             let msg: serde_json::Value =
                                 serde_json::from_slice(&parts[1]).unwrap_or_default();
@@ -310,14 +325,17 @@ fn finish_recording(
 
     match encoder_tx.try_send(EncodeJob {
         buffer: completed,
-        base_name,
+        base_name: base_name.clone(),
         fps,
         width,
         height,
     }) {
         Ok(()) => {}
         Err(std::sync::mpsc::TrySendError::Full(_)) => {
-            log::warn!("Encoder busy, skipping this recording");
+            log::warn!(
+                "Encoder busy, dropping recording obj_id={} frame={} ({} frames)",
+                obj_id, frame, n_filled
+            );
         }
         Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
             log::error!("Encoder thread died");
