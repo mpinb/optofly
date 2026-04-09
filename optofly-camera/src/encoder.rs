@@ -102,10 +102,12 @@ fn try_encode(job: &EncodeJob, video_path: &str, use_nvenc: bool) -> bool {
     }
 }
 
-/// Spawn the encoder thread. Returns a sender to submit encode jobs.
-/// The thread runs until the sender is dropped.
-pub fn spawn() -> mpsc::SyncSender<EncodeJob> {
+/// Spawn the encoder thread. Returns a sender to submit encode jobs
+/// and a receiver to reclaim spent buffers for reuse.
+/// The thread runs until the job sender is dropped.
+pub fn spawn() -> (mpsc::SyncSender<EncodeJob>, mpsc::Receiver<FrameBuffer>) {
     let (tx, rx) = mpsc::sync_channel::<EncodeJob>(2);
+    let (buf_return_tx, buf_return_rx) = mpsc::channel::<FrameBuffer>();
 
     thread::Builder::new()
         .name("encoder".into())
@@ -135,6 +137,8 @@ pub fn spawn() -> mpsc::SyncSender<EncodeJob> {
 
                 if !ok {
                     log::error!("Encoding failed for {}, skipping", video_path);
+                    // Still return the buffer even on failure
+                    let _ = buf_return_tx.send(job.buffer);
                     continue;
                 }
 
@@ -154,11 +158,14 @@ pub fn spawn() -> mpsc::SyncSender<EncodeJob> {
                     "Encode done: {:.1} MB, {:.2}s ({} fps encode), csv: {}",
                     size_mb, elapsed, (n as f64 / elapsed) as u64, csv_path,
                 );
+
+                // Return spent buffer for reuse
+                let _ = buf_return_tx.send(job.buffer);
             }
 
             log::info!("Encoder thread exiting");
         })
         .expect("Failed to spawn encoder thread");
 
-    tx
+    (tx, buf_return_rx)
 }

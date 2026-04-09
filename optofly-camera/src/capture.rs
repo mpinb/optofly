@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::{Receiver, SyncSender};
 use std::sync::Arc;
 
 use crate::buffer::{FrameBuffer, FrameMeta};
@@ -98,14 +98,17 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
         (buf_capacity * frame_bytes) as f64 / (1024.0 * 1024.0)
     );
 
-    let mut buffers = [
-        FrameBuffer::new(buf_capacity, frame_bytes),
-        FrameBuffer::new(buf_capacity, frame_bytes),
+    // Both buffers start as Some; the active one is taken when sent to encoder,
+    // and restored when the encoder returns it via buffer_rx.
+    let mut buffers: [Option<FrameBuffer>; 2] = [
+        Some(FrameBuffer::new(buf_capacity, frame_bytes)),
+        Some(FrameBuffer::new(buf_capacity, frame_bytes)),
     ];
     let mut active_idx: usize = 0;
 
     // --- Encoder thread ---
-    let encoder_tx: SyncSender<EncodeJob> = encoder::spawn();
+    let (encoder_tx, buffer_rx): (SyncSender<EncodeJob>, Receiver<FrameBuffer>) =
+        encoder::spawn();
 
     // --- Capture state ---
     let mut state = State::Idle;
@@ -126,6 +129,20 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
         if shutdown.load(Ordering::Relaxed) {
             log::info!("Received shutdown signal");
             break;
+        }
+
+        // Reclaim returned buffers from encoder (non-blocking)
+        while let Ok(mut returned) = buffer_rx.try_recv() {
+            returned.reset();
+            // Put it back into whichever slot is empty
+            if buffers[0].is_none() {
+                buffers[0] = Some(returned);
+            } else if buffers[1].is_none() {
+                buffers[1] = Some(returned);
+            } else {
+                // Both slots occupied — shouldn't happen, but drop gracefully
+                log::warn!("Returned buffer has no empty slot, dropping");
+            }
         }
 
         let img = match acq.next_image::<u8>(Some(5000)) {
@@ -163,13 +180,20 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                                 serde_json::from_slice(&parts[1]).unwrap_or_default();
                             recording_obj_id = msg["obj_id"].as_u64().unwrap_or(0);
                             recording_frame = msg["frame"].as_u64().unwrap_or(0);
-                            buffers[active_idx].reset();
-                            state = State::Recording;
-                            log::info!(
-                                "ZONE_ENTER obj_id={} — started recording (max {} frames)",
-                                recording_obj_id,
-                                buf_capacity
-                            );
+                            if let Some(ref mut buf) = buffers[active_idx] {
+                                buf.reset();
+                                state = State::Recording;
+                                log::info!(
+                                    "ZONE_ENTER obj_id={} — started recording (max {} frames)",
+                                    recording_obj_id,
+                                    buf_capacity
+                                );
+                            } else {
+                                log::warn!(
+                                    "ZONE_ENTER obj_id={} — no buffer available, skipping",
+                                    recording_obj_id
+                                );
+                            }
                         }
                     }
                 }
@@ -177,20 +201,22 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
 
             State::Recording => {
                 // Write frame into linear buffer
-                if let Some(slot) = buffers[active_idx].next_slot() {
-                    let data = img.data();
-                    let copy_len = slot.len().min(data.len());
-                    slot[..copy_len].copy_from_slice(&data[..copy_len]);
+                if let Some(ref mut buf) = buffers[active_idx] {
+                    if let Some(slot) = buf.next_slot() {
+                        let data = img.data();
+                        let copy_len = slot.len().min(data.len());
+                        slot[..copy_len].copy_from_slice(&data[..copy_len]);
 
-                    let ts_raw = img.timestamp_raw();
-                    let ts_sec = (ts_raw >> 32) as u32;
-                    let ts_usec = (ts_raw & 0xFFFF_FFFF) as u32;
-                    buffers[active_idx].commit(FrameMeta {
-                        nframe,
-                        ts_sec,
-                        ts_usec,
-                        cam_time_ns: ts_sec as u64 * 1_000_000_000 + ts_usec as u64 * 1000,
-                    });
+                        let ts_raw = img.timestamp_raw();
+                        let ts_sec = (ts_raw >> 32) as u32;
+                        let ts_usec = (ts_raw & 0xFFFF_FFFF) as u32;
+                        buf.commit(FrameMeta {
+                            nframe,
+                            ts_sec,
+                            ts_usec,
+                            cam_time_ns: ts_sec as u64 * 1_000_000_000 + ts_usec as u64 * 1000,
+                        });
+                    }
                 }
 
                 // Poll ZMQ for ZONE_EXIT or kill
@@ -241,31 +267,39 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                 }
 
                 // Safety: buffer full
-                if state == State::Recording && buffers[active_idx].is_full() {
-                    log::warn!(
-                        "Buffer full ({} frames), forcing recording stop",
-                        buf_capacity
-                    );
-                    finish_recording(
-                        &mut buffers,
-                        &mut active_idx,
-                        &mut state,
-                        &encoder_tx,
-                        recording_obj_id,
-                        recording_frame,
-                        &cfg.save_folder,
-                        fps,
-                        width,
-                        height,
-                        dropped,
-                    );
+                if state == State::Recording {
+                    let is_full = buffers[active_idx]
+                        .as_ref()
+                        .map_or(false, |b| b.is_full());
+                    if is_full {
+                        log::warn!(
+                            "Buffer full ({} frames), forcing recording stop",
+                            buf_capacity
+                        );
+                        finish_recording(
+                            &mut buffers,
+                            &mut active_idx,
+                            &mut state,
+                            &encoder_tx,
+                            recording_obj_id,
+                            recording_frame,
+                            &cfg.save_folder,
+                            fps,
+                            width,
+                            height,
+                            dropped,
+                        );
+                    }
                 }
             }
         }
     }
 
     // Flush any active recording
-    if state == State::Recording && buffers[active_idx].filled() > 0 {
+    let has_frames = buffers[active_idx]
+        .as_ref()
+        .map_or(false, |b| b.filled() > 0);
+    if state == State::Recording && has_frames {
         finish_recording(
             &mut buffers,
             &mut active_idx,
@@ -297,7 +331,7 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
 }
 
 fn finish_recording(
-    buffers: &mut [FrameBuffer; 2],
+    buffers: &mut [Option<FrameBuffer>; 2],
     active_idx: &mut usize,
     state: &mut State,
     encoder_tx: &SyncSender<EncodeJob>,
@@ -309,7 +343,9 @@ fn finish_recording(
     height: u32,
     dropped: u64,
 ) {
-    let n_filled = buffers[*active_idx].filled();
+    let n_filled = buffers[*active_idx]
+        .as_ref()
+        .map_or(0, |b| b.filled());
     if n_filled == 0 {
         log::warn!("Recording ended with 0 frames, skipping encode");
         *state = State::Idle;
@@ -318,10 +354,9 @@ fn finish_recording(
 
     let base_name = format!("{}/obj_id_{}_frame_{}", save_folder, obj_id, frame);
 
-    // Take the active buffer out and replace with a fresh one of same dimensions
-    let cap = buffers[*active_idx].capacity();
-    let fb = buffers[*active_idx].frame_bytes();
-    let completed = std::mem::replace(&mut buffers[*active_idx], FrameBuffer::new(cap, fb));
+    // Take the buffer out, leaving None in its slot.
+    // The encoder will return it via the buffer_rx channel after encoding.
+    let completed = buffers[*active_idx].take().unwrap();
 
     match encoder_tx.try_send(EncodeJob {
         buffer: completed,
@@ -331,20 +366,25 @@ fn finish_recording(
         height,
     }) {
         Ok(()) => {}
-        Err(std::sync::mpsc::TrySendError::Full(_)) => {
+        Err(std::sync::mpsc::TrySendError::Full(job)) => {
             log::warn!(
                 "Encoder busy, dropping recording obj_id={} frame={} ({} frames)",
                 obj_id, frame, n_filled
             );
+            // Put the buffer back so it's not lost
+            buffers[*active_idx] = Some(job.buffer);
         }
-        Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+        Err(std::sync::mpsc::TrySendError::Disconnected(job)) => {
             log::error!("Encoder thread died");
+            buffers[*active_idx] = Some(job.buffer);
         }
     }
 
     // Swap to standby buffer
     *active_idx = 1 - *active_idx;
-    buffers[*active_idx].reset();
+    if let Some(ref mut buf) = buffers[*active_idx] {
+        buf.reset();
+    }
     *state = State::Idle;
     log::info!(
         "Recording done: {} frames, back to IDLE (dropped so far: {})",

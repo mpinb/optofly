@@ -58,10 +58,12 @@ impl FrameBuffer {
         self.filled
     }
 
+    #[allow(dead_code)]
     pub fn capacity(&self) -> usize {
         self.capacity
     }
 
+    #[allow(dead_code)]
     pub fn frame_bytes(&self) -> usize {
         self.frame_bytes
     }
