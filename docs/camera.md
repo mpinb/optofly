@@ -1,6 +1,6 @@
 # Ximea Camera
 
-High-speed triggered video recording using ximea-py and ffmpeg.
+High-speed triggered video recording using the `optofly-camera` Rust binary.
 
 **Specifications:**
 - 500fps at 2112x2112 pixels (configurable)
@@ -10,31 +10,56 @@ High-speed triggered video recording using ximea-py and ffmpeg.
 
 ## Architecture
 
+The camera subsystem has two layers:
+
+1. **`optofly-camera` (Rust binary)** — core capture and encoding logic
+2. **`RustCameraProcess` (Python wrapper)** — launches the binary as a subprocess, integrates with the OptoFly process model
+
+### Rust Binary (`optofly-camera/`)
+
 Single-process design with a background encoder thread:
 
-1. **Capture loop** (in `CameraProcess.run()`) — captures frames at 500fps via ximea-py, writes into a linear double-buffer using `ctypes.memmove`
-2. **State machine** — IDLE polls ZMQ for ZONE_ENTER; on enter, transitions to RECORDING. In RECORDING, captures frames linearly and polls for ZONE_EXIT. On exit (or buffer full), hands buffer to encoder
-3. **Encoder thread** — pipes raw frames to ffmpeg stdin (single contiguous write), writes CSV metadata and debug histograms
+1. **Capture loop** (`capture.rs`) — opens XIMEA camera via `xiapi`, captures frames at 500fps into a linear double-buffer
+2. **State machine** — `Idle` polls ZMQ for ZONE_ENTER; on enter, transitions to `Recording`. In `Recording`, captures frames linearly and polls for ZONE_EXIT. On exit (or buffer full), hands buffer to encoder
+3. **Encoder thread** (`encoder.rs`) — pipes raw frames to ffmpeg stdin (single contiguous write), writes CSV metadata and debug histograms
+4. **Config** (`config.rs`) — reads `[camera]` and `[zmq]` sections from the shared TOML config
 
-**Double-buffer pattern:** Two pre-allocated numpy arrays sized for `zone_timeout + 1s`. On recording completion, the active buffer is enqueued for encoding and the standby buffer becomes active. The encoder reads the old buffer while capture continues into the new one.
+**Double-buffer pattern:** Two pre-allocated `Vec<u8>` buffers sized for `max_recording_time + 1s`. On recording completion, the active buffer is swapped via `std::mem::replace` and enqueued for encoding. The encoder reads the old buffer while capture continues into the new one.
 
-**Memory:** `2 x (zone_timeout + 1s) x fps x width x height`
-Default settings (2s timeout, 500fps, 2112x2112): ~8.5GB.
+**Memory:** `2 x (max_recording_time + 1s) x fps x width x height`
+Default settings (3s, 500fps, 2112x2112): ~8.5GB.
+
+### Python Wrapper (`src/processes/camera.py`)
+
+`RustCameraProcess` extends `WorkerProcess` and:
+- Locates the binary in `optofly-camera/target/{release,debug}/` or `PATH`
+- Launches it with `--config`, `--save-folder`, and `--log-level` arguments
+- Monitors the subprocess and the shared `stop_event`
+- On shutdown: sends a ZMQ `kill` message, waits for graceful exit, then SIGTERM/SIGKILL
 
 ## Dependencies
 
-- **ximea-py** — Python wrapper for XIMEA SDK (`uv sync` installs from git)
+- **xiapi** (Rust crate) — Rust bindings for XIMEA SDK
 - **ffmpeg** — must be on PATH; NVENC requires NVIDIA drivers
 - **XIMEA SDK** — system install required for camera access
+
+## Building
+
+```bash
+cd optofly-camera
+cargo build --release
+```
+
+The release binary is at `optofly-camera/target/release/optofly-camera`.
 
 ## Usage
 
 **Via main.py (normal use):**
 Set `[camera] active = true` in `configs/config.toml`, then `uv run python main.py`.
 
-**Standalone:**
+**Rust binary directly:**
 ```bash
-uv run python -m src.processes.camera --config configs/config.toml --log-level DEBUG
+./optofly-camera/target/release/optofly-camera --config configs/config.toml --save-folder /tmp/videos --log-level info
 ```
 
 **Pre-flight checks:**
@@ -46,9 +71,28 @@ if not results["overall"]:
         print(error)
 ```
 
+## Configuration
+
+The Rust binary reads from the shared `configs/config.toml`:
+
+```toml
+[camera]
+active = true
+width = 2016
+height = 2016
+fps = 500
+exposure_time = 900
+max_recording_time = 3.0   # seconds, controls buffer size
+
+[zmq]
+trigger_address = "tcp://localhost:5556"
+zone_enter_topic = "ZONE_ENTER"
+zone_exit_topic = "ZONE_EXIT"
+```
+
 ## ZMQ Protocol
 
-Subscribes to topics `ZONE_ENTER` and `ZONE_EXIT` on port 5556 (multipart):
+Subscribes to topics `ZONE_ENTER`, `ZONE_EXIT`, and `kill` on port 5556 (multipart):
 ```
 [b"ZONE_ENTER", b'{"obj_id": 123, "frame": 4567, "x": 0.01, "y": -0.02, "z": 0.18, "mean_heading": 0.52}']
 [b"ZONE_EXIT", b'{"obj_id": 123, "reason": "left_fov", "timestamp": 1234.78, "duration": 0.22}']
@@ -89,9 +133,17 @@ ffmpeg -encoders | grep nvenc
 netstat -tulpn | grep 5556
 ```
 
+**Binary not found** — `RustCameraProcess` searches these paths in order:
+1. `optofly-camera/target/release/optofly-camera`
+2. `optofly-camera/target/debug/optofly-camera`
+3. `optofly-camera` on `PATH`
+
 ## Testing
 
 ```bash
 # Integration test (requires hardware)
 python tests/test_camera_integration.py
+
+# Check Rust compilation
+cd optofly-camera && cargo check
 ```

@@ -1,4 +1,3 @@
-use std::io::Write;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;

@@ -84,9 +84,4 @@ impl AppConfig {
     pub fn buffer_capacity(&self) -> usize {
         ((self.max_recording_time + 1.0) * self.fps) as usize
     }
-
-    /// Bytes per frame (grayscale).
-    pub fn frame_bytes(&self) -> usize {
-        self.width as usize * self.height as usize
-    }
 }

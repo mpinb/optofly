@@ -53,7 +53,7 @@ BraidPublisher  →  ZMQ PUB  topic=BRAID  port=5555
     ↓
 TriggerHandler  →  ZMQ PUB  topics=ZONE_ENTER/ZONE_EXIT  port=5556
     ↓
-    ├── CameraProcess        (records while fly is in zone, via ximea-py + ffmpeg)
+    ├── RustCameraProcess    (launches optofly-camera Rust binary for capture + ffmpeg encode)
     ├── OptoTriggerWorker    (fires LED on ZONE_ENTER, one-shot)
     ├── VisualStimuliProcess (renders stimuli on ZONE_ENTER, one-shot)
     ├── LiquidLens           (tracks focus ZONE_ENTER→ZONE_EXIT via BRAID)
@@ -107,4 +107,4 @@ Heading-to-pixel conversion uses `GeometryUtils` (`src/stimuli/geometry.py`). Wi
 
 ### Camera
 
-`CameraProcess` (`src/processes/camera.py`) captures frames in-process using ximea-py with `ctypes.memmove` zero-copy into a pre-allocated linear double-buffer. On ZONE_ENTER, recording starts; on ZONE_EXIT (or buffer full), the active buffer is handed to a background encoder thread that pipes raw frames to ffmpeg (NVENC with x264 fallback). Requires `ffmpeg` on PATH and the XIMEA SDK.
+`RustCameraProcess` (`src/processes/camera.py`) launches the `optofly-camera` Rust binary (`optofly-camera/`) as a subprocess. The binary captures frames via the XIMEA SDK (`xiapi` crate) into a linear double-buffer, transitions between Idle/Recording states on ZMQ ZONE_ENTER/ZONE_EXIT messages, and pipes raw frames to ffmpeg for H.264 encoding (NVENC with x264 fallback). On shutdown, the Python wrapper sends a ZMQ `kill` message for graceful exit. Requires `ffmpeg` on PATH and the XIMEA SDK. Build: `cd optofly-camera && cargo build --release`.
