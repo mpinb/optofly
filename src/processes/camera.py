@@ -697,6 +697,127 @@ class CameraProcess(WorkerProcess):
             self.logger.info("CameraProcess cleaned up successfully")
 
 
+class RustCameraProcess(WorkerProcess):
+    """
+    Camera process that launches the Rust optofly-camera binary as a subprocess.
+
+    Drop-in replacement for CameraProcess — same interface for main.py.
+    """
+
+    BINARY_NAME = "optofly-camera"
+
+    def __init__(
+        self,
+        config_path: str = "configs/config.toml",
+        event: Optional[mp.Event] = None,
+        save_folder: Optional[str] = None,
+        process_name: str = "RustCamera",
+        log_level: str = "INFO",
+        log_color: str = "CYAN",
+    ):
+        super().__init__(
+            event=event,
+            log_level=log_level,
+            log_color=log_color,
+            process_name=process_name,
+        )
+
+        self.config_path = config_path
+        self.save_folder = save_folder or CameraConfig(config_path).save_folder
+        self.stop_event = event if event is not None else mp.Event()
+        self._proc: Optional[subprocess.Popen] = None
+
+    def _find_binary(self) -> str:
+        """Locate the optofly-camera binary."""
+        project_root = Path(__file__).parent.parent.parent
+        candidates = [
+            project_root / "optofly-camera" / "target" / "release" / self.BINARY_NAME,
+            project_root / "optofly-camera" / "target" / "debug" / self.BINARY_NAME,
+        ]
+        for path in candidates:
+            if path.exists():
+                return str(path)
+
+        found = shutil.which(self.BINARY_NAME)
+        if found:
+            return found
+
+        raise FileNotFoundError(
+            f"Cannot find {self.BINARY_NAME}. "
+            f"Build with: cd optofly-camera && cargo build --release"
+        )
+
+    def run(self) -> None:
+        """Launch the Rust binary and wait for it to finish."""
+        self._initialize_logger()
+        self.logger.info("Starting RustCameraProcess")
+
+        try:
+            binary = self._find_binary()
+        except FileNotFoundError as e:
+            self.logger.error(str(e))
+            return
+
+        os.makedirs(self.save_folder, exist_ok=True)
+
+        cmd = [
+            binary,
+            "--config", self.config_path,
+            "--save-folder", self.save_folder,
+            "--log-level", "info",
+        ]
+        self.logger.info("Launching: %s", " ".join(cmd))
+
+        self._proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        # Wait for either stop_event or process exit
+        while not self.stop_event.is_set():
+            try:
+                self._proc.wait(timeout=0.5)
+                if self._proc.returncode != 0:
+                    stderr = self._proc.stderr.read().decode() if self._proc.stderr else ""
+                    self.logger.error(
+                        "optofly-camera exited with code %d: %s",
+                        self._proc.returncode,
+                        stderr.strip(),
+                    )
+                else:
+                    self.logger.info("optofly-camera exited cleanly")
+                return
+            except subprocess.TimeoutExpired:
+                continue
+
+        # Stop event set — send kill ZMQ message then SIGTERM
+        self.logger.info("Sending kill signal to optofly-camera")
+        try:
+            zmq_config = ZMQConfig(self.config_path)
+            ctx = zmq.Context()
+            pub_sock = ctx.socket(zmq.PUB)
+            pub_sock.connect(f"tcp://localhost:{zmq_config.trigger_port}")
+            time.sleep(0.1)  # ZMQ slow-joiner
+            pub_sock.send_multipart([b"kill", b""])
+            pub_sock.close()
+            ctx.term()
+        except Exception as e:
+            self.logger.warning("Failed to send ZMQ kill: %s", e)
+
+        # Give it a moment to exit cleanly, then SIGTERM
+        try:
+            self._proc.wait(timeout=3.0)
+        except subprocess.TimeoutExpired:
+            self.logger.warning("optofly-camera did not exit, sending SIGTERM")
+            self._proc.terminate()
+            try:
+                self._proc.wait(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                self.logger.error("optofly-camera did not exit after SIGTERM, killing")
+                self._proc.kill()
+
+
 # Allow running as standalone module for testing
 if __name__ == "__main__":
     import argparse

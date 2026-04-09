@@ -16,7 +16,7 @@ from src.processes.braid import BraidPublisher
 from src.processes.tracking import TriggerHandler
 from src.processes.visual import VisualStimuliProcess
 from src.processes.led import OptoTriggerWorker
-from src.processes.camera import CameraProcess
+from src.processes.camera import RustCameraProcess as CameraProcess
 from src.processes.lens import LiquidLens
 from src.utils.braid import check_braid_folder_exists, copy_csv_files_to_braid
 from src.utils.logger import setup_file_logging
