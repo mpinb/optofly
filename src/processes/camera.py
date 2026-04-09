@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import zmq
 
-from src.utils.config import CameraConfig, TriggerHandlerConfig, ZMQConfig
+from src.utils.config import CameraConfig, ZMQConfig
 from src.utils.worker import WorkerProcess
 
 log = logging.getLogger(__name__)
@@ -498,16 +498,15 @@ class CameraProcess(WorkerProcess):
         self.logger.info("Resolution: %dx%d @ %d fps", width, height, fps)
 
         # --- Allocate double buffers (linear, no ring) ---
-        # Buffer sized from zone_timeout (+1s margin for message latency)
-        trigger_config = TriggerHandlerConfig(self.config_path)
-        max_recording_time = trigger_config.zone_timeout + 1.0
+        # Buffer sized from max_recording_time (+1s margin for message latency)
+        max_recording_time = self.config.max_recording_time + 1.0
         buf_size = int(fps * max_recording_time)
 
         self.logger.info(
-            "Buffer: %d frames (%.1f s from zone_timeout=%.1f, %.1f MB x2)",
+            "Buffer: %d frames (%.1f s from max_recording_time=%.1f, %.1f MB x2)",
             buf_size,
             max_recording_time,
-            trigger_config.zone_timeout,
+            self.config.max_recording_time,
             buf_size * frame_bytes / (1024**2),
         )
 

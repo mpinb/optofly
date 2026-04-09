@@ -392,6 +392,7 @@ class CameraConfig(ConfigBase):
         self.height: int = self.sensor_height_px
 
         self.exposure_time: float = float(config.get("exposure_time", 0.0))
+        self.max_recording_time: float = float(config.get("max_recording_time", 3.0))
 
         # Communication settings
         self.zmq_address: str = config.get("zmq_address", "127.0.0.1")

@@ -69,7 +69,7 @@ active = false
 resolution = [2112, 2112]
 fps = 500
 exposure_time = 2000             # Microseconds
-# Buffer sized automatically from trigger_handler.zone_timeout
+max_recording_time = 3.0         # Max seconds per recording (sizes buffer)
 
 [camera.FOV]
 # Camera field of view in tracking coordinates (meters)
