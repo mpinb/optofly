@@ -37,7 +37,7 @@ def test_prerequisites(config_path: str = "configs/config.toml") -> bool:
     results = check_camera_prerequisites(config_path)
 
     print("\nResults:")
-    print(f"  ximea-py:    {'OK' if results['ximea'] else 'FAIL'}")
+    print(f"  binary:      {'OK' if results['binary'] else 'FAIL'}")
     print(f"  ffmpeg:      {'OK' if results['ffmpeg'] else 'FAIL'}")
     print(f"  Save Folder: {'OK' if results['save_folder'] else 'FAIL'}")
     print(f"  ZMQ Port:    {'OK' if results['zmq_port'] else 'FAIL'}")

@@ -298,7 +298,7 @@ def check_camera_prerequisites(config_path: str = "configs/config.toml") -> dict
     """
     config = CameraConfig(config_path)
     results = {
-        "ximea": False,
+        "binary": False,
         "ffmpeg": False,
         "save_folder": False,
         "zmq_port": False,
@@ -307,15 +307,19 @@ def check_camera_prerequisites(config_path: str = "configs/config.toml") -> dict
         "warnings": [],
     }
 
-    # Check 1: ximea-py importable
-    try:
-        from ximea import Camera  # noqa: F401
-
-        results["ximea"] = True
-    except ImportError as e:
-        results["errors"].append(f"ximea-py not importable: {e}")
+    # Check 1: optofly-camera Rust binary findable
+    project_root = Path(__file__).parent.parent.parent
+    binary_candidates = [
+        project_root / "optofly-camera" / "target" / "release" / "optofly-camera",
+        project_root / "optofly-camera" / "target" / "debug" / "optofly-camera",
+    ]
+    found_binary = any(p.exists() for p in binary_candidates) or shutil.which("optofly-camera")
+    if found_binary:
+        results["binary"] = True
+    else:
+        results["errors"].append("optofly-camera binary not found")
         results["errors"].append(
-            "Install: uv add 'ximea @ git+https://github.com/elhananby/ximea-py.git'"
+            "Build: cd optofly-camera && cargo build --release"
         )
 
     # Check 2: ffmpeg available
@@ -362,7 +366,7 @@ def check_camera_prerequisites(config_path: str = "configs/config.toml") -> dict
         results["zmq_port"] = True
 
     results["overall"] = (
-        results["ximea"]
+        results["binary"]
         and results["ffmpeg"]
         and results["save_folder"]
         and results["zmq_port"]
