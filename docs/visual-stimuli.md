@@ -37,10 +37,10 @@ VisualStimuliProcess (main process)
 
 | Class | File | Purpose |
 |-------|------|---------|
-| `BaseStimulus` | `base_stimulus.py` | Abstract interface |
-| `StimulusRegistry` | `stimulus_registry.py` | Manages plugins, dispatches events |
-| `GeometryUtils` | `geometry_utils.py` | Heading-to-pixels, degrees-to-pixels |
-| `DisplayManager` | `display_manager.py` | Creates pyglet window |
+| `BaseStimulus` | `base.py` | Abstract interface |
+| `StimulusRegistry` | `registry.py` | Manages plugins, dispatches events |
+| `GeometryUtils` | `geometry.py` | Heading-to-pixels, degrees-to-pixels |
+| `DisplayManager` | `display.py` | Creates pyglet window |
 | `VisualStimuliProcess` | `../processes/visual.py` | Main process loop |
 
 ## Core Concepts
@@ -128,8 +128,8 @@ positions_deg = [-90, 0, 90]            # Balanced presentation
 Create `src/stimuli/my_stimulus.py`:
 
 ```python
-from src.stimuli.base_stimulus import BaseStimulus
-from src.stimuli.geometry_utils import GeometryUtils
+from src.stimuli.base import BaseStimulus
+from src.stimuli.geometry import GeometryUtils
 import pyglet.shapes
 
 class MyStimulus(BaseStimulus):
@@ -263,36 +263,41 @@ def render(self, batch):
 ```python
 class BaseStimulus(ABC):
     @abstractmethod
-    def render(self, batch):        # Required: add/update shapes (240x/sec)
+    def render(self, batch):        # Required: add/update shapes in batch (240x/sec)
         pass
 
     @abstractmethod
-    def is_active(self) -> bool:    # Required: whether to render
+    def is_active(self) -> bool:    # Required: return True if should render
         pass
 
     @abstractmethod
-    def cleanup(self):              # Required: delete shapes, free resources
+    def cleanup(self):              # Required: delete shapes, free memory
         pass
 
-    def update(self, dt):           # Optional: advance state (240x/sec)
+    def update(self, dt):           # Optional: update state (240x/sec)
         pass
 
-    def on_trigger(self, data):     # Optional: handle TRIGGER messages
+    def on_trigger(self, trigger_data: dict):  # Optional: handle ZONE_ENTER
+        # trigger_data has: obj_id, frame, timestamp, x, y, z, mean_heading
         pass
 
-    def initialize_rendering(self, batch):  # Optional: one-time setup
+    def initialize_rendering(self, batch):  # Optional: one-time rendering setup
         pass
 ```
 
-## Trigger Message Format
+## ZONE_ENTER Message Format
+
+When a ZONE_ENTER event is dispatched to stimuli:
 
 ```python
 {
-    "obj_id": 1,
-    "frame": 12345,
-    "braid_timestamp": 123456.789,
-    "trigger_timestamp": 123456.790,
-    "mean_heading": 1.57            # radians
+    "obj_id": 1,                    # Braid tracking ID
+    "frame": 12345,                 # Camera frame number
+    "timestamp": 123456.790,        # TriggerHandler emission time (seconds)
+    "x": 0.01,                      # Position (meters)
+    "y": -0.02,
+    "z": 0.18,
+    "mean_heading": 1.57            # Fly heading (radians, 0 = +x direction)
 }
 ```
 

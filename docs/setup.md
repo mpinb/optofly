@@ -45,15 +45,16 @@ Key sections:
 
 ```toml
 [braid_publisher]
-url = "http://10.40.80.6:8397"              # Braid server address
+host = "127.0.0.1"                          # Braid server IP
+events_port = 8397                          # Braid SSE/events port
 experiments_path = "/mnt/data/experiments/" # Where .braid folders are saved
 
 [trigger_handler]
-min_trajectory_time = 1.0   # Min tracking duration before triggering (s)
-min_trigger_interval = 10.0 # Cooldown between triggers (s)
+min_tracking_age = 0.1      # Min object age before triggering (s)
+refractory_period = 10.0    # Global cooldown between ZONE_ENTER (s)
 z_min = 0.15                # Minimum z for trigger (m)
 z_max = 0.25                # Maximum z for trigger (m)
-heading_cone_deg = 30.0     # Heading threshold (degrees from center-directed)
+heading_cone_deg = 45.0     # Heading tolerance from center-directed (degrees)
 min_velocity = 0.01         # Min velocity threshold (m/s)
 
 [camera]
