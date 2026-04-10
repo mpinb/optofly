@@ -39,7 +39,7 @@ class VisualStimuliProcess(WorkerProcess):
         event: Optional[mp.Event] = None,
         process_name: str = "VisualStimuli",
         log_level: str = "INFO",
-        log_color: str = "CYAN",
+        log_color: str = "YELLOW",
         standalone: bool = False,
         braid_folder: Optional[str] = None,
     ):
