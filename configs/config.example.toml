@@ -106,7 +106,7 @@ sham_probability = 0.0           # Probability of sham trials (0.0-1.0)
 port = "/dev/ttyUSB1"
 mode = "diopter"
 calibration_file = "calibrations/liquid_lens.csv"
-tracking_timeout = 3.0           # Stop adjusting if no tracking data (seconds)
+# Zone timeout is now global (from [trigger_handler] section)
 
 [liquid_lens.kalman]
 # Kalman filter for predictive focus

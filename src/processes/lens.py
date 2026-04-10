@@ -468,7 +468,8 @@ class LiquidLens(WorkerProcess):
         self.logger.info("Liquid Lens process started.")
 
         # Safety timeout: stop tracking if no position updates for this long
-        position_timeout = 0.5
+        # (uses global zone_timeout from trigger_handler config)
+        position_timeout = self.lens_config.zone_timeout
 
         while self.is_running and not self.stop_event.is_set():
             try:

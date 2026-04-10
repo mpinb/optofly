@@ -116,7 +116,9 @@ class LiquidLensConfig(ConfigBase):
         self.calibration_file: str = config.get(
             "calibration_file", "calibrations/liquid_lens.csv"
         )
-        self.tracking_timeout: float = config.get("tracking_timeout", 3.0)
+        # Zone timeout is now global — read from trigger_handler config
+        trigger_config = TriggerHandlerConfig(config_path)
+        self.zone_timeout: float = trigger_config.zone_timeout
 
         self.n_elements: int = config.get("n_elements", 1000)
 
