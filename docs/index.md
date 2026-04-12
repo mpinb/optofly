@@ -10,7 +10,7 @@ Real-time tracking and closed-loop optogenetic stimulation system for flying ins
 | [Architecture](architecture.md) | System architecture, data flow, and ZMQ topology |
 | [Calibration](calibration.md) | Visual stimuli and liquid lens calibration procedures |
 | [Visual Stimuli](visual-stimuli.md) | Developer guide for the stimulus rendering system |
-| [Camera](camera.md) | Ximea high-speed camera system (Rust) |
+| [Camera](camera.md) | Ximea high-speed camera system |
 | [Opto Trigger](opto-trigger.md) | Arduino LED firmware and serial protocol |
 | [Troubleshooting](troubleshooting.md) | Common issues and fixes |
 
@@ -23,4 +23,5 @@ OptoFly integrates multiple hardware and software components for automated close
 - **Ximea Camera** — High-speed (500fps) triggered video recording
 - **Optogenetic Trigger** — LED stimulation control via Arduino
 - **Liquid Lens** — Dynamic autofocus with optional predictive tracking
-- **Visual Stimuli** — Configurable patterns at 240Hz (looming, gratings, static)
+- **Visual Stimuli** — Configurable patterns (looming, vertical bar, static)
+- **Monitoring** — Web dashboard for real-time trigger visualization

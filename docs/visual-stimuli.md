@@ -4,7 +4,7 @@ Developer guide for the visual stimulus rendering system.
 
 ## Overview
 
-The visual stimuli package provides a 240Hz, plugin-based system for rendering visual patterns on a multi-screen display. It integrates with OptoFly's closed-loop tracking system to present stimuli in response to fly behavior.
+The visual stimuli package provides a plugin-based system for rendering visual patterns on a multi-screen display at a configurable refresh rate (set via `target_fps` in config, default 60Hz). It integrates with OptoFly's closed-loop tracking system to present stimuli in response to fly behavior.
 
 ## Architecture
 
@@ -24,9 +24,9 @@ VisualStimuliProcess (main process)
 1. Create pyglet window and Batch
 2. Initialize all stimuli (load config)
 3. Call `stimulus.initialize_rendering(batch)` for each
-4. Start 240Hz rendering loop
+4. Start rendering loop at configured `target_fps`
 
-**Per-frame loop (240x/second):**
+**Per-frame loop (runs at `target_fps`):**
 1. Check for ZONE_ENTER messages from ZMQ
 2. If ZONE_ENTER received → `StimulusRegistry.on_trigger(data)`
 3. `StimulusRegistry.update_all(dt)` → update stimulus state
@@ -61,7 +61,7 @@ self.circle.radius = radius
 ### Initialize vs. Render
 
 - `initialize_rendering(batch)` — called once at startup; create static shapes here
-- `render(batch)` — called 240x/second; update shape properties here
+- `render(batch)` — called every frame; update shape properties here
 
 ### Coordinate Systems
 
@@ -120,6 +120,25 @@ final_size_deg = 72.0
 expansion_duration_ms = [300, 500, 700]
 positions_deg = [-90, 0, 90]            # Balanced presentation
 ```
+
+### VerticalBarStimulus
+
+Closed-loop. Vertical bar at a configurable angular position relative to the fly's heading. Used to test reorientation behavior.
+
+```toml
+[visual_stimuli.vertical_bar]
+enabled = true
+bar_width_deg = 20.0                 # Width in visual degrees
+bar_color = "black"
+bar_height_fraction = 1.0            # Height as fraction of screen (1.0 = full)
+presentation_duration_ms = 2000
+cooldown_duration_ms = 3000
+positions_deg = [90, 0, 180]         # Balanced presentation across positions
+```
+
+### SweepingBarStimulus (config only)
+
+The example config includes a `[visual_stimuli.sweeping_bar]` section for a sweeping bar stimulus. This stimulus is not yet implemented — the config section is a placeholder for future development.
 
 ## Creating a New Stimulus
 
@@ -188,8 +207,18 @@ In `src/processes/visual.py`, in `_initialize_stimuli()`:
 my_config = self.config.get("my_stimulus", {})
 if my_config.get("enabled", False):
     from src.stimuli.my_stimulus import MyStimulus
-    stim = MyStimulus(my_config, self.geometry, self.logger, self.csv_writer)
+    stim = MyStimulus(
+        config=my_config,
+        geometry_utils=self.geometry,
+        logger=self.logger,
+        csv_writer=self.csv_writer,
+    )
     self.registry.register("my_stimulus", stim)
+```
+
+Also add the import at the top of `visual.py`:
+```python
+from src.stimuli.my_stimulus import MyStimulus
 ```
 
 ### Step 3: Add config
@@ -263,7 +292,7 @@ def render(self, batch):
 ```python
 class BaseStimulus(ABC):
     @abstractmethod
-    def render(self, batch):        # Required: add/update shapes in batch (240x/sec)
+    def render(self, batch):        # Required: add/update shapes in batch (every frame)
         pass
 
     @abstractmethod
@@ -274,7 +303,7 @@ class BaseStimulus(ABC):
     def cleanup(self):              # Required: delete shapes, free memory
         pass
 
-    def update(self, dt):           # Optional: update state (240x/sec)
+    def update(self, dt):           # Optional: update state (every frame)
         pass
 
     def on_trigger(self, trigger_data: dict):  # Optional: handle ZONE_ENTER
@@ -313,7 +342,7 @@ When a ZONE_ENTER event is dispatched to stimuli:
 - Use `GeometryUtils` for all coordinate conversions
 - Pyglet origin is bottom-left (not top-left)
 
-**FPS drops below 240Hz:**
-- Look for log warnings: `Performance: 180.2 fps`
+**FPS drops below target:**
+- Look for log warnings: `Performance: 45.2 fps [target: 60 fps]`
 - Check for shape recreation each frame instead of in-place updates
 - Profile with `cProfile` to find bottlenecks

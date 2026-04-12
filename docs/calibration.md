@@ -36,7 +36,7 @@ For each of the 4 calibration positions (one per screen):
 | `calibrations/heading_mapping_data.csv` | Raw calibration data (pixel_x, braid_x, braid_y) |
 | `calibrations/heading_mapping_model.npz` | Interpolation model used at runtime |
 
-**Apply calibration in `configs/config.toml`:**
+**Apply calibration in `configs/visual_stimuli.toml`:**
 ```toml
 [visual_stimuli]
 calibration_mapping_file = "calibrations/heading_mapping_model.npz"

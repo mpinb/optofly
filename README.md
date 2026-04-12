@@ -2,7 +2,7 @@
 
 Real-time tracking and closed-loop optogenetic stimulation system for flying insects.
 
-Integrates Braid 3D fly tracking with triggered video recording, optogenetic LED stimulation, dynamic autofocus, and 240Hz visual stimuli.
+Integrates Braid 3D fly tracking with triggered video recording, optogenetic LED stimulation, dynamic autofocus, and configurable visual stimuli.
 
 ## Documentation
 

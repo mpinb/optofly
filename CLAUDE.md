@@ -14,7 +14,7 @@ uv run python main.py
 
 # Python tests
 uv run pytest
-uv run pytest tests/test_config.py -v   # single file
+uv run pytest tests/ -v               # verbose
 
 # Lint
 uv run ruff check .
@@ -53,10 +53,11 @@ BraidPublisher  →  ZMQ PUB  topic=BRAID  port=5555
     ↓
 TriggerHandler  →  ZMQ PUB  topics=ZONE_ENTER/ZONE_EXIT  port=5556
     ↓
-    ├── CameraProcess       (records while fly is in zone, via ximea-py + ffmpeg)
-    ├── OptoTriggerWorker   (fires LED on ZONE_ENTER, one-shot)
+    ├── CameraProcess        (records while fly is in zone, via ximea-py + ffmpeg)
+    ├── OptoTriggerWorker    (fires LED on ZONE_ENTER, one-shot)
     ├── VisualStimuliProcess (renders stimuli on ZONE_ENTER, one-shot)
-    └── LiquidLens          (tracks focus ZONE_ENTER→ZONE_EXIT via BRAID)
+    ├── LiquidLens           (tracks focus ZONE_ENTER→ZONE_EXIT via BRAID)
+    └── Monitoring Server    (web dashboard, optional)
 ```
 
 The ZMQ BRAID feed is only live when the full stack is running. Standalone tools (calibration, simulators) that need tracking data must connect directly to the Braid HTTP SSE endpoint (`/events`).
@@ -89,13 +90,13 @@ All processes inherit `WorkerProcess` (`src/utils/worker.py`) and run as `multip
 
 ### Configuration Loading
 
-`src/utils/config.py` has typed config classes (e.g. `LiquidLensConfig`, `ZMQConfig`) that load from TOML sections. Pass `config_path` to each process; don't read TOML directly elsewhere.
+`src/utils/config.py` has typed config classes (e.g. `LiquidLensConfig`, `ZMQConfig`) that load from TOML sections. Pass `config_path` to each process; don't read TOML directly elsewhere. `trigger_handler.zone_timeout` is the single global timeout used by TriggerHandler, CameraProcess (buffer sizing), and LiquidLens (focus tracking).
 
 ### Visual Stimuli
 
-Plugin-based factory pattern in `src/stimuli/`. To add a stimulus:
-1. Create class in `src/stimuli/my_stimulus.py` implementing `on_trigger`, `update`, `render`, `is_active`
-2. Register in `src/stimuli/registry.py`
+Plugin-based pattern in `src/stimuli/`. Included stimuli: `StaticPatternStimulus`, `LoomingStimulusRenderer`, `VerticalBarStimulus`. To add a stimulus:
+1. Create class in `src/stimuli/my_stimulus.py` extending `BaseStimulus` with `on_trigger`, `update`, `render`, `is_active`
+2. Register in `src/processes/visual.py:_initialize_stimuli()`
 3. Add `[visual_stimuli.my_stimulus]` section to `configs/visual_stimuli.toml`
 
 Heading-to-pixel conversion uses `GeometryUtils` (`src/stimuli/geometry.py`). With `use_empirical_calibration = true`, it interpolates from `calibrations/heading_mapping_model.npz`; otherwise it uses a geometric formula.

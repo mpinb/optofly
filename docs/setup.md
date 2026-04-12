@@ -61,7 +61,6 @@ min_velocity = 0.01         # Min velocity threshold (m/s)
 active = true
 resolution = [2112, 2112]
 fps = 500
-# Buffer sized automatically from trigger_handler.zone_timeout
 
 [opto_trigger]
 active = true
@@ -71,50 +70,61 @@ intensity = [0, 51, 102, 153, 204, 255]
 color = "red"
 
 [liquid_lens]
-active = false
+# Activates automatically when camera is active
 port = "/dev/ttyUSB1"
 calibration_file = "calibrations/liquid_lens.csv"
 
 [visual_stimuli]
 active = true
 config_file = "configs/visual_stimuli.toml"
+
+[monitoring]
+active = true
+host = "0.0.0.0"
+port = 5000
 ```
 
 ### configs/visual_stimuli.toml
 
 ```toml
-[display]
+[visual_stimuli]
+active = true
+window_x_offset = 3840
 window_width = 7680
 window_height = 1080
+target_fps = 60
 arena_center_to_screen_cm = 25.0
 
 [visual_stimuli.static]
 enabled = true
-pattern_density = 0.3
+pattern_density = 0.5
 random_seed = 42
 
 [visual_stimuli.looming]
 enabled = true
-initial_size_deg = [5.0, 10.0, 15.0]
+initial_size_deg = 5.0
 final_size_deg = 72.0
-expansion_duration_ms = [300, 500, 700]
+expansion_duration_ms = 500
 positions_deg = [-90, 0, 90]
+
+[visual_stimuli.vertical_bar]
+enabled = false
+bar_width_deg = 20.0
+positions_deg = [90, 0, 180]
 ```
 
 See the example files for all available options.
 
 ## Running an Experiment
 
-1. Start Braid recording (creates the `.braid` folder)
+1. Start Braid (tracking must be active)
 2. Launch OptoFly:
 
 ```bash
 uv run python main.py
-# or
-python main.py
 ```
 
-The launcher checks for a Braid recording folder, loads configuration, starts all enabled processes, and runs until Ctrl+C.
+The launcher checks for an active Braid recording folder (or starts one automatically), copies configuration files to the experiment folder, starts all enabled processes, and runs until Ctrl+C or the configured `experiment_duration` is reached.
 
 ## Testing
 
@@ -122,13 +132,12 @@ The launcher checks for a Braid recording folder, loads configuration, starts al
 # Python unit tests
 uv run pytest
 
-# Specific test file
-uv run pytest tests/test_config.py -v
-
-# Camera integration test
+# Camera integration test (requires hardware)
 python tests/test_camera_integration.py
 
 # Visual stimuli standalone (no hardware)
 python -m src.processes.visual --standalone
 
+# Simulate Braid tracking data (development)
+python -m src.tools.braid_simulator
 ```

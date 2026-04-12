@@ -67,9 +67,9 @@ ls calibrations/liquid_lens.csv
 
 ## Performance
 
-**Visual stimuli FPS drops below 240Hz:**
+**Visual stimuli FPS drops below target:**
 
-Check logs for: `WARNING - Performance: 180.2 fps`
+Check logs for: `WARNING - Performance: 45.2 fps [target: 60 fps]`
 
 Causes:
 - Shapes being created/deleted every frame instead of updated in-place

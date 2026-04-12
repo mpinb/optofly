@@ -3,9 +3,9 @@
 High-speed triggered video recording using ximea-py and ffmpeg.
 
 **Specifications:**
-- 500fps at 2112x2112 pixels
+- 500fps at 2112x2112 pixels (configurable)
 - H.264 encoding with NVENC hardware acceleration (x264 fallback)
-- Double-buffer design for zero-copy, race-free operation
+- Linear double-buffer design for zero-copy, race-free operation
 - ~8GB memory footprint (default settings, 2 buffers)
 
 ## Architecture
@@ -19,7 +19,7 @@ Single-process design with a background encoder thread:
 **Double-buffer pattern:** Two pre-allocated numpy arrays sized for `zone_timeout + 1s`. On recording completion, the active buffer is enqueued for encoding and the standby buffer becomes active. The encoder reads the old buffer while capture continues into the new one.
 
 **Memory:** `2 x (zone_timeout + 1s) x fps x width x height`
-Default settings (3s x 500fps x 2016x2016): ~5.7GB.
+Default settings (2s timeout, 500fps, 2112x2112): ~8.5GB.
 
 ## Dependencies
 
@@ -59,7 +59,7 @@ Kill signal: `[b"kill", b""]`
 ## Output
 
 **Video:** `{save_folder}/obj_id_{obj_id}_frame_{frame}.mp4`
-- Codec: H.264 (NVENC p7/constqp16, or x264 crf16 fallback), grayscale input
+- Codec: H.264 (NVENC p4/constqp18, or x264 ultrafast/crf18 fallback), grayscale input
 
 **Metadata CSV:** `{save_folder}/obj_id_{obj_id}_frame_{frame}.csv`
 ```csv

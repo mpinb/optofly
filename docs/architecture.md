@@ -18,10 +18,11 @@ TriggerHandler (src/processes/tracking.py)
     |
     | ZMQ PUB (topics: ZONE_ENTER / ZONE_EXIT, port: 5556)
     |
-    +---> CameraProcess       (records while fly is in zone)
+    +---> CameraProcess        (records while fly is in zone)
     +---> LiquidLens           (tracks focus while fly is in zone)
-    +---> OptoTriggerWorker   (one-shot LED on ZONE_ENTER)
+    +---> OptoTriggerWorker    (one-shot LED on ZONE_ENTER)
     +---> VisualStimuliProcess (one-shot stimulus on ZONE_ENTER)
+    +---> Monitoring Server    (web dashboard, optional)
 ```
 
 ## Process Model
@@ -32,10 +33,11 @@ All processes inherit from `WorkerProcess` (`src/utils/worker.py`) and run as `m
 |---------|----------|--------|
 | BraidPublisher | PUB on port 5555 (topic: BRAID) | `src/processes/braid.py` |
 | TriggerHandler | SUB on 5555, PUB on 5556 (topics: ZONE_ENTER, ZONE_EXIT) | `src/processes/tracking.py` |
-| CameraProcess | SUB on 5556 (ZONE_ENTER, ZONE_EXIT) | `src/processes/camera.py` |
+| CameraProcess | SUB on 5556 (ZONE_ENTER, ZONE_EXIT, kill) | `src/processes/camera.py` |
 | OptoTriggerWorker | SUB on 5556 (ZONE_ENTER) | `src/processes/led.py` |
 | VisualStimuliProcess | SUB on 5556 (ZONE_ENTER) | `src/processes/visual.py` |
 | LiquidLens | SUB on 5555 (BRAID) + 5556 (ZONE_ENTER, ZONE_EXIT) | `src/processes/lens.py` |
+| Monitoring Server | SUB on 5556 (ZONE_ENTER, ZONE_EXIT) | `src/monitoring/server.py` |
 
 ## ZMQ Message Formats
 
@@ -87,10 +89,10 @@ Key parameters in `[trigger_handler]` section:
 | `min_velocity` | 0.01 m/s | Minimum speed to consider object "moving" |
 | `max_velocity` | 2.0 m/s | Maximum speed (filters tracking noise) |
 | `min_tracking_age` | 0.1 s | Object age before it can trigger (noise filter) |
-| `zone_timeout` | 2.0 s | Timeout for auto-ZONE_EXIT if tracking is lost |
+| `zone_timeout` | 2.0 s | Global timeout: auto-ZONE_EXIT if tracking lost; also used by camera (buffer sizing) and liquid lens (focus tracking) |
 | `refractory_period` | 10.0 s | Global cooldown between ZONE_ENTER events |
 
-The trigger zone's x/y bounds are sourced from the camera FOV (not configurable separately).
+The trigger zone's x/y bounds are sourced from the camera FOV (not configurable separately). The `zone_timeout` value is the single source of truth — CameraProcess and LiquidLens read it from `[trigger_handler]` rather than maintaining separate timeouts.
 
 ## Trigger Entry Gates
 
