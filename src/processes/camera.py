@@ -774,9 +774,18 @@ class RustCameraProcess(WorkerProcess):
 
         self._proc = subprocess.Popen(
             cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
         )
+
+        # Start a thread to forward Rust binary output to logger
+        output_thread = threading.Thread(
+            target=self._forward_output,
+            daemon=True,
+        )
+        output_thread.start()
 
         # Wait for either stop_event or process exit
         while not self.stop_event.is_set():
@@ -802,6 +811,17 @@ class RustCameraProcess(WorkerProcess):
         except subprocess.TimeoutExpired:
             self.logger.error("optofly-camera did not exit after SIGTERM, killing")
             self._proc.kill()
+
+    def _forward_output(self) -> None:
+        """Read from Rust binary stdout/stderr and forward to logger (daemon thread)."""
+        try:
+            if self._proc and self._proc.stdout:
+                for line in self._proc.stdout:
+                    line = line.rstrip()
+                    if line:
+                        self.logger.info("[optofly-camera] %s", line)
+        except Exception as e:
+            self.logger.warning("Error reading optofly-camera output: %s", e)
 
 
 # Allow running as standalone module for testing
