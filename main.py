@@ -207,7 +207,7 @@ def main():
         print("\nStarting core processes...")
 
         # 0. BacklightController - turn on the backlight
-        backlight_ser = serial.Serial("/dev/ttyUSB1", baudrate=9600, timeout=1)
+        backlight_ser = serial.Serial("/dev/ttyUSB0", baudrate=9600, timeout=1)
         time.sleep(2.0)  # wait for the arduino to reset
         backlight_ser.write(b"1.0\n")
 
