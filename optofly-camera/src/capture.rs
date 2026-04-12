@@ -124,6 +124,19 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
         .map_err(|e| format!("Start acquisition error: {}", e))?;
     log::info!("Acquisition started — entering capture loop");
 
+    // Verify no row padding on first frame — flat copy assumes contiguous pixel data
+    let first_img = acq
+        .next_image::<u8>(Some(5000))
+        .map_err(|e| format!("First frame error: {}", e))?;
+    if first_img.data().len() != frame_bytes {
+        return Err(format!(
+            "Frame data size mismatch: expected {} ({}x{}), got {} — row padding detected. \
+             Cannot use flat buffer copy.",
+            frame_bytes, width, height, first_img.data().len()
+        ));
+    }
+    drop(first_img);
+
     loop {
         // Check for SIGTERM/SIGINT
         if shutdown.load(Ordering::Relaxed) {
@@ -210,11 +223,13 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                         let ts_raw = img.timestamp_raw();
                         let ts_sec = (ts_raw >> 32) as u32;
                         let ts_usec = (ts_raw & 0xFFFF_FFFF) as u32;
+                        // xiB/xiC/xiT/xiX: timestamp_raw is a 64-bit counter in 4ns ticks
+                        let cam_time_ns = ts_raw * 4;
                         buf.commit(FrameMeta {
                             nframe,
                             ts_sec,
                             ts_usec,
-                            cam_time_ns: ts_sec as u64 * 1_000_000_000 + ts_usec as u64 * 1000,
+                            cam_time_ns,
                         });
                     }
                 }

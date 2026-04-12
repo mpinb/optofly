@@ -803,10 +803,11 @@ class RustCameraProcess(WorkerProcess):
                 continue
 
         # Stop event set — send SIGTERM for graceful shutdown
+        # Allow enough time for the encoder to finish any in-progress recording
         self.logger.info("Sending SIGTERM to optofly-camera")
         self._proc.terminate()
         try:
-            self._proc.wait(timeout=5.0)
+            self._proc.wait(timeout=30.0)
             self.logger.info("optofly-camera exited after SIGTERM")
         except subprocess.TimeoutExpired:
             self.logger.error("optofly-camera did not exit after SIGTERM, killing")
