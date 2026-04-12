@@ -768,7 +768,7 @@ class RustCameraProcess(WorkerProcess):
             binary,
             "--config", self.config_path,
             "--save-folder", self.save_folder,
-            "--log-level", "info",
+            "--log-level", "warn",
         ]
         self.logger.info("Launching: %s", " ".join(cmd))
 

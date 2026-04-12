@@ -42,5 +42,5 @@ fn main() {
         std::process::exit(1);
     }
 
-    log::info!("optofly-camera exiting cleanly");
+    log::warn!("optofly-camera exiting cleanly");
 }

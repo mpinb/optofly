@@ -42,7 +42,7 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
     // --- Camera setup ---
     let mut cam = xiapi::open_device(None)
         .map_err(|e| format!("Cannot open XIMEA camera: {}", e))?;
-    log::info!("Camera opened");
+    log::warn!("Camera opened");
 
     cam.set_exposure(cfg.exposure_us)
         .map_err(|e| format!("Set exposure error: {}", e))?;
@@ -322,7 +322,7 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
         .stop_acquisition()
         .map_err(|e| format!("Stop acquisition error: {}", e))?;
 
-    log::info!(
+    log::warn!(
         "Camera stopped. Total frames: {}, dropped: {}",
         total_frames,
         dropped
@@ -386,7 +386,7 @@ fn finish_recording(
         buf.reset();
     }
     *state = State::Idle;
-    log::info!(
+    log::warn!(
         "Recording done: {} frames, back to IDLE (dropped so far: {})",
         n_filled,
         dropped
