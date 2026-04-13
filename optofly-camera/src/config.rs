@@ -16,11 +16,14 @@ struct CameraToml {
     exposure_time: f32,
     #[serde(default = "default_max_recording_time")]
     max_recording_time: f32,
+    #[serde(default = "default_buffers_queue_size")]
+    buffers_queue_size: i32,
     save_folder: Option<String>,
 }
 
 fn default_exposure() -> f32 { 2000.0 }
 fn default_max_recording_time() -> f32 { 3.0 }
+fn default_buffers_queue_size() -> i32 { 32 }
 
 #[derive(Debug, Deserialize)]
 struct ZmqToml {
@@ -42,6 +45,7 @@ pub struct AppConfig {
     pub fps: f32,
     pub exposure_us: f32,
     pub max_recording_time: f32,
+    pub buffers_queue_size: i32,
     pub save_folder: String,
     pub zmq_trigger_address: String,
     pub zmq_zone_enter_topic: String,
@@ -73,6 +77,7 @@ impl AppConfig {
             fps: cam.fps,
             exposure_us: cam.exposure_time,
             max_recording_time: cam.max_recording_time,
+            buffers_queue_size: cam.buffers_queue_size,
             save_folder,
             zmq_trigger_address: format!("tcp://localhost:{}", zmq.trigger_port),
             zmq_zone_enter_topic: zmq.zone_enter_topic,

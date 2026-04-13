@@ -73,6 +73,21 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
     cam.set_framerate(cfg.fps)
         .map_err(|e| format!("Set framerate error: {}", e))?;
 
+    // Use unsafe buffer policy (zero-copy, API manages buffers) and increase
+    // the internal queue depth so the SDK can absorb occasional processing
+    // stalls without dropping frames.
+    // XI_BP_UNSAFE = 0: zero-copy, API manages buffers directly
+    cam.set_buffer_policy(0)
+        .map_err(|e| format!("Set buffer policy error: {}", e))?;
+    cam.set_buffers_queue_size(cfg.buffers_queue_size)
+        .map_err(|e| format!("Set buffers queue size error: {}", e))?;
+    cam.set_recent_frame(xiapi::XI_SWITCH::XI_OFF)
+        .map_err(|e| format!("Set recent frame error: {}", e))?;
+    log::info!(
+        "Buffer policy: UNSAFE, queue size: {}, recent_frame: OFF",
+        cfg.buffers_queue_size
+    );
+
     let width = actual_roi.width;
     let height = actual_roi.height;
     let frame_bytes = (width * height) as usize;
@@ -114,8 +129,8 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
     let mut state = State::Idle;
     let mut recording_obj_id: u64 = 0;
     let mut recording_frame: u64 = 0;
-    let mut dropped: u64 = 0;
-    let mut prev_nframe: Option<u32> = None;
+    let mut rec_dropped: u64 = 0;
+    let mut rec_prev_nframe: Option<u32> = None;
     let mut total_frames: u64 = 0;
 
     // --- Start acquisition (consumes cam, returns AcquisitionBuffer) ---
@@ -166,16 +181,7 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
             }
         };
         total_frames += 1;
-
-        // Dropped frame tracking
         let nframe = img.nframe();
-        if let Some(prev) = prev_nframe {
-            let gap = nframe.wrapping_sub(prev).wrapping_sub(1);
-            if gap > 0 && gap < 10000 {
-                dropped += gap as u64;
-            }
-        }
-        prev_nframe = Some(nframe);
 
         match state {
             State::Idle => {
@@ -195,6 +201,8 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                             recording_frame = msg["frame"].as_u64().unwrap_or(0);
                             if let Some(ref mut buf) = buffers[active_idx] {
                                 buf.reset();
+                                rec_dropped = 0;
+                                rec_prev_nframe = None;
                                 state = State::Recording;
                                 log::info!(
                                     "ZONE_ENTER obj_id={} — started recording (max {} frames)",
@@ -213,6 +221,15 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
             }
 
             State::Recording => {
+                // Per-video dropped frame tracking
+                if let Some(prev) = rec_prev_nframe {
+                    let gap = nframe.wrapping_sub(prev).wrapping_sub(1);
+                    if gap > 0 && gap < 10000 {
+                        rec_dropped += gap as u64;
+                    }
+                }
+                rec_prev_nframe = Some(nframe);
+
                 // Write frame into linear buffer
                 if let Some(ref mut buf) = buffers[active_idx] {
                     if let Some(slot) = buf.next_slot() {
@@ -223,8 +240,7 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                         let ts_raw = img.timestamp_raw();
                         let ts_sec = (ts_raw >> 32) as u32;
                         let ts_usec = (ts_raw & 0xFFFF_FFFF) as u32;
-                        // xiB/xiC/xiT/xiX: timestamp_raw is a 64-bit counter in 4ns ticks
-                        let cam_time_ns = ts_raw * 4;
+                        let cam_time_ns = ts_sec as u64 * 1_000_000_000 + ts_usec as u64 * 1_000;
                         buf.commit(FrameMeta {
                             nframe,
                             ts_sec,
@@ -250,7 +266,7 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                                 fps,
                                 width,
                                 height,
-                                dropped,
+                                rec_dropped,
                             );
                             log::info!("Received kill signal during recording");
                             break;
@@ -274,7 +290,7 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                                     fps,
                                     width,
                                     height,
-                                    dropped,
+                                    rec_dropped,
                                 );
                             }
                         }
@@ -302,7 +318,7 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                             fps,
                             width,
                             height,
-                            dropped,
+                            rec_dropped,
                         );
                     }
                 }
@@ -326,7 +342,7 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
             fps,
             width,
             height,
-            dropped,
+            rec_dropped,
         );
     }
 
@@ -337,11 +353,7 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
         .stop_acquisition()
         .map_err(|e| format!("Stop acquisition error: {}", e))?;
 
-    log::warn!(
-        "Camera stopped. Total frames: {}, dropped: {}",
-        total_frames,
-        dropped
-    );
+    log::warn!("Camera stopped. Total frames: {}", total_frames);
     Ok(())
 }
 
@@ -356,7 +368,7 @@ fn finish_recording(
     fps: u32,
     width: u32,
     height: u32,
-    dropped: u64,
+    rec_dropped: u64,
 ) {
     let n_filled = buffers[*active_idx]
         .as_ref()
@@ -402,8 +414,8 @@ fn finish_recording(
     }
     *state = State::Idle;
     log::warn!(
-        "Recording done: {} frames, back to IDLE (dropped so far: {})",
+        "Recording done: {} frames, {} dropped, back to IDLE",
         n_filled,
-        dropped
+        rec_dropped
     );
 }
