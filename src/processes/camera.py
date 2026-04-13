@@ -537,8 +537,8 @@ class CameraProcess(WorkerProcess):
         buf_idx = 0  # current write index in active buffer (reset on each recording)
         recording_obj_id = None
         recording_frame = None
-        dropped = 0
-        prev_nframe = None
+        rec_dropped = 0
+        rec_prev_nframe = None
         total_frames = 0
         last_status_time = time.perf_counter()
         last_status_frames = 0
@@ -549,7 +549,7 @@ class CameraProcess(WorkerProcess):
 
         def _finish_recording():
             """Flush current buffer to encoder and swap to standby."""
-            nonlocal active_idx, buf_idx, state, recording_obj_id, recording_frame
+            nonlocal active_idx, buf_idx, state, recording_obj_id, recording_frame, rec_dropped
             n_filled = buf_idx
             if n_filled == 0:
                 self.logger.warning("Recording ended with 0 frames, skipping encode")
@@ -573,9 +573,9 @@ class CameraProcess(WorkerProcess):
             buf_idx = 0
             state = IDLE
             self.logger.info(
-                "Recording done: %d frames, back to IDLE (dropped so far: %d)",
+                "Recording done: %d frames, %d dropped, back to IDLE",
                 n_filled,
-                dropped,
+                rec_dropped,
             )
             recording_obj_id = None
             recording_frame = None
@@ -587,13 +587,6 @@ class CameraProcess(WorkerProcess):
             while not self.stop_event.is_set():
                 cam.get_image(img, timeout=5000)
                 total_frames += 1
-
-                # Dropped frame tracking
-                if prev_nframe is not None:
-                    gap = img.nframe - prev_nframe - 1
-                    if gap > 0:
-                        dropped += gap
-                prev_nframe = img.nframe
 
                 # --- State machine ---
                 if state == IDLE:
@@ -610,6 +603,8 @@ class CameraProcess(WorkerProcess):
                             recording_obj_id = msg["obj_id"]
                             recording_frame = msg.get("frame", 0)
                             buf_idx = 0
+                            rec_dropped = 0
+                            rec_prev_nframe = None
                             state = RECORDING
                             self.logger.info(
                                 "ZONE_ENTER obj_id=%s — started recording (max %d frames)",
@@ -620,15 +615,23 @@ class CameraProcess(WorkerProcess):
                         pass
 
                 elif state == RECORDING:
+                    # Per-video dropped frame tracking
+                    if rec_prev_nframe is not None:
+                        gap = img.nframe - rec_prev_nframe - 1
+                        if gap > 0:
+                            rec_dropped += gap
+                    rec_prev_nframe = img.nframe
+
                     # Write frame into linear buffer
                     _memmove(
                         buffers[active_idx][buf_idx].ctypes.data, img.bp, frame_bytes
                     )
+                    cam_time_ns = int(img.tsSec) * 1_000_000_000 + int(img.tsUSec) * 1_000
                     meta_buffers[active_idx][buf_idx] = (
                         img.nframe,
                         img.tsSec,
                         img.tsUSec,
-                        img.tsSec * 1_000_000_000 + img.tsUSec * 1000,
+                        cam_time_ns,
                     )
                     buf_idx += 1
 
@@ -667,13 +670,12 @@ class CameraProcess(WorkerProcess):
                     if dt > 0:
                         rolling_fps = (total_frames - last_status_frames) / dt
                         self.logger.debug(
-                            "[%s] frames=%d fps=%.1f dropped=%d",
+                            "[%s] frames=%d fps=%.1f",
                             "IDLE"
                             if state == IDLE
                             else f"RECORDING ({buf_idx}/{buf_size})",
                             total_frames,
                             rolling_fps,
-                            dropped,
                         )
                     last_status_time = now
                     last_status_frames = total_frames
@@ -687,9 +689,7 @@ class CameraProcess(WorkerProcess):
 
             cam.stop_acquisition()
             cam.close_device()
-            self.logger.info(
-                "Camera stopped. Total frames: %d, dropped: %d", total_frames, dropped
-            )
+            self.logger.info("Camera stopped. Total frames: %d", total_frames)
 
             # Wait for encoder to finish
             done_event.set()
