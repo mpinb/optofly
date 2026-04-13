@@ -7,10 +7,10 @@
 [visual_stimuli]
 # Main visual stimuli settings
 active = true
-log_file = "visual_stimuli.csv"
+log_file = "stim.csv"
 performance_log_file = "visual_stimuli_performance.csv"
 log_level = "INFO"
-log_color = "CYAN"
+log_color = "YELLOW"
 
 # ------------------------------------------------------------------------------
 # Display Configuration
