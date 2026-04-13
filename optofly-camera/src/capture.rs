@@ -267,6 +267,7 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                                 width,
                                 height,
                                 rec_dropped,
+                                "kill",
                             );
                             log::info!("Received kill signal during recording");
                             break;
@@ -274,11 +275,7 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                             let msg: serde_json::Value =
                                 serde_json::from_slice(&parts[1]).unwrap_or_default();
                             if msg["obj_id"].as_u64().unwrap_or(0) == recording_obj_id {
-                                log::info!(
-                                    "ZONE_EXIT obj_id={} reason={} — stopping recording",
-                                    recording_obj_id,
-                                    msg["reason"].as_str().unwrap_or("unknown"),
-                                );
+                                let reason = msg["reason"].as_str().unwrap_or("unknown");
                                 finish_recording(
                                     &mut buffers,
                                     &mut active_idx,
@@ -291,6 +288,7 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                                     width,
                                     height,
                                     rec_dropped,
+                                    reason,
                                 );
                             }
                         }
@@ -319,6 +317,7 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                             width,
                             height,
                             rec_dropped,
+                            "buffer_full",
                         );
                     }
                 }
@@ -343,6 +342,7 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
             width,
             height,
             rec_dropped,
+            "shutdown",
         );
     }
 
@@ -369,6 +369,7 @@ fn finish_recording(
     width: u32,
     height: u32,
     rec_dropped: u64,
+    reason: &str,
 ) {
     let n_filled = buffers[*active_idx]
         .as_ref()
@@ -414,8 +415,9 @@ fn finish_recording(
     }
     *state = State::Idle;
     log::warn!(
-        "Recording done: {} frames, {} dropped, back to IDLE",
+        "Recording done: {} frames, {} dropped, reason={}, back to IDLE",
         n_filled,
-        rec_dropped
+        rec_dropped,
+        reason
     );
 }
