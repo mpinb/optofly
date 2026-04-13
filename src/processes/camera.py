@@ -547,7 +547,7 @@ class CameraProcess(WorkerProcess):
         _memmove = ctypes.memmove
         _debug = self.logger.isEnabledFor(logging.DEBUG)
 
-        def _finish_recording():
+        def _finish_recording(reason: str = "unknown"):
             """Flush current buffer to encoder and swap to standby."""
             nonlocal active_idx, buf_idx, state, recording_obj_id, recording_frame, rec_dropped
             n_filled = buf_idx
@@ -573,9 +573,10 @@ class CameraProcess(WorkerProcess):
             buf_idx = 0
             state = IDLE
             self.logger.info(
-                "Recording done: %d frames, %d dropped, back to IDLE",
+                "Recording done: %d frames, %d dropped, reason=%s, back to IDLE",
                 n_filled,
                 rec_dropped,
+                reason,
             )
             recording_obj_id = None
             recording_frame = None
@@ -640,18 +641,14 @@ class CameraProcess(WorkerProcess):
                         topic, message = zmq_sub.recv_multipart(flags=zmq.NOBLOCK)
                         topic_str = topic.decode()
                         if topic_str == "kill":
-                            _finish_recording()
+                            _finish_recording("kill")
                             self.logger.info("Received kill signal during recording")
                             break
                         elif topic_str == zmq_config.zone_exit_topic:
                             msg = json.loads(message.decode())
                             if msg["obj_id"] == recording_obj_id:
-                                self.logger.info(
-                                    "ZONE_EXIT obj_id=%s reason=%s — stopping recording",
-                                    msg["obj_id"],
-                                    msg.get("reason", "unknown"),
-                                )
-                                _finish_recording()
+                                exit_reason = msg.get("reason", "unknown")
+                                _finish_recording(exit_reason)
                     except zmq.Again:
                         pass
 
@@ -661,7 +658,7 @@ class CameraProcess(WorkerProcess):
                             "Buffer full (%d frames), forcing recording stop",
                             buf_size,
                         )
-                        _finish_recording()
+                        _finish_recording("buffer_full")
 
                 # Periodic FPS reporting (only when debug logging is active)
                 if _debug and total_frames % FPS_WINDOW == 0:
@@ -685,7 +682,7 @@ class CameraProcess(WorkerProcess):
         finally:
             # If we were recording, flush the buffer
             if state == RECORDING and buf_idx > 0:
-                _finish_recording()
+                _finish_recording("shutdown")
 
             cam.stop_acquisition()
             cam.close_device()
