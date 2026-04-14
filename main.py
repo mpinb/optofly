@@ -21,7 +21,7 @@ from src.processes.camera import RustCameraProcess as CameraProcess
 from src.processes.lens import LiquidLens
 from src.utils.braid import check_braid_folder_exists, copy_csv_files_to_braid
 from src.utils.logger import setup_file_logging
-from src.utils.metadata import collect_metadata, write_metadata
+from src.utils.metadata import collect_metadata, write_metadata, append_metadata_to_csv
 from src.utils.worker import WorkerProcess
 from src.monitoring.server import run_server
 
@@ -194,6 +194,7 @@ def main():
     # Write metadata to braid folder if it was collected
     if metadata is not None:
         write_metadata(metadata, braid_folder)
+        append_metadata_to_csv(metadata, braid_folder)
     experiment_end_time = datetime.now().timestamp() + experiment_duration * 3600
     print(f"Experiment duration set to {experiment_duration} hours.")
     print(

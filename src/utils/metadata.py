@@ -8,6 +8,7 @@ and writes them to experiment_data.toml in the braid recording folder.
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+import csv
 
 
 def collect_metadata() -> dict[str, Any]:
@@ -114,3 +115,41 @@ def write_metadata(metadata: dict[str, Any], braid_folder: str) -> None:
 
     output_file.write_text("".join(toml_lines))
     print(f"✓ Metadata written to {output_file}")
+
+
+def append_metadata_to_csv(metadata: dict[str, Any], braid_folder: str) -> None:
+    """
+    Append experiment metadata to a central CSV file in the user's home directory.
+
+    Args:
+        metadata: Dict with experiment metadata fields
+        braid_folder: Path to the .braid recording folder
+    """
+    csv_path = Path.home() / "optofly_experiments.csv"
+
+    # Derive the .braidz filename
+    braid_name = Path(braid_folder).name
+    if braid_name.endswith(".braid"):
+        braid_file = braid_name.replace(".braid", ".braidz")
+    else:
+        braid_file = f"{braid_name}.braidz"
+
+    # Prepare row data
+    row = metadata.copy()
+    row["braid_file"] = braid_file
+
+    file_exists = csv_path.exists() and csv_path.stat().st_size > 0
+
+    try:
+        with open(csv_path, mode="a", newline="") as f:
+            # Fieldnames: metadata keys + braid_file
+            fieldnames = list(metadata.keys()) + ["braid_file"]
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+
+            if not file_exists:
+                writer.writeheader()
+
+            writer.writerow(row)
+        print(f"✓ Metadata appended to {csv_path}")
+    except Exception as e:
+        print(f"⚠ WARNING: Failed to append metadata to {csv_path}: {e}")
