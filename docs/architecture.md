@@ -16,14 +16,24 @@ TriggerHandler (src/processes/tracking.py)
       4. Velocity must be in [min_velocity, max_velocity] range
       5. Must be heading toward arena center (within heading_cone_deg)
     |
-    | ZMQ PUB (topics: ZONE_ENTER / ZONE_EXIT, port: 5556)
+    | ZMQ PUB (topics: PRE_ZONE_ENTER / PRE_ZONE_EXIT
+    |                   ZONE_ENTER / ZONE_EXIT, port: 5556)
     |
-    +---> CameraProcess        (records while fly is in zone)
-    +---> LiquidLens           (tracks focus while fly is in zone)
-    +---> OptoTriggerWorker    (one-shot LED on ZONE_ENTER)
-    +---> VisualStimuliProcess (one-shot stimulus on ZONE_ENTER)
+    +---> RustCameraProcess    (starts recording on PRE_ZONE_ENTER; stamps trigger frame on ZONE_ENTER)
+    +---> LiquidLens           (starts pre-focusing on PRE_ZONE_ENTER; tracks via BRAID until ZONE_EXIT)
+    +---> OptoTriggerWorker    (one-shot LED on ZONE_ENTER only)
+    +---> VisualStimuliProcess (one-shot stimulus on ZONE_ENTER only)
     +---> Monitoring Server    (web dashboard, optional)
 ```
+
+### Pre-Trigger Zone
+
+TriggerHandler maintains two concentric zones:
+
+- **Pre-trigger zone** (outer): camera FOV expanded by `pre_zone_expansion` metres on each side and in z. Fires `PRE_ZONE_ENTER` / `PRE_ZONE_EXIT`. The camera starts recording and the liquid lens starts adjusting focus here, giving the lens time to settle before the fly reaches the actual trigger zone.
+- **Trigger zone** (inner): the camera FOV itself. Fires `ZONE_ENTER` / `ZONE_EXIT`. Opto and visual stimuli activate here.
+
+Both zones apply the same five entry gates. Setting `pre_zone_expansion = 0` makes the zones identical, restoring single-zone behaviour.
 
 ## Process Model
 
@@ -32,11 +42,11 @@ All processes inherit from `WorkerProcess` (`src/utils/worker.py`) and run as `m
 | Process | ZMQ Role | Source |
 |---------|----------|--------|
 | BraidPublisher | PUB on port 5555 (topic: BRAID) | `src/processes/braid.py` |
-| TriggerHandler | SUB on 5555, PUB on 5556 (topics: ZONE_ENTER, ZONE_EXIT) | `src/processes/tracking.py` |
-| CameraProcess | SUB on 5556 (ZONE_ENTER, ZONE_EXIT, kill) | `src/processes/camera.py` |
-| OptoTriggerWorker | SUB on 5556 (ZONE_ENTER) | `src/processes/led.py` |
-| VisualStimuliProcess | SUB on 5556 (ZONE_ENTER) | `src/processes/visual.py` |
-| LiquidLens | SUB on 5555 (BRAID) + 5556 (ZONE_ENTER, ZONE_EXIT) | `src/processes/lens.py` |
+| TriggerHandler | SUB on 5555, PUB on 5556 (topics: PRE_ZONE_ENTER, PRE_ZONE_EXIT, ZONE_ENTER, ZONE_EXIT) | `src/processes/tracking.py` |
+| RustCameraProcess | SUB on 5556 (PRE_ZONE_ENTER, PRE_ZONE_EXIT, ZONE_ENTER, ZONE_EXIT, kill) | `src/processes/camera.py` |
+| OptoTriggerWorker | SUB on 5556 (ZONE_ENTER only) | `src/processes/led.py` |
+| VisualStimuliProcess | SUB on 5556 (ZONE_ENTER only) | `src/processes/visual.py` |
+| LiquidLens | SUB on 5555 (BRAID) + 5556 (PRE_ZONE_ENTER, PRE_ZONE_EXIT, ZONE_ENTER, ZONE_EXIT) | `src/processes/lens.py` |
 | Monitoring Server | SUB on 5556 (ZONE_ENTER, ZONE_EXIT) | `src/monitoring/server.py` |
 
 ## ZMQ Message Formats
@@ -46,7 +56,7 @@ All processes inherit from `WorkerProcess` (`src/utils/worker.py`) and run as `m
 {"Update": {"obj_id": 1, "x": 0.01, "y": -0.02, "z": 0.18, ...}}
 ```
 
-**ZONE_ENTER topic** (TriggerHandler → consumers):
+**ZONE_ENTER / PRE_ZONE_ENTER topics** (TriggerHandler → consumers, identical format):
 ```json
 {
   "obj_id": 1,
@@ -59,7 +69,7 @@ All processes inherit from `WorkerProcess` (`src/utils/worker.py`) and run as `m
 }
 ```
 
-**ZONE_EXIT topic** (TriggerHandler → camera, lens):
+**ZONE_EXIT / PRE_ZONE_EXIT topics** (TriggerHandler → camera, lens, identical format):
 ```json
 {
   "obj_id": 1,
@@ -91,6 +101,7 @@ Key parameters in `[trigger_handler]` section:
 | `min_tracking_age` | 0.1 s | Object age before it can trigger (noise filter) |
 | `zone_timeout` | 2.0 s | Global timeout: auto-ZONE_EXIT if tracking lost; also used by camera (buffer sizing) and liquid lens (focus tracking) |
 | `refractory_period` | 10.0 s | Global cooldown between ZONE_ENTER events |
+| `pre_zone_expansion` | 0.0 m | Extra metres added to each FOV edge and z bound to form the outer pre-trigger zone. `0` disables pre-triggering. |
 
 The trigger zone's x/y bounds are sourced from the camera FOV (not configurable separately). The `zone_timeout` value is the single source of truth — CameraProcess and LiquidLens read it from `[trigger_handler]` rather than maintaining separate timeouts.
 
@@ -115,5 +126,5 @@ All five gates must pass in sequence to emit ZONE_ENTER. If any gate fails, the 
 - The ZMQ BRAID feed is only live when the full stack is running. Standalone tools that need tracking data must connect directly to the Braid HTTP SSE endpoint (`http://<braid_url>/events`).
 - BraidPublisher reads from `http://<url>/events` as a streaming SSE connection and re-publishes via ZMQ.
 - All inter-process communication is one-way (pub/sub). Processes do not acknowledge zone events.
-- Camera and LiquidLens use both ZONE_ENTER and ZONE_EXIT (continuous tracking). OptoTrigger and VisualStimuli are one-shot (ZONE_ENTER only).
-- ZONE_EXIT is emitted immediately when an object leaves the spatial zone, or after `zone_timeout` (default 2s) if tracking is lost.
+- RustCameraProcess and LiquidLens respond to PRE_ZONE_ENTER/EXIT (and ZONE_ENTER/EXIT). OptoTrigger and VisualStimuli are one-shot on ZONE_ENTER only.
+- ZONE_EXIT is emitted immediately when an object leaves the spatial zone, or after `zone_timeout` (default 2s) if tracking is lost. PRE_ZONE_EXIT follows the same logic for the outer zone.

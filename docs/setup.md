@@ -56,6 +56,7 @@ z_min = 0.15                # Minimum z for trigger (m)
 z_max = 0.25                # Maximum z for trigger (m)
 heading_cone_deg = 45.0     # Heading tolerance from center-directed (degrees)
 min_velocity = 0.01         # Min velocity threshold (m/s)
+pre_zone_expansion = 0.01   # Extra metres added to each FOV edge for the pre-trigger zone
 
 [camera]
 active = true
