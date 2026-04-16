@@ -90,6 +90,10 @@ class TriggerHandlerConfig(ConfigBase):
         # trigger ZONE_ENTER (filters transient noise detections).
         self.min_tracking_age: float = float(config.get("min_tracking_age", 0.1))
 
+        # Pre-zone expansion: metres added to each FOV edge and z bound for
+        # camera/lens pre-triggering. 0.0 = no expansion (identical to old behaviour).
+        self.pre_zone_expansion: float = float(config.get("pre_zone_expansion", 0.0))
+
         # Communication settings reused across processes
         self.zmq = ZMQConfig(config_path)
 
@@ -164,6 +168,8 @@ class ZMQConfig(ConfigBase):
         self.braid_topic: str = config["braid_topic"]
         self.zone_enter_topic: str = config.get("zone_enter_topic", "ZONE_ENTER")
         self.zone_exit_topic: str = config.get("zone_exit_topic", "ZONE_EXIT")
+        self.pre_zone_enter_topic: str = config.get("pre_zone_enter_topic", "PRE_ZONE_ENTER")
+        self.pre_zone_exit_topic: str  = config.get("pre_zone_exit_topic",  "PRE_ZONE_EXIT")
 
         # Validate configuration
         self._validate_config()

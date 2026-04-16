@@ -134,6 +134,11 @@ class LiquidLens(WorkerProcess):
         self.csv_writer = None
         self.kalman_filters = {}
 
+        # Per-recording timing state (reset on each PRE_ZONE_ENTER / ZONE_ENTER)
+        self._timing_rows: list = []
+        self._recording_obj_id: Optional[int] = None
+        self._recording_frame: Optional[int] = None
+
     def initialize(self):
         """
         Initialize the process.
@@ -196,6 +201,32 @@ class LiquidLens(WorkerProcess):
         row.update(kwargs)
         self.csv_writer.append(row)
 
+    def _flush_timing_csv(self):
+        """Write the per-recording lens timing rows to a CSV alongside the video files."""
+        if not self._timing_rows:
+            return
+        if self._recording_obj_id is None:
+            return
+
+        save_folder = self.camera_config.save_folder
+        fname = f"obj_id_{self._recording_obj_id}_frame_{self._recording_frame}_lens_timing.csv"
+        csv_path = os.path.join(save_folder, fname)
+        try:
+            os.makedirs(save_folder, exist_ok=True)
+            df = pd.DataFrame(self._timing_rows)
+            df.to_csv(csv_path, index=False)
+            self.logger.info(
+                f"Lens timing CSV written: {csv_path} ({len(df)} rows, "
+                f"mean delay={df['delay_ms'].mean():.2f} ms, "
+                f"max delay={df['delay_ms'].max():.2f} ms)"
+            )
+        except Exception as e:
+            self.logger.error(f"Error writing lens timing CSV {csv_path}: {e}")
+        finally:
+            self._timing_rows = []
+            self._recording_obj_id = None
+            self._recording_frame = None
+
     def _initialize_calibration_model(self):
         """
         Initialize the lens calibration model.
@@ -232,6 +263,12 @@ class LiquidLens(WorkerProcess):
             )
             self.trigger_socket.setsockopt_string(
                 zmq.SUBSCRIBE, self.zmq_config.zone_exit_topic
+            )
+            self.trigger_socket.setsockopt_string(
+                zmq.SUBSCRIBE, self.zmq_config.pre_zone_enter_topic
+            )
+            self.trigger_socket.setsockopt_string(
+                zmq.SUBSCRIBE, self.zmq_config.pre_zone_exit_topic
             )
             self.logger.debug(
                 "Connected to BraidPublisher and TriggerHandler (zone events)."
@@ -477,36 +514,47 @@ class LiquidLens(WorkerProcess):
                 topic, raw_msg = self._receive_message(self.trigger_socket, "trigger")
                 if topic is not None and raw_msg is not None:
                     if (
-                        topic == self.zmq_config.zone_enter_topic
+                        topic in (self.zmq_config.zone_enter_topic, self.zmq_config.pre_zone_enter_topic)
                         and not self.is_tracking
                     ):
                         obj_id = raw_msg.get("obj_id")
                         if obj_id is not None:
+                            event_name = "PRE_ZONE_ENTER" if topic == self.zmq_config.pre_zone_enter_topic else "ZONE_ENTER"
                             self.logger.info(
-                                f"ZONE_ENTER: start tracking object {obj_id}"
+                                f"{event_name}: start tracking object {obj_id}"
                             )
                             self.is_tracking = True
                             self.current_tracked_obj = obj_id
                             self.last_position_time = time.time()
-                            self._log_csv("zone_enter", obj_id=obj_id)
-                    elif topic == self.zmq_config.zone_exit_topic and self.is_tracking:
+                            self._log_csv(event_name.lower(), obj_id=obj_id)
+                            # Reset per-recording timing buffer
+                            self._timing_rows = []
+                            self._recording_obj_id = obj_id
+                            self._recording_frame = raw_msg.get("frame")
+                    elif (
+                        topic in (self.zmq_config.zone_exit_topic, self.zmq_config.pre_zone_exit_topic)
+                        and self.is_tracking
+                    ):
                         if raw_msg.get("obj_id") == self.current_tracked_obj:
                             reason = raw_msg.get("reason", "unknown")
+                            event_name = "PRE_ZONE_EXIT" if topic == self.zmq_config.pre_zone_exit_topic else "ZONE_EXIT"
                             self.logger.info(
-                                f"ZONE_EXIT: stop tracking object {self.current_tracked_obj} "
+                                f"{event_name}: stop tracking object {self.current_tracked_obj} "
                                 f"reason={reason}"
                             )
                             self._log_csv(
-                                "zone_exit",
+                                event_name.lower(),
                                 obj_id=self.current_tracked_obj,
                                 reason=reason,
                             )
+                            self._flush_timing_csv()
                             self._clear_kalman_filter(self.current_tracked_obj)
                             self.is_tracking = False
                             self.current_tracked_obj = None
 
                 # --- If tracking, process BRAID updates for lens adjustment ---
                 if self.is_tracking:
+                    t_braid_received = time.time()
                     _, braid_raw = self._receive_message(self.braid_socket, "braid")
                     braid_data = self._parse_message(braid_raw, "braid")
 
@@ -521,6 +569,7 @@ class LiquidLens(WorkerProcess):
                                 obj_id=self.current_tracked_obj,
                                 reason="position_timeout",
                             )
+                            self._flush_timing_csv()
                             self._clear_kalman_filter(self.current_tracked_obj)
                             self.is_tracking = False
                             self.current_tracked_obj = None
@@ -541,6 +590,7 @@ class LiquidLens(WorkerProcess):
                             obj_id=self.current_tracked_obj,
                             reason="object_death",
                         )
+                        self._flush_timing_csv()
                         self._clear_kalman_filter(self.current_tracked_obj)
                         self.is_tracking = False
                         self.current_tracked_obj = None
@@ -584,8 +634,11 @@ class LiquidLens(WorkerProcess):
 
                         dpt = self.lens_calibration.get_dpt(focus_position)
                         self.lens_driver.set_diopter(dpt)
+                        t_diopter_sent = time.time()
+                        delay_ms = (t_diopter_sent - t_braid_received) * 1000.0
                         self.logger.debug(
-                            f"Setting lens to {dpt} diopters for z={focus_position}"
+                            f"Setting lens to {dpt} diopters for z={focus_position} "
+                            f"(delay={delay_ms:.2f} ms)"
                         )
                         self._log_csv(
                             "focus",
@@ -597,6 +650,19 @@ class LiquidLens(WorkerProcess):
                             diopter=dpt,
                             kalman=self.lens_config.kalman_enabled,
                         )
+                        self._timing_rows.append({
+                            "t_braid_received": t_braid_received,
+                            "t_diopter_sent": t_diopter_sent,
+                            "delay_ms": delay_ms,
+                            "frame": braid_data.get("frame"),
+                            "obj_id": self.current_tracked_obj,
+                            "x": x,
+                            "y": y,
+                            "z": z,
+                            "focus_z": focus_position,
+                            "diopter": dpt,
+                            "kalman": self.lens_config.kalman_enabled,
+                        })
                     except Exception as e:
                         self.logger.error(f"Error adjusting lens: {e}")
 

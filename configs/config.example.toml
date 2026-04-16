@@ -15,6 +15,8 @@ trigger_port = 5556
 braid_topic = "BRAID"
 zone_enter_topic = "ZONE_ENTER"
 zone_exit_topic = "ZONE_EXIT"
+pre_zone_enter_topic = "PRE_ZONE_ENTER"
+pre_zone_exit_topic  = "PRE_ZONE_EXIT"
 
 [logging]
 # Global logging level
@@ -48,6 +50,7 @@ max_velocity = 2.0               # Maximum velocity to filter noise (m/s)
 min_tracking_age = 0.1           # Object must exist this long before triggering (seconds)
 zone_timeout = 2.0               # Auto ZONE_EXIT if no updates for this long (seconds)
 refractory_period = 10.0         # Global cooldown between ZONE_ENTER events (seconds)
+pre_zone_expansion = 0.01        # metres added to each FOV edge and z bound for camera/lens pre-trigger
 
 [camera]
 # High-speed camera settings

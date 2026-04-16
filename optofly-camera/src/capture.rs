@@ -35,6 +35,12 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
         .set_subscribe(cfg.zmq_zone_exit_topic.as_bytes())
         .map_err(|e| format!("ZMQ subscribe error: {}", e))?;
     zmq_sub
+        .set_subscribe(cfg.zmq_pre_zone_enter_topic.as_bytes())
+        .map_err(|e| format!("ZMQ subscribe error: {}", e))?;
+    zmq_sub
+        .set_subscribe(cfg.zmq_pre_zone_exit_topic.as_bytes())
+        .map_err(|e| format!("ZMQ subscribe error: {}", e))?;
+    zmq_sub
         .set_subscribe(b"kill")
         .map_err(|e| format!("ZMQ subscribe error: {}", e))?;
     log::info!("ZMQ connected to {}", cfg.zmq_trigger_address);
@@ -132,6 +138,10 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
     let mut rec_dropped: u64 = 0;
     let mut rec_prev_nframe: Option<u32> = None;
     let mut total_frames: u64 = 0;
+    // Frame index within the current recording buffer at which the real ZONE_ENTER
+    // fired. None means recording started from PRE_ZONE_ENTER and the real trigger
+    // has not arrived yet.
+    let mut trigger_frame_idx: Option<u64> = None;
 
     // --- Start acquisition (consumes cam, returns AcquisitionBuffer) ---
     let acq = cam
@@ -185,16 +195,17 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
 
         match state {
             State::Idle => {
-                // Poll ZMQ for ZONE_ENTER or kill
+                // Poll ZMQ for PRE_ZONE_ENTER, ZONE_ENTER, or kill
                 if let Ok(parts) = zmq_sub.recv_multipart(zmq::DONTWAIT) {
                     if !parts.is_empty() {
                         let topic = String::from_utf8_lossy(&parts[0]);
                         if topic == "kill" {
                             log::info!("Received kill signal");
                             break;
-                        } else if topic.as_ref() == cfg.zmq_zone_enter_topic
+                        } else if topic.as_ref() == cfg.zmq_pre_zone_enter_topic
                             && parts.len() >= 2
                         {
+                            // PRE_ZONE_ENTER: start recording early; real ZONE_ENTER not yet seen
                             let msg: serde_json::Value =
                                 serde_json::from_slice(&parts[1]).unwrap_or_default();
                             recording_obj_id = msg["obj_id"].as_u64().unwrap_or(0);
@@ -203,6 +214,32 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                                 buf.reset();
                                 rec_dropped = 0;
                                 rec_prev_nframe = None;
+                                trigger_frame_idx = None;
+                                state = State::Recording;
+                                log::info!(
+                                    "PRE_ZONE_ENTER obj_id={} — started recording early (max {} frames)",
+                                    recording_obj_id,
+                                    buf_capacity
+                                );
+                            } else {
+                                log::warn!(
+                                    "PRE_ZONE_ENTER obj_id={} — no buffer available, skipping",
+                                    recording_obj_id
+                                );
+                            }
+                        } else if topic.as_ref() == cfg.zmq_zone_enter_topic
+                            && parts.len() >= 2
+                        {
+                            // ZONE_ENTER in IDLE: backward-compat path (pre_zone_expansion = 0)
+                            let msg: serde_json::Value =
+                                serde_json::from_slice(&parts[1]).unwrap_or_default();
+                            recording_obj_id = msg["obj_id"].as_u64().unwrap_or(0);
+                            recording_frame = msg["frame"].as_u64().unwrap_or(0);
+                            if let Some(ref mut buf) = buffers[active_idx] {
+                                buf.reset();
+                                rec_dropped = 0;
+                                rec_prev_nframe = None;
+                                trigger_frame_idx = Some(0);
                                 state = State::Recording;
                                 log::info!(
                                     "ZONE_ENTER obj_id={} — started recording (max {} frames)",
@@ -250,7 +287,7 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                     }
                 }
 
-                // Poll ZMQ for ZONE_EXIT or kill
+                // Poll ZMQ for ZONE_ENTER, ZONE_EXIT, PRE_ZONE_EXIT, or kill
                 if let Ok(parts) = zmq_sub.recv_multipart(zmq::DONTWAIT) {
                     if !parts.is_empty() {
                         let topic = String::from_utf8_lossy(&parts[0]);
@@ -267,10 +304,28 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                                 width,
                                 height,
                                 rec_dropped,
+                                trigger_frame_idx,
                                 "kill",
                             );
+                            trigger_frame_idx = None;
                             log::info!("Received kill signal during recording");
                             break;
+                        } else if topic.as_ref() == cfg.zmq_zone_enter_topic && parts.len() >= 2 {
+                            // Real ZONE_ENTER while already recording (started by PRE_ZONE_ENTER)
+                            let msg: serde_json::Value =
+                                serde_json::from_slice(&parts[1]).unwrap_or_default();
+                            if msg["obj_id"].as_u64().unwrap_or(0) == recording_obj_id {
+                                let idx = buffers[active_idx]
+                                    .as_ref()
+                                    .map_or(0, |b| b.filled() as u64);
+                                trigger_frame_idx = Some(idx);
+                                log::warn!(
+                                    "ZONE_ENTER obj_id={} at frame {} ({} pre-trigger frames)",
+                                    recording_obj_id,
+                                    idx,
+                                    idx,
+                                );
+                            }
                         } else if topic.as_ref() == cfg.zmq_zone_exit_topic && parts.len() >= 2 {
                             let msg: serde_json::Value =
                                 serde_json::from_slice(&parts[1]).unwrap_or_default();
@@ -288,8 +343,39 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                                     width,
                                     height,
                                     rec_dropped,
+                                    trigger_frame_idx,
                                     reason,
                                 );
+                                trigger_frame_idx = None;
+                            }
+                        } else if topic.as_ref() == cfg.zmq_pre_zone_exit_topic
+                            && parts.len() >= 2
+                            && trigger_frame_idx.is_none()
+                        {
+                            // Fly left pre-zone before reaching real trigger zone — abort
+                            let msg: serde_json::Value =
+                                serde_json::from_slice(&parts[1]).unwrap_or_default();
+                            if msg["obj_id"].as_u64().unwrap_or(0) == recording_obj_id {
+                                log::info!(
+                                    "PRE_ZONE_EXIT obj_id={} before real ZONE_ENTER — stopping recording",
+                                    recording_obj_id
+                                );
+                                finish_recording(
+                                    &mut buffers,
+                                    &mut active_idx,
+                                    &mut state,
+                                    &encoder_tx,
+                                    recording_obj_id,
+                                    recording_frame,
+                                    &cfg.save_folder,
+                                    fps,
+                                    width,
+                                    height,
+                                    rec_dropped,
+                                    trigger_frame_idx,
+                                    "left_pre_zone",
+                                );
+                                trigger_frame_idx = None;
                             }
                         }
                     }
@@ -317,8 +403,10 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                             width,
                             height,
                             rec_dropped,
+                            trigger_frame_idx,
                             "buffer_full",
                         );
+                        trigger_frame_idx = None;
                     }
                 }
             }
@@ -342,6 +430,7 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
             width,
             height,
             rec_dropped,
+            trigger_frame_idx,
             "shutdown",
         );
     }
@@ -369,6 +458,7 @@ fn finish_recording(
     width: u32,
     height: u32,
     rec_dropped: u64,
+    trigger_frame_idx: Option<u64>,
     reason: &str,
 ) {
     let n_filled = buffers[*active_idx]
@@ -414,10 +504,16 @@ fn finish_recording(
         buf.reset();
     }
     *state = State::Idle;
+
+    let trigger_info = match trigger_frame_idx {
+        Some(idx) => format!("trigger_frame={}", idx),
+        None => "trigger_frame=none(no_zone_enter)".to_string(),
+    };
     log::warn!(
-        "Recording done: {} frames, {} dropped, reason={}, back to IDLE",
+        "Recording done: {} frames, {} dropped, {}, reason={}, back to IDLE",
         n_filled,
         rec_dropped,
+        trigger_info,
         reason
     );
 }

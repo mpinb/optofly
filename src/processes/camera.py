@@ -444,12 +444,16 @@ class CameraProcess(WorkerProcess):
         zmq_sub.connect(zmq_config.get_subscriber_address(zmq_config.trigger_port))
         zmq_sub.setsockopt_string(zmq.SUBSCRIBE, zmq_config.zone_enter_topic)
         zmq_sub.setsockopt_string(zmq.SUBSCRIBE, zmq_config.zone_exit_topic)
+        zmq_sub.setsockopt_string(zmq.SUBSCRIBE, zmq_config.pre_zone_enter_topic)
+        zmq_sub.setsockopt_string(zmq.SUBSCRIBE, zmq_config.pre_zone_exit_topic)
         zmq_sub.setsockopt_string(zmq.SUBSCRIBE, "kill")
         self.logger.info(
-            "ZMQ SUB connected to trigger port %d (topics: %s, %s, kill)",
+            "ZMQ SUB connected to trigger port %d (topics: %s, %s, %s, %s, kill)",
             zmq_config.trigger_port,
             zmq_config.zone_enter_topic,
             zmq_config.zone_exit_topic,
+            zmq_config.pre_zone_enter_topic,
+            zmq_config.pre_zone_exit_topic,
         )
 
         # --- Camera setup ---
@@ -540,6 +544,7 @@ class CameraProcess(WorkerProcess):
         buf_idx = 0  # current write index in active buffer (reset on each recording)
         recording_obj_id = None
         recording_frame = None
+        trigger_frame_idx: Optional[int] = None  # buf_idx when real ZONE_ENTER fires
         rec_dropped = 0
         rec_prev_nframe = None
         total_frames = 0
@@ -552,7 +557,7 @@ class CameraProcess(WorkerProcess):
 
         def _finish_recording(reason: str = "unknown"):
             """Flush current buffer to encoder and swap to standby."""
-            nonlocal active_idx, buf_idx, state, recording_obj_id, recording_frame, rec_dropped
+            nonlocal active_idx, buf_idx, state, recording_obj_id, recording_frame, rec_dropped, trigger_frame_idx
             n_filled = buf_idx
             if n_filled == 0:
                 self.logger.warning("Recording ended with 0 frames, skipping encode")
@@ -583,6 +588,7 @@ class CameraProcess(WorkerProcess):
             )
             recording_obj_id = None
             recording_frame = None
+            trigger_frame_idx = None
 
         try:
             cam.start_acquisition()
@@ -594,21 +600,38 @@ class CameraProcess(WorkerProcess):
 
                 # --- State machine ---
                 if state == IDLE:
-                    # Not recording — poll ZMQ for ZONE_ENTER (every frame is fine,
-                    # no buffer write overhead while idle)
+                    # Not recording — poll ZMQ for PRE_ZONE_ENTER or ZONE_ENTER
+                    # (every frame is fine, no buffer write overhead while idle)
                     try:
                         topic, message = zmq_sub.recv_multipart(flags=zmq.NOBLOCK)
                         topic_str = topic.decode()
                         if topic_str == "kill":
                             self.logger.info("Received kill signal")
                             break
-                        elif topic_str == zmq_config.zone_enter_topic:
+                        elif topic_str == zmq_config.pre_zone_enter_topic:
+                            # PRE_ZONE_ENTER: start recording early; real ZONE_ENTER not yet seen
                             msg = json.loads(message.decode())
                             recording_obj_id = msg["obj_id"]
                             recording_frame = msg.get("frame", 0)
                             buf_idx = 0
                             rec_dropped = 0
                             rec_prev_nframe = None
+                            trigger_frame_idx = None  # will be set on real ZONE_ENTER
+                            state = RECORDING
+                            self.logger.info(
+                                "PRE_ZONE_ENTER obj_id=%s — started recording early (max %d frames)",
+                                recording_obj_id,
+                                buf_size,
+                            )
+                        elif topic_str == zmq_config.zone_enter_topic:
+                            # ZONE_ENTER in IDLE: backward compat (pre_zone_expansion=0)
+                            msg = json.loads(message.decode())
+                            recording_obj_id = msg["obj_id"]
+                            recording_frame = msg.get("frame", 0)
+                            buf_idx = 0
+                            rec_dropped = 0
+                            rec_prev_nframe = None
+                            trigger_frame_idx = 0  # recording started at real trigger
                             state = RECORDING
                             self.logger.info(
                                 "ZONE_ENTER obj_id=%s — started recording (max %d frames)",
@@ -639,7 +662,7 @@ class CameraProcess(WorkerProcess):
                     )
                     buf_idx += 1
 
-                    # Poll ZMQ every frame — need to catch ZONE_EXIT promptly
+                    # Poll ZMQ every frame — need to catch ZONE_EXIT / PRE_ZONE_EXIT promptly
                     try:
                         topic, message = zmq_sub.recv_multipart(flags=zmq.NOBLOCK)
                         topic_str = topic.decode()
@@ -647,10 +670,31 @@ class CameraProcess(WorkerProcess):
                             _finish_recording("kill")
                             self.logger.info("Received kill signal during recording")
                             break
+                        elif topic_str == zmq_config.zone_enter_topic:
+                            # Real ZONE_ENTER while already recording (started by PRE_ZONE_ENTER)
+                            msg = json.loads(message.decode())
+                            if msg["obj_id"] == recording_obj_id:
+                                trigger_frame_idx = buf_idx
+                                self.logger.info(
+                                    "ZONE_ENTER obj_id=%s at buf_idx=%d (pre-trigger frames=%d)",
+                                    recording_obj_id,
+                                    trigger_frame_idx,
+                                    trigger_frame_idx,
+                                )
                         elif topic_str == zmq_config.zone_exit_topic:
                             msg = json.loads(message.decode())
                             if msg["obj_id"] == recording_obj_id:
                                 exit_reason = msg.get("reason", "unknown")
+                                _finish_recording(exit_reason)
+                        elif topic_str == zmq_config.pre_zone_exit_topic:
+                            msg = json.loads(message.decode())
+                            if msg["obj_id"] == recording_obj_id and trigger_frame_idx is None:
+                                # Fly left pre-zone without ever reaching real zone — stop recording
+                                exit_reason = msg.get("reason", "left_pre_zone")
+                                self.logger.info(
+                                    "PRE_ZONE_EXIT obj_id=%s before real ZONE_ENTER — stopping recording",
+                                    recording_obj_id,
+                                )
                                 _finish_recording(exit_reason)
                     except zmq.Again:
                         pass
