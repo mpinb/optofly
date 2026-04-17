@@ -651,6 +651,8 @@ class LiquidLens(WorkerProcess):
                             kalman=self.lens_config.kalman_enabled,
                         )
                         self._timing_rows.append({
+                            "t_braid": braid_data.get("timestamp"),
+                            "t_relay": braid_data.get("t_relay"),
                             "t_braid_received": t_braid_received,
                             "t_diopter_sent": t_diopter_sent,
                             "delay_ms": delay_ms,

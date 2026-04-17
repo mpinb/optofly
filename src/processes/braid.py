@@ -226,6 +226,8 @@ class BraidPublisher(WorkerProcess):
                         data = parse_chunk(chunk)
 
                         if "msg" in data and self.zmq_socket is not None:
+                            # Inject relay wall-clock time for latency profiling
+                            data["msg"]["t_relay"] = time.time()
                             # Publish to ZMQ
                             message = json.dumps(data["msg"])
                             self.zmq_socket.send_multipart([
