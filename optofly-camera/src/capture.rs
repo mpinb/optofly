@@ -482,6 +482,7 @@ fn finish_recording(
         fps,
         width,
         height,
+        trigger_frame_idx,
     }) {
         Ok(()) => {}
         Err(std::sync::mpsc::TrySendError::Full(job)) => {

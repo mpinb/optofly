@@ -209,7 +209,7 @@ def encoder_loop(
 ) -> None:
     """Persistent encoder thread.
 
-    Pulls (buf, meta, n_filled, base_name) from queue.
+    Pulls (buf, meta, n_filled, base_name, trigger_frame_idx) from queue.
     Pipes raw frames to ffmpeg stdin (linear buffer, no ring indexing).
     """
     use_nvenc = _detect_nvenc()
@@ -217,7 +217,7 @@ def encoder_loop(
 
     while not done_event.is_set() or not q.empty():
         try:
-            buf, metadata, n_filled, base_name = q.get(timeout=0.5)
+            buf, metadata, n_filled, base_name, trigger_frame_idx = q.get(timeout=0.5)
         except queue.Empty:
             continue
 
@@ -265,10 +265,10 @@ def encoder_loop(
         # Write CSV metadata (linear order)
         with open(csv_path, "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["frame_idx", "nframe", "ts_sec", "ts_usec", "cam_time_ns"])
+            writer.writerow(["frame_idx", "nframe", "ts_sec", "ts_usec", "cam_time_ns", "trigger_frame_idx"])
             for i in range(n_filled):
                 row = metadata[i]
-                writer.writerow([i, row[0], row[1], row[2], row[3]])
+                writer.writerow([i, row[0], row[1], row[2], row[3], trigger_frame_idx])
 
         save_debug_histograms(metadata, n_filled, base_name)
 
@@ -580,7 +580,7 @@ class CameraProcess(WorkerProcess):
                 self.logger.warning("Encoder busy, skipping this recording")
             else:
                 encode_queue.put(
-                    (buffers[active_idx], meta_buffers[active_idx], n_filled, base_name)
+                    (buffers[active_idx], meta_buffers[active_idx], n_filled, base_name, trigger_frame_idx)
                 )
 
             # Swap to standby buffer
