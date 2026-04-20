@@ -124,8 +124,6 @@ class LiquidLensConfig(ConfigBase):
         trigger_config = TriggerHandlerConfig(config_path)
         self.zone_timeout: float = trigger_config.zone_timeout
 
-        self.n_elements: int = config.get("n_elements", 1000)
-
         # Get camera FOV boundaries from CameraConfig (x/y only — lens uses calibration for z)
         camera_config = CameraConfig(config_path)
         self.fov_x_min = camera_config.fov_x_min
