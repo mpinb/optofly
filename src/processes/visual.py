@@ -536,29 +536,53 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # Load visual stimuli config for calibration helpers
+    def _load_visual_config(config_path: str) -> dict:
+        try:
+            with open(config_path, "rb") as f:
+                main = tomllib.load(f)
+            vs_file = main.get("visual_stimuli", {}).get(
+                "config_file", "configs/visual_stimuli.toml"
+            )
+            vs_path = Path(vs_file)
+            if vs_path.exists():
+                with open(vs_path, "rb") as f:
+                    return tomllib.load(f).get("visual_stimuli", {})
+            return main.get("visual_stimuli", {})
+        except Exception:
+            return {}
+
+    vis_cfg = _load_visual_config(args.config)
+    cal_kwargs = dict(
+        window_width=vis_cfg.get("window_width", 7680),
+        window_height=vis_cfg.get("window_height", 1080),
+        window_x_offset=vis_cfg.get("window_x_offset", 3840),
+        screen_mapping=vis_cfg.get("screen_mapping", ["West", "North", "East", "South"]),
+    )
+
     # Handle calibration modes
     if args.calibrate:
         from src.stimuli.calibration import run_screen_identification
 
-        run_screen_identification()
+        run_screen_identification(**cal_kwargs)
         exit(0)
 
     if args.calibrate_mapping:
         from src.stimuli.calibration import run_heading_calibration
 
-        run_heading_calibration()
+        run_heading_calibration(**cal_kwargs)
         exit(0)
 
     if args.test_calibration:
         from src.stimuli.calibration import run_calibration_test
 
-        run_calibration_test()
+        run_calibration_test(**cal_kwargs)
         exit(0)
 
     if args.test_mapping:
         from src.stimuli.calibration import run_mapping_test
 
-        run_mapping_test()
+        run_mapping_test(**cal_kwargs)
         exit(0)
 
     # TODO: Implement test mode

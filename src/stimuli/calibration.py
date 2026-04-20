@@ -7,20 +7,33 @@ from typing import List
 
 
 def run_screen_identification(
-    window_width: int = 7680, window_height: int = 1080, window_x_offset: int = 3840
+    window_width: int = 7680,
+    window_height: int = 1080,
+    window_x_offset: int = 3840,
+    screen_mapping: List[str] = None,
 ) -> None:
     """Run screen identification calibration mode.
 
-    Displays labels on each screen quadrant for physical identification.
+    Displays labels on each screen so you can verify physical layout matches
+    configs/visual_stimuli.toml screen_mapping. Re-run whenever screens are
+    physically rearranged, then update screen_mapping if needed.
 
     Args:
         window_width: Total display width
         window_height: Display height
         window_x_offset: X offset for window positioning
+        screen_mapping: Ordered list of direction labels (e.g. ["West", "North", "East", "South"])
     """
+    if screen_mapping is None:
+        screen_mapping = ["West", "North", "East", "South"]
+
+    num_screens = len(screen_mapping)
+    screen_width = window_width // num_screens
+
     print("=== Screen Identification Calibration ===")
     print("This will display labels on each screen.")
-    print("Identify which screen is North/East/South/West.")
+    print(f"Current screen_mapping: {screen_mapping}")
+    print("Verify the labels match the physical layout. If not, update screen_mapping in configs/visual_stimuli.toml.")
     print("Press ESC to exit.")
     print()
 
@@ -32,16 +45,15 @@ def run_screen_identification(
     )
     window.set_location(window_x_offset, 0)
 
-    # Create labels for each screen quadrant
+    # Create labels for each screen
     screen_labels = []
-    screen_names = ["DP-0.1", "DP-0.2", "DP-2.1", "DP-2.2"]
 
-    for i, name in enumerate(screen_names):
-        x_center = (i * 1920) + 1920  # Center of each 1920px screen
+    for i, direction in enumerate(screen_mapping):
+        x_center = i * screen_width + screen_width // 2
         y_center = window_height // 2
 
         label = pyglet.text.Label(
-            f"Screen {i + 1}\n{name}",
+            f"Screen {i + 1}\n{direction}",
             font_name="Arial",
             font_size=72,
             x=x_center,
@@ -49,13 +61,13 @@ def run_screen_identification(
             anchor_x="center",
             anchor_y="center",
             multiline=True,
-            width=1920,
+            width=screen_width,
         )
         screen_labels.append(label)
 
     # Instructions at top
     instructions = pyglet.text.Label(
-        "Identify which screen is North/East/South/West, then update configs/config.toml",
+        "Verify labels match physical layout. If not, update screen_mapping in configs/visual_stimuli.toml.",
         font_name="Arial",
         font_size=36,
         x=window_width // 2,
@@ -84,7 +96,7 @@ def run_screen_identification(
     signal.signal(signal.SIGINT, sigint_handler)
 
     print("Displaying screen labels...")
-    print("Update configs/config.toml with screen_mapping after identification.")
+    print("If labels do not match physical layout, update screen_mapping in configs/visual_stimuli.toml.")
     print()
 
     pyglet.app.run()
@@ -94,6 +106,7 @@ def run_heading_calibration(
     window_width: int = 7680,
     window_height: int = 1080,
     window_x_offset: int = 3840,
+    screen_mapping: List[str] = None,
     num_calibration_points: int = 4,
     screen_order: List[int] = None,
     output_file: str = "calibrations/heading_mapping_data.csv",
@@ -106,18 +119,23 @@ def run_heading_calibration(
         window_width: Total display width
         window_height: Display height
         window_x_offset: X offset for window
+        screen_mapping: Ordered list of direction labels per screen slot
         num_calibration_points: Number of calibration circles (minimum 4)
         screen_order: Physical clockwise order of screens by index.
                       Default [0, 1, 2, 3] for standard clockwise setup.
                       Pixel layout: screen 0 (0-1919), 1 (1920-3839), 2 (3840-5759), 3 (5760-7679)
         output_file: CSV file to save calibration data
     """
+    if screen_mapping is None:
+        screen_mapping = ["West", "North", "East", "South"]
+
     # Default screen order: natural pixel order (assumes cables are arranged clockwise)
     if screen_order is None:
-        screen_order = [0, 1, 2, 3]
+        screen_order = list(range(len(screen_mapping)))
 
     print("=== Heading-to-Pixel Calibration (Manual Mode) ===")
     print(f"This will display {num_calibration_points} calibration circles.")
+    print(f"Screen mapping: {screen_mapping}")
     print(f"Screen order (clockwise): {screen_order}")
     print()
     print("For each circle:")
@@ -129,7 +147,7 @@ def run_heading_calibration(
     print()
 
     # Calculate calibration circle positions
-    num_screens = 4
+    num_screens = len(screen_mapping)
     screen_width = window_width // num_screens
     screen_centers = [screen_width * i + screen_width // 2 for i in range(num_screens)]
 
@@ -155,15 +173,12 @@ def run_heading_calibration(
 
         calibration_x_positions = np.array(calibration_x_positions)
 
-    # Screen direction labels (matching configs/visual_stimuli.toml screen_mapping order)
-    screen_directions = ["West", "North", "East", "South"]  # After cable swap
-
     def get_screen_for_pixel(pixel_x):
         return min(pixel_x // screen_width, num_screens - 1)
 
     def get_direction_for_pixel(pixel_x):
         screen_idx = get_screen_for_pixel(pixel_x)
-        return screen_directions[screen_idx]
+        return screen_mapping[screen_idx]
 
     # Create window
     window = pyglet.window.Window(
@@ -307,6 +322,7 @@ def run_calibration_test(
     window_width: int = 7680,
     window_height: int = 1080,
     window_x_offset: int = 3840,
+    screen_mapping: List[str] = None,
     sweep_speed_deg_per_sec: float = 45.0,
 ) -> None:
     """Run a visual test to verify screen arrangement and wrapping.
@@ -324,8 +340,12 @@ def run_calibration_test(
         window_width: Total display width
         window_height: Display height
         window_x_offset: X offset for window
+        screen_mapping: Ordered list of direction labels per screen slot
         sweep_speed_deg_per_sec: Speed of sweep in degrees per second
     """
+    if screen_mapping is None:
+        screen_mapping = ["West", "North", "East", "South"]
+
     print("=== Calibration Test Mode ===")
     print("A circle will sweep clockwise around the display.")
     print()
@@ -343,9 +363,8 @@ def run_calibration_test(
     window.set_location(window_x_offset, 0)
 
     # Screen setup
-    num_screens = 4
+    num_screens = len(screen_mapping)
     screen_width = window_width // num_screens
-    screen_directions = ["West", "North", "East", "South"]
 
     # State
     current_angle_deg = [0.0]  # Use list to allow modification in nested function
@@ -371,7 +390,7 @@ def run_calibration_test(
         # Direction label at center of each screen
         label_x = i * screen_width + screen_width // 2
         label = pyglet.text.Label(
-            screen_directions[i],
+            screen_mapping[i],
             font_name="Arial",
             font_size=48,
             x=label_x,
@@ -496,6 +515,7 @@ def run_mapping_test(
     window_width: int = 7680,
     window_height: int = 1080,
     window_x_offset: int = 3840,
+    screen_mapping: List[str] = None,
 ) -> None:
     """Test the heading-to-pixel calibration mapping.
 
@@ -506,7 +526,11 @@ def run_mapping_test(
         window_width: Total display width
         window_height: Display height
         window_x_offset: X offset for window
+        screen_mapping: Ordered list of direction labels per screen slot
     """
+    if screen_mapping is None:
+        screen_mapping = ["West", "North", "East", "South"]
+
     import os
 
     print("=== Calibration Mapping Test ===")
@@ -539,9 +563,8 @@ def run_mapping_test(
     window.set_location(window_x_offset, 0)
 
     # Screen setup
-    num_screens = 4
+    num_screens = len(screen_mapping)
     screen_width = window_width // num_screens
-    screen_directions = ["West", "North", "East", "South"]
 
     # Graphics
     batch = pyglet.graphics.Batch()
@@ -559,7 +582,7 @@ def run_mapping_test(
             batch=batch,
         )
         pyglet.text.Label(
-            screen_directions[i],
+            screen_mapping[i],
             font_name="Arial",
             font_size=48,
             x=i * screen_width + screen_width // 2,
