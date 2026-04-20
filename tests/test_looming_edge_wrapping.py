@@ -13,7 +13,12 @@ import math
 import time
 import multiprocessing as mp
 import pyglet
-from src.processes.visual_stimuli import VisualStimuliProcess
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.processes.visual import VisualStimuliProcess
 from src.utils.config import ConfigBase
 
 

@@ -33,11 +33,17 @@ struct ZmqToml {
     zone_enter_topic: String,
     #[serde(default = "default_zone_exit_topic")]
     zone_exit_topic: String,
+    #[serde(default = "default_pre_zone_enter_topic")]
+    pre_zone_enter_topic: String,
+    #[serde(default = "default_pre_zone_exit_topic")]
+    pre_zone_exit_topic: String,
 }
 
 fn default_trigger_port() -> u16 { 5556 }
 fn default_zone_enter_topic() -> String { "ZONE_ENTER".to_string() }
 fn default_zone_exit_topic() -> String { "ZONE_EXIT".to_string() }
+fn default_pre_zone_enter_topic() -> String { "PRE_ZONE_ENTER".to_string() }
+fn default_pre_zone_exit_topic() -> String { "PRE_ZONE_EXIT".to_string() }
 
 pub struct AppConfig {
     pub width: u32,
@@ -50,6 +56,8 @@ pub struct AppConfig {
     pub zmq_trigger_address: String,
     pub zmq_zone_enter_topic: String,
     pub zmq_zone_exit_topic: String,
+    pub zmq_pre_zone_enter_topic: String,
+    pub zmq_pre_zone_exit_topic: String,
 }
 
 impl AppConfig {
@@ -82,6 +90,8 @@ impl AppConfig {
             zmq_trigger_address: format!("tcp://localhost:{}", zmq.trigger_port),
             zmq_zone_enter_topic: zmq.zone_enter_topic,
             zmq_zone_exit_topic: zmq.zone_exit_topic,
+            zmq_pre_zone_enter_topic: zmq.pre_zone_enter_topic,
+            zmq_pre_zone_exit_topic: zmq.pre_zone_exit_topic,
         })
     }
 

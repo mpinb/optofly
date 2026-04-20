@@ -56,6 +56,10 @@ class TrackedObject:
     in_zone: bool = False           # ZONE_ENTER has been emitted for this object
     zone_enter_time: Optional[float] = None   # when ZONE_ENTER was emitted
 
+    # Pre-zone membership tracking (expanded zone for camera/lens pre-triggering)
+    in_pre_zone: bool = False
+    pre_zone_enter_time: Optional[float] = None
+
     # Track last time this object was checked
     last_check_time: float = field(default_factory=time.time)
 
@@ -281,6 +285,15 @@ class TriggerHandler(WorkerProcess):
             and self.z_min <= z <= self.z_max
         )
 
+    def is_in_pre_zone(self, x: float, y: float, z: float) -> bool:
+        """Check if a point is within the expanded pre-trigger zone."""
+        exp = self.config.pre_zone_expansion
+        return (
+            self.fov_x_min - exp <= x <= self.fov_x_max + exp
+            and self.fov_y_min - exp <= y <= self.fov_y_max + exp
+            and self.z_min - exp <= z <= self.z_max + exp
+        )
+
     def process_message(self, message_data: Dict[str, Any]) -> None:
         """Process a message from the Braid server."""
         try:
@@ -367,6 +380,10 @@ class TriggerHandler(WorkerProcess):
             obj_id = data if isinstance(data, int) else data.get("obj_id", data)
             if obj_id in self.tracked_objects:
                 tracked_obj = self.tracked_objects[obj_id]
+                if tracked_obj.in_pre_zone:
+                    self._send_pre_zone_exit(tracked_obj, reason="death")
+                    tracked_obj.in_pre_zone = False
+                    tracked_obj.pre_zone_enter_time = None
                 if tracked_obj.in_zone:
                     self._send_zone_exit(tracked_obj, reason="death")
                 self.logger.debug(f"Stopped tracking object {obj_id}")
@@ -436,6 +453,36 @@ class TriggerHandler(WorkerProcess):
             tracked_obj.in_zone = False
             tracked_obj.zone_enter_time = None
 
+        # Pre-zone transitions (for camera/lens pre-triggering)
+        in_pre_zone_now = self.is_in_pre_zone(x, y, z)
+
+        if not tracked_obj.in_pre_zone and in_pre_zone_now:
+            # Same entry gates as ZONE_ENTER
+            age = tracked_obj.get_tracking_duration()
+            if age < self.config.min_tracking_age:
+                pass
+            else:
+                now = time.time()
+                elapsed = now - self._last_zone_enter_time
+                if elapsed < self.refractory_period:
+                    pass
+                else:
+                    mean_vel = tracked_obj.get_mean_velocity()
+                    vel_ok = True
+                    if mean_vel is not None:
+                        speed = np.sqrt(mean_vel[0] ** 2 + mean_vel[1] ** 2)
+                        if speed < self.config.min_velocity or speed > self.config.max_velocity:
+                            vel_ok = False
+                    if vel_ok and tracked_obj.is_heading_toward_center(self.config.heading_threshold):
+                        tracked_obj.in_pre_zone = True
+                        tracked_obj.pre_zone_enter_time = time.time()
+                        self._send_pre_zone_enter(tracked_obj)
+
+        elif tracked_obj.in_pre_zone and not in_pre_zone_now:
+            self._send_pre_zone_exit(tracked_obj, reason="left_pre_zone")
+            tracked_obj.in_pre_zone = False
+            tracked_obj.pre_zone_enter_time = None
+
     def _send_zone_enter(self, tracked_obj: TrackedObject) -> None:
         """Emit a ZONE_ENTER event."""
         try:
@@ -488,6 +535,53 @@ class TriggerHandler(WorkerProcess):
         except Exception as e:
             self.logger.error(f"Error sending ZONE_EXIT: {e}")
 
+    def _send_pre_zone_enter(self, tracked_obj: TrackedObject) -> None:
+        """Emit a PRE_ZONE_ENTER event."""
+        try:
+            mean_heading = tracked_obj.get_mean_heading()
+            message_data = {
+                "obj_id": tracked_obj.obj_id,
+                "frame": tracked_obj.current_frame,
+                "timestamp": time.time(),
+                "x": tracked_obj.current_x,
+                "y": tracked_obj.current_y,
+                "z": tracked_obj.current_z,
+                "mean_heading": mean_heading,
+            }
+            message = json.dumps(message_data)
+            topic = self.config.zmq.pre_zone_enter_topic.encode("utf-8")
+            self.publisher.send_multipart([topic, message.encode("utf-8")])
+            self.logger.debug(
+                f"PRE_ZONE_ENTER obj={tracked_obj.obj_id} "
+                f"pos=({tracked_obj.current_x:.3f}, {tracked_obj.current_y:.3f}, {tracked_obj.current_z:.3f})"
+            )
+        except Exception as e:
+            self.logger.error(f"Error sending PRE_ZONE_ENTER: {e}")
+
+    def _send_pre_zone_exit(self, tracked_obj: TrackedObject, reason: str) -> None:
+        """Emit a PRE_ZONE_EXIT event."""
+        try:
+            now = time.time()
+            duration = (
+                now - tracked_obj.pre_zone_enter_time
+                if tracked_obj.pre_zone_enter_time
+                else 0.0
+            )
+            message_data = {
+                "obj_id": tracked_obj.obj_id,
+                "reason": reason,
+                "timestamp": now,
+                "duration": duration,
+            }
+            message = json.dumps(message_data)
+            topic = self.config.zmq.pre_zone_exit_topic.encode("utf-8")
+            self.publisher.send_multipart([topic, message.encode("utf-8")])
+            self.logger.debug(
+                f"PRE_ZONE_EXIT obj={tracked_obj.obj_id} reason={reason} duration={duration:.2f}s"
+            )
+        except Exception as e:
+            self.logger.error(f"Error sending PRE_ZONE_EXIT: {e}")
+
     def _cleanup_stale_objects(self) -> None:
         """Remove objects that haven't been updated recently.
         If an in-zone object times out, emit ZONE_EXIT first."""
@@ -495,13 +589,15 @@ class TriggerHandler(WorkerProcess):
         stale_ids = []
 
         for obj_id, obj in self.tracked_objects.items():
-            if (
-                obj.in_zone
-                and current_time - obj.last_check_time > self.config.zone_timeout
-            ):
-                self._send_zone_exit(obj, reason="timeout")
-                obj.in_zone = False
-                obj.zone_enter_time = None
+            if current_time - obj.last_check_time > self.config.zone_timeout:
+                if obj.in_pre_zone:
+                    self._send_pre_zone_exit(obj, reason="timeout")
+                    obj.in_pre_zone = False
+                    obj.pre_zone_enter_time = None
+                if obj.in_zone:
+                    self._send_zone_exit(obj, reason="timeout")
+                    obj.in_zone = False
+                    obj.zone_enter_time = None
 
             if current_time - obj.last_check_time > MAX_OBJECT_AGE:
                 stale_ids.append(obj_id)

@@ -26,6 +26,7 @@ class KalmanFilter:
         process_noise: float = 0.01,
         measurement_noise: float = 0.1,
         initial_covariance: float = 1.0,
+        velocity_noise: float = 1.0,
     ):
         """
         Initialize the Kalman filter with specified parameters.
@@ -34,6 +35,9 @@ class KalmanFilter:
             process_noise: Process noise covariance - how quickly velocity can change
             measurement_noise: Measurement noise covariance - accuracy of position measurements
             initial_covariance: Initial state covariance - uncertainty in initial state
+            velocity_noise: Measurement noise for velocity observations (Braid xvel/yvel/zvel).
+                            When velocity is provided it is fused as a proper measurement rather
+                            than overwriting the state, so P stays consistent.
         """
         # State dimension: [x, y, z, vx, vy, vz]
         self.state_dim = 6
@@ -54,7 +58,7 @@ class KalmanFilter:
         # Time step will be updated during prediction
         self.dt = 0.0
 
-        # Initialize measurement matrix (H) to map state to measurements
+        # Position measurement matrix H_pos: maps state → [x, y, z]
         # [ 1 0 0 0 0 0 ]
         # [ 0 1 0 0 0 0 ]
         # [ 0 0 1 0 0 0 ]
@@ -63,13 +67,26 @@ class KalmanFilter:
         self.H[1, 1] = 1.0  # y
         self.H[2, 2] = 1.0  # z
 
+        # Velocity measurement matrix H_vel: maps state → [vx, vy, vz]
+        # [ 0 0 0 1 0 0 ]
+        # [ 0 0 0 0 1 0 ]
+        # [ 0 0 0 0 0 1 ]
+        self.H_vel = np.zeros((self.measurement_dim, self.state_dim))
+        self.H_vel[0, 3] = 1.0  # vx
+        self.H_vel[1, 4] = 1.0  # vy
+        self.H_vel[2, 5] = 1.0  # vz
+
         # Process noise covariance (Q)
         self.process_noise = process_noise
         self.Q = np.eye(self.state_dim) * self.process_noise
 
-        # Measurement noise covariance (R)
+        # Measurement noise covariance (R) — position
         self.measurement_noise = measurement_noise
         self.R = np.eye(self.measurement_dim) * self.measurement_noise
+
+        # Measurement noise covariance for velocity (R_vel)
+        self.velocity_noise = velocity_noise
+        self.R_vel = np.eye(self.measurement_dim) * self.velocity_noise
 
         # State covariance matrix (P)
         self.initial_covariance = initial_covariance
@@ -153,16 +170,19 @@ class KalmanFilter:
         # Create measurement vector
         z = np.array([[position[0]], [position[1]], [position[2]]])
 
-        # Use the accelerated Kalman update function
+        # Prediction + position measurement update (Joseph form covariance)
         self.x, self.P = kalman_update(
             self.x, self.P, z, self.F, self.H, self.Q, self.R, self.state_dim
         )
 
-        # If velocity measurement is provided, directly update those states
+        # If velocity is provided, fuse it as a second sequential measurement update.
+        # This keeps P consistent with x — unlike a direct overwrite which would leave
+        # P reflecting uncertainty that no longer exists in the velocity states.
         if velocity is not None:
-            self.x[3, 0] = velocity[0]  # vx
-            self.x[4, 0] = velocity[1]  # vy
-            self.x[5, 0] = velocity[2]  # vz
+            z_vel = np.array([[velocity[0]], [velocity[1]], [velocity[2]]])
+            self.x, self.P = kalman_measurement_update(
+                self.x, self.P, z_vel, self.H_vel, self.R_vel, self.state_dim
+            )
 
     def predict(self, dt: float = None) -> Tuple[float, float, float]:
         """
@@ -255,7 +275,12 @@ def kalman_update(
     state_dim: int,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Accelerated Kalman filter update step.
+    Accelerated Kalman filter predict + measurement update step.
+
+    Uses the Joseph form for the covariance update:
+        P = (I - KH) P_pred (I - KH)' + K R K'
+    which is numerically stable regardless of Kalman gain accuracy,
+    whereas the simpler (I - KH) P_pred can become non-symmetric over time.
 
     Args:
         x: Current state vector
@@ -274,21 +299,54 @@ def kalman_update(
     x_pred = F @ x
     P_pred = F @ P @ F.T + Q
 
-    # Measurement update step
+    # Innovation covariance and Kalman gain
     S = H @ P_pred @ H.T + R
+    K = P_pred @ H.T @ np.linalg.inv(S)
 
-    # Compute S inverse with Numba-compatible approach
-    S_inv = np.linalg.inv(S)
+    # State update
+    x_new = x_pred + K @ (z - H @ x_pred)
 
-    K = P_pred @ H.T @ S_inv
+    # Covariance update — Joseph form: (I-KH) P (I-KH)' + K R K'
+    IKH = np.eye(state_dim) - K @ H
+    P_new = IKH @ P_pred @ IKH.T + K @ R @ K.T
 
-    # Update state
-    y = z - H @ x_pred  # Measurement residual
-    x_new = x_pred + K @ y
+    return x_new, P_new
 
-    # Update covariance
-    identity_matrix = np.eye(state_dim)
-    P_new = (identity_matrix - K @ H) @ P_pred
+
+@nb.njit
+def kalman_measurement_update(
+    x: np.ndarray,
+    P: np.ndarray,
+    z: np.ndarray,
+    H: np.ndarray,
+    R: np.ndarray,
+    state_dim: int,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Measurement-only update step (no prediction).
+
+    Used for sequential fusion of independent measurements within the same
+    time step — e.g. fusing velocity observations after a position update.
+    Also uses the Joseph form for numerical stability.
+
+    Args:
+        x: Current state vector
+        P: Current state covariance matrix
+        z: Measurement vector
+        H: Measurement matrix
+        R: Measurement noise covariance matrix
+        state_dim: Dimension of the state vector
+
+    Returns:
+        Updated state vector and state covariance matrix
+    """
+    S = H @ P @ H.T + R
+    K = P @ H.T @ np.linalg.inv(S)
+
+    x_new = x + K @ (z - H @ x)
+
+    IKH = np.eye(state_dim) - K @ H
+    P_new = IKH @ P @ IKH.T + K @ R @ K.T
 
     return x_new, P_new
 
