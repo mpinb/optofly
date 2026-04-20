@@ -178,6 +178,8 @@ class LiquidLens(WorkerProcess):
         self.logger.info("Liquid Lens process started.")
 
         position_timeout = self.lens_config.zone_timeout
+        # Both topics treated identically — PRE_ZONE_ENTER just arrives earlier,
+        # giving the lens a head-start before the fly reaches the actual trigger zone.
         enter_topics = (
             self.zmq_config.zone_enter_topic,
             self.zmq_config.pre_zone_enter_topic,
@@ -189,7 +191,11 @@ class LiquidLens(WorkerProcess):
 
         while self.is_running and not self.stop_event.is_set():
             try:
-                # --- Poll trigger socket ---
+                # ----------------------------------------------------------------
+                # 1. Check for zone events from TriggerHandler (non-blocking).
+                #    These start/stop tracking regardless of whether a Braid
+                #    position update is available this iteration.
+                # ----------------------------------------------------------------
                 try:
                     topic_b, raw = self.trigger_socket.recv_multipart(flags=zmq.NOBLOCK)
                     topic = topic_b.decode()
@@ -210,6 +216,7 @@ class LiquidLens(WorkerProcess):
                             self.current_tracked_obj = obj_id
                             self.last_position_time = time.time()
                             self._log_csv(event_name.lower(), obj_id=obj_id)
+                            # Reset per-trial buffers; Kalman starts fresh each trial.
                             self._timing_rows = []
                             self._recording_obj_id = obj_id
                             self._recording_frame = msg.get("frame")
@@ -234,18 +241,28 @@ class LiquidLens(WorkerProcess):
                             self._stop_tracking()
 
                 except zmq.Again:
-                    pass
+                    pass  # no trigger message this iteration — normal
 
-                # --- Poll Braid socket when tracking ---
+                # ----------------------------------------------------------------
+                # 2. If not tracking, nothing to do — sleep and loop.
+                # ----------------------------------------------------------------
                 if not self.is_tracking:
                     time.sleep(0.01)
                     continue
 
+                # ----------------------------------------------------------------
+                # 3. Pull the latest position update from Braid (non-blocking).
+                #    t_braid_received is stamped here so the per-row delay
+                #    reflects end-to-end latency from message arrival to lens cmd.
+                # ----------------------------------------------------------------
                 t_braid_received = time.time()
                 try:
                     _, raw = self.braid_socket.recv_multipart(flags=zmq.NOBLOCK)
                     braid_msg = json.loads(raw)
                 except zmq.Again:
+                    # No update available. If the gap exceeds position_timeout,
+                    # assume the fly left without a clean ZONE_EXIT (e.g. Braid
+                    # tracking dropout) and stop tracking defensively.
                     if time.time() - self.last_position_time > position_timeout:
                         self.logger.warning(
                             f"No position data for {position_timeout}s, stopping tracking"
@@ -260,7 +277,12 @@ class LiquidLens(WorkerProcess):
                         time.sleep(0.001)
                     continue
 
-                # Death
+                # ----------------------------------------------------------------
+                # 4. Handle Braid message types.
+                #    Death  → stop tracking immediately (fly lost by Braid).
+                #    Update → proceed to focus adjustment below.
+                #    Other  → skip (Birth, CalibrationFlydraXml, etc.)
+                # ----------------------------------------------------------------
                 if "Death" in braid_msg:
                     if braid_msg["Death"] == self.current_tracked_obj:
                         self.logger.info(
@@ -274,10 +296,10 @@ class LiquidLens(WorkerProcess):
                         self._stop_tracking()
                     continue
 
-                # Update
                 if "Update" not in braid_msg:
                     continue
                 u = braid_msg["Update"]
+                # Ignore updates for objects we're not tracking (multi-fly arena).
                 if u.get("obj_id") != self.current_tracked_obj:
                     continue
 
@@ -286,7 +308,11 @@ class LiquidLens(WorkerProcess):
                 vx, vy, vz = u.get("xvel", 0.0), u.get("yvel", 0.0), u.get("zvel", 0.0)
                 timestamp = u.get("timestamp")
 
-                # Kalman update
+                # ----------------------------------------------------------------
+                # 5. Update Kalman filter with the new measurement.
+                #    First update of a trial initialises the filter; subsequent
+                #    updates fuse position + velocity into the 6D state estimate.
+                # ----------------------------------------------------------------
                 if self.lens_config.kalman_enabled:
                     if self.kalman is None:
                         self.kalman = KalmanFilter(
@@ -298,7 +324,13 @@ class LiquidLens(WorkerProcess):
                     else:
                         self.kalman.update((x, y, z), (vx, vy, vz), timestamp)
 
-                # Determine focus z
+                # ----------------------------------------------------------------
+                # 6. Determine the z to focus at.
+                #    With Kalman: predict system_latency + prediction_horizon
+                #    seconds ahead so the lens is already focused when the fly
+                #    arrives, compensating for serial command + mechanical settle.
+                #    Without Kalman: use current z directly.
+                # ----------------------------------------------------------------
                 focus_z = z
                 if self.lens_config.kalman_enabled and self.kalman is not None:
                     prediction_time = (
@@ -312,7 +344,10 @@ class LiquidLens(WorkerProcess):
                             f"Predicted z={focus_z:.3f} (current z={z:.3f})"
                         )
 
-                # Set lens
+                # ----------------------------------------------------------------
+                # 7. Convert z → diopters and send to lens hardware.
+                #    Timing is recorded for post-hoc latency analysis.
+                # ----------------------------------------------------------------
                 try:
                     dpt = self.lens_calibration.get_dpt(focus_z)
                     self.lens_driver.set_diopter(dpt)
