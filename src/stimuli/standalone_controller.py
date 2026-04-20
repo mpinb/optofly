@@ -166,9 +166,9 @@ class StandaloneController:
             last_time, last_heading, last_pos = self.trigger_history[-1]
             time_ago = time.time() - last_time
             pos_str = f" @ {last_pos}°" if last_pos else ""
-            self.labels["last_trigger"].text = (
-                f"Last trigger: {last_heading:.1f}°{pos_str} ({time_ago:.1f}s ago)"
-            )
+            self.labels[
+                "last_trigger"
+            ].text = f"Last trigger: {last_heading:.1f}°{pos_str} ({time_ago:.1f}s ago)"
 
     def render_overlay(self):
         """Render debug overlay on top of stimuli."""

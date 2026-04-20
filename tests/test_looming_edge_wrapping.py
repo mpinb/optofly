@@ -48,9 +48,9 @@ def run_edge_wrapping_test(use_experimental_display=False):
     Args:
         use_experimental_display: If True, render on experimental display
     """
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("LOOMING STIMULUS EDGE WRAPPING TEST")
-    print("="*70)
+    print("=" * 70)
 
     # Update config if using experimental display
     if use_experimental_display:
@@ -85,7 +85,7 @@ def run_edge_wrapping_test(use_experimental_display=False):
         config_path="configs/config.toml",
         event=stop_event,
         log_level="INFO",
-        standalone=True
+        standalone=True,
     )
 
     if not process.initialize():
@@ -106,7 +106,9 @@ def run_edge_wrapping_test(use_experimental_display=False):
             if key_num in test_trigger_map:
                 desc, heading, offset = test_trigger_map[key_num]
                 print(f"\nTriggering: {desc}")
-                print(f"  Heading: {heading}°, Offset: {offset}°, Total: {heading + offset}°")
+                print(
+                    f"  Heading: {heading}°, Offset: {offset}°, Total: {heading + offset}°"
+                )
 
                 # Create and send trigger
                 trigger_data = create_test_trigger(heading, offset)
@@ -114,8 +116,12 @@ def run_edge_wrapping_test(use_experimental_display=False):
 
                 # Print expected pixel position for debugging
                 total_rad = math.radians(heading + offset)
-                expected_pixel = (total_rad / (2 * math.pi)) * process.geometry.screen_width
-                print(f"  Expected pixel: {expected_pixel:.1f} (screen_width={process.geometry.screen_width})")
+                expected_pixel = (
+                    total_rad / (2 * math.pi)
+                ) * process.geometry.screen_width
+                print(
+                    f"  Expected pixel: {expected_pixel:.1f} (screen_width={process.geometry.screen_width})"
+                )
 
                 return True
 
@@ -152,7 +158,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--use-experimental-display",
         action="store_true",
-        help="Render on experimental display instead of small test window"
+        help="Render on experimental display instead of small test window",
     )
 
     args = parser.parse_args()

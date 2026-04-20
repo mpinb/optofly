@@ -9,7 +9,6 @@ Requires: ffmpeg on PATH. NVENC tests are skipped if no GPU encoder is available
 import os
 import queue
 import subprocess
-import tempfile
 import threading
 
 import numpy as np

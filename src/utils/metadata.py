@@ -100,7 +100,7 @@ def write_metadata(metadata: dict[str, Any], braid_folder: str) -> None:
     output_file = braid_path / "experiment_data.toml"
 
     # Build TOML content manually (flat structure, simple types)
-    toml_lines = ['# Experiment metadata collected at startup\n']
+    toml_lines = ["# Experiment metadata collected at startup\n"]
 
     for key, value in metadata.items():
         if isinstance(value, str):
@@ -108,7 +108,7 @@ def write_metadata(metadata: dict[str, Any], braid_folder: str) -> None:
             escaped_value = value.replace('"', '\\"')
             toml_lines.append(f'{key} = "{escaped_value}"\n')
         elif isinstance(value, (int, float)):
-            toml_lines.append(f'{key} = {value}\n')
+            toml_lines.append(f"{key} = {value}\n")
         else:
             # Fallback: convert to string
             toml_lines.append(f'{key} = "{str(value)}"\n')

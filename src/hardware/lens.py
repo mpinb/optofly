@@ -33,6 +33,7 @@ def crc_16(data: bytes) -> int:
     """
     return crc16.arc(data)
 
+
 class LensException(Exception):
     """Base exception for all LiquidLens errors."""
 

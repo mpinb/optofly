@@ -201,6 +201,7 @@ class LiquidLens(WorkerProcess):
                     topic = topic_b.decode()
                     msg = json.loads(raw)
 
+                    # If we're not tracking AND it's an enter_zone topic
                     if topic in enter_topics and not self.is_tracking:
                         obj_id = msg.get("obj_id")
                         if obj_id is not None:
@@ -212,16 +213,22 @@ class LiquidLens(WorkerProcess):
                             self.logger.info(
                                 f"{event_name}: start tracking object {obj_id}"
                             )
+
+                            # Start tracking this object and log the event.
+                            # The actual lens adjustments will begin when the next Braid position update arrives,
+                            # which should be shortly since the trigger was just activated.
                             self.is_tracking = True
                             self.current_tracked_obj = obj_id
                             self.last_position_time = time.time()
                             self._log_csv(event_name.lower(), obj_id=obj_id)
+
                             # Reset per-trial buffers; Kalman starts fresh each trial.
                             self._timing_rows = []
                             self._recording_obj_id = obj_id
                             self._recording_frame = msg.get("frame")
                             self.kalman = None
 
+                    # If we're tracking AND it's an exit_zone topic for the currently tracked object, stop tracking.
                     elif topic in exit_topics and self.is_tracking:
                         if msg.get("obj_id") == self.current_tracked_obj:
                             reason = msg.get("reason", "unknown")
@@ -299,6 +306,7 @@ class LiquidLens(WorkerProcess):
                 if "Update" not in braid_msg:
                     continue
                 u = braid_msg["Update"]
+
                 # Ignore updates for objects we're not tracking (multi-fly arena).
                 if u.get("obj_id") != self.current_tracked_obj:
                     continue

@@ -64,7 +64,6 @@ class TriggerHandlerConfig(ConfigBase):
         # after the last one, regardless of object identity.
         self.refractory_period: float = float(config.get("refractory_period", 10.0))
 
-
         # Trigger zone x/y = camera FOV (single source of truth)
         camera_config = CameraConfig(config_path)
         self.fov_x_min: float = camera_config.fov_x_min
@@ -166,8 +165,12 @@ class ZMQConfig(ConfigBase):
         self.braid_topic: str = config["braid_topic"]
         self.zone_enter_topic: str = config.get("zone_enter_topic", "ZONE_ENTER")
         self.zone_exit_topic: str = config.get("zone_exit_topic", "ZONE_EXIT")
-        self.pre_zone_enter_topic: str = config.get("pre_zone_enter_topic", "PRE_ZONE_ENTER")
-        self.pre_zone_exit_topic: str  = config.get("pre_zone_exit_topic",  "PRE_ZONE_EXIT")
+        self.pre_zone_enter_topic: str = config.get(
+            "pre_zone_enter_topic", "PRE_ZONE_ENTER"
+        )
+        self.pre_zone_exit_topic: str = config.get(
+            "pre_zone_exit_topic", "PRE_ZONE_EXIT"
+        )
 
         # Validate configuration
         self._validate_config()

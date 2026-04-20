@@ -7,9 +7,7 @@ from typing import List
 
 
 def run_screen_identification(
-    window_width: int = 7680,
-    window_height: int = 1080,
-    window_x_offset: int = 3840
+    window_width: int = 7680, window_height: int = 1080, window_x_offset: int = 3840
 ) -> None:
     """Run screen identification calibration mode.
 
@@ -30,7 +28,7 @@ def run_screen_identification(
     window = pyglet.window.Window(
         width=window_width,
         height=window_height,
-        caption="Screen Identification Calibration"
+        caption="Screen Identification Calibration",
     )
     window.set_location(window_x_offset, 0)
 
@@ -43,27 +41,27 @@ def run_screen_identification(
         y_center = window_height // 2
 
         label = pyglet.text.Label(
-            f"Screen {i+1}\n{name}",
-            font_name='Arial',
+            f"Screen {i + 1}\n{name}",
+            font_name="Arial",
             font_size=72,
             x=x_center,
             y=y_center,
-            anchor_x='center',
-            anchor_y='center',
+            anchor_x="center",
+            anchor_y="center",
             multiline=True,
-            width=1920
+            width=1920,
         )
         screen_labels.append(label)
 
     # Instructions at top
     instructions = pyglet.text.Label(
         "Identify which screen is North/East/South/West, then update configs/config.toml",
-        font_name='Arial',
+        font_name="Arial",
         font_size=36,
         x=window_width // 2,
         y=window_height - 100,
-        anchor_x='center',
-        anchor_y='center'
+        anchor_x="center",
+        anchor_y="center",
     )
 
     @window.event
@@ -98,7 +96,7 @@ def run_heading_calibration(
     window_x_offset: int = 3840,
     num_calibration_points: int = 4,
     screen_order: List[int] = None,
-    output_file: str = "calibrations/heading_mapping_data.csv"
+    output_file: str = "calibrations/heading_mapping_data.csv",
 ) -> None:
     """Run heading-to-pixel empirical calibration mode with manual input.
 
@@ -140,7 +138,9 @@ def run_heading_calibration(
 
     # If more than 4 calibration points, interpolate additional points
     if num_calibration_points <= num_screens:
-        calibration_x_positions = np.array(ordered_screen_centers[:num_calibration_points])
+        calibration_x_positions = np.array(
+            ordered_screen_centers[:num_calibration_points]
+        )
     else:
         calibration_x_positions = []
         points_per_screen = num_calibration_points // num_screens
@@ -167,9 +167,7 @@ def run_heading_calibration(
 
     # Create window
     window = pyglet.window.Window(
-        width=window_width,
-        height=window_height,
-        caption="Heading Calibration"
+        width=window_width, height=window_height, caption="Heading Calibration"
     )
     window.set_location(window_x_offset, 0)
 
@@ -187,33 +185,36 @@ def run_heading_calibration(
 
             # Create graphics for this point
             circle = pyglet.shapes.Circle(
-                x=x_pos, y=circle_y, radius=circle_radius,
-                color=(255, 0, 0), batch=batch
+                x=x_pos,
+                y=circle_y,
+                radius=circle_radius,
+                color=(255, 0, 0),
+                batch=batch,
             )
 
             label = pyglet.text.Label(
                 f"Point {point_idx + 1}/{num_calibration_points} ({direction})\nPixel X: {x_pos}",
-                font_name='Arial',
+                font_name="Arial",
                 font_size=24,
                 x=x_pos,
                 y=circle_y + 150,
-                anchor_x='center',
-                anchor_y='center',
+                anchor_x="center",
+                anchor_y="center",
                 multiline=True,
                 width=500,
-                batch=batch
+                batch=batch,
             )
 
             status_label = pyglet.text.Label(
                 "Enter coordinates in terminal",
-                font_name='Arial',
+                font_name="Arial",
                 font_size=18,
                 x=window_width // 2,
                 y=50,
-                anchor_x='center',
-                anchor_y='center',
+                anchor_x="center",
+                anchor_y="center",
                 color=(255, 255, 0, 255),
-                batch=batch
+                batch=batch,
             )
 
             # Render the display
@@ -226,8 +227,12 @@ def run_heading_calibration(
             window.dispatch_events()
 
             # Prompt for input in terminal
-            print(f"\n--- Point {point_idx + 1}/{num_calibration_points} ({direction}, Pixel X: {x_pos}) ---")
-            print("Position object facing the red circle, then enter Braid coordinates.")
+            print(
+                f"\n--- Point {point_idx + 1}/{num_calibration_points} ({direction}, Pixel X: {x_pos}) ---"
+            )
+            print(
+                "Position object facing the red circle, then enter Braid coordinates."
+            )
 
             while True:
                 try:
@@ -237,13 +242,13 @@ def run_heading_calibration(
                 except ValueError:
                     print("  Invalid input. Please enter numeric values.")
 
-            calibration_data.append({
-                "pixel_x": x_pos,
-                "braid_x": braid_x,
-                "braid_y": braid_y
-            })
+            calibration_data.append(
+                {"pixel_x": x_pos, "braid_x": braid_x, "braid_y": braid_y}
+            )
 
-            print(f"  Recorded: pixel_x={x_pos}, braid_x={braid_x:.4f}, braid_y={braid_y:.4f}")
+            print(
+                f"  Recorded: pixel_x={x_pos}, braid_x={braid_x:.4f}, braid_y={braid_y:.4f}"
+            )
 
             # Clean up graphics for this point
             circle.delete()
@@ -261,10 +266,7 @@ def run_heading_calibration(
         window.close()
 
 
-def save_calibration_data(
-    calibration_data: List[dict],
-    output_file: str
-) -> None:
+def save_calibration_data(calibration_data: List[dict], output_file: str) -> None:
     """Save calibration data to CSV and generate interpolation model.
 
     Args:
@@ -298,7 +300,7 @@ def save_calibration_data(
     print()
     print("Update configs/config.toml:")
     print(f'  calibration_mapping_file = "{model_file}"')
-    print('  use_empirical_calibration = true')
+    print("  use_empirical_calibration = true")
 
 
 def run_calibration_test(
@@ -336,9 +338,7 @@ def run_calibration_test(
 
     # Create window
     window = pyglet.window.Window(
-        width=window_width,
-        height=window_height,
-        caption="Calibration Test"
+        width=window_width, height=window_height, caption="Calibration Test"
     )
     window.set_location(window_x_offset, 0)
 
@@ -364,10 +364,7 @@ def run_calibration_test(
         # Boundary line at start of each screen (use Rectangle as thin line)
         x = i * screen_width
         line = pyglet.shapes.Rectangle(
-            x=x, y=0,
-            width=2, height=window_height,
-            color=(100, 100, 100),
-            batch=batch
+            x=x, y=0, width=2, height=window_height, color=(100, 100, 100), batch=batch
         )
         boundary_lines.append(line)
 
@@ -375,67 +372,63 @@ def run_calibration_test(
         label_x = i * screen_width + screen_width // 2
         label = pyglet.text.Label(
             screen_directions[i],
-            font_name='Arial',
+            font_name="Arial",
             font_size=48,
             x=label_x,
             y=window_height - 80,
-            anchor_x='center',
-            anchor_y='center',
+            anchor_x="center",
+            anchor_y="center",
             color=(150, 150, 150, 255),
-            batch=batch
+            batch=batch,
         )
         direction_labels.append(label)
 
     # Moving circle
     circle = pyglet.shapes.Circle(
-        x=0,
-        y=circle_y,
-        radius=circle_radius,
-        color=(255, 0, 0),
-        batch=batch
+        x=0, y=circle_y, radius=circle_radius, color=(255, 0, 0), batch=batch
     )
 
     # Info labels
     angle_label = pyglet.text.Label(
         "Angle: 0.0°",
-        font_name='Arial',
+        font_name="Arial",
         font_size=24,
         x=20,
         y=window_height - 30,
         color=(255, 255, 255, 255),
-        batch=batch
+        batch=batch,
     )
 
     pixel_label = pyglet.text.Label(
         "Pixel X: 0",
-        font_name='Arial',
+        font_name="Arial",
         font_size=24,
         x=20,
         y=window_height - 60,
         color=(255, 255, 255, 255),
-        batch=batch
+        batch=batch,
     )
 
     status_label = pyglet.text.Label(
         "[SPACE] Pause | [←/→] Adjust | [R] Reset | [ESC] Exit",
-        font_name='Arial',
+        font_name="Arial",
         font_size=16,
         x=window_width // 2,
         y=30,
-        anchor_x='center',
+        anchor_x="center",
         color=(200, 200, 200, 255),
-        batch=batch
+        batch=batch,
     )
 
     pause_label = pyglet.text.Label(
         "",
-        font_name='Arial',
+        font_name="Arial",
         font_size=36,
         x=window_width // 2,
         y=window_height // 2 + 150,
-        anchor_x='center',
+        anchor_x="center",
         color=(255, 255, 0, 255),
-        batch=batch
+        batch=batch,
     )
 
     def angle_to_pixel_x(angle_deg):
@@ -449,7 +442,9 @@ def run_calibration_test(
     def update_display(dt=0):
         """Update circle position and labels."""
         if not paused[0]:
-            current_angle_deg[0] = (current_angle_deg[0] + sweep_speed_deg_per_sec * dt) % 360
+            current_angle_deg[0] = (
+                current_angle_deg[0] + sweep_speed_deg_per_sec * dt
+            ) % 360
 
         pixel_x = angle_to_pixel_x(current_angle_deg[0])
         circle.x = pixel_x
@@ -483,7 +478,7 @@ def run_calibration_test(
     update_display(0)
 
     # Schedule updates at 60fps
-    pyglet.clock.schedule_interval(update_display, 1/60.0)
+    pyglet.clock.schedule_interval(update_display, 1 / 60.0)
 
     # Handle Ctrl+C
     def sigint_handler(signum, frame):
@@ -539,9 +534,7 @@ def run_mapping_test(
 
     # Create window
     window = pyglet.window.Window(
-        width=window_width,
-        height=window_height,
-        caption="Mapping Test"
+        width=window_width, height=window_height, caption="Mapping Test"
     )
     window.set_location(window_x_offset, 0)
 
@@ -558,21 +551,23 @@ def run_mapping_test(
     # Screen boundary lines and labels
     for i in range(num_screens):
         pyglet.shapes.Rectangle(
-            x=i * screen_width, y=0,
-            width=2, height=window_height,
+            x=i * screen_width,
+            y=0,
+            width=2,
+            height=window_height,
             color=(100, 100, 100),
-            batch=batch
+            batch=batch,
         )
         pyglet.text.Label(
             screen_directions[i],
-            font_name='Arial',
+            font_name="Arial",
             font_size=48,
             x=i * screen_width + screen_width // 2,
             y=window_height - 80,
-            anchor_x='center',
-            anchor_y='center',
+            anchor_x="center",
+            anchor_y="center",
             color=(150, 150, 150, 255),
-            batch=batch
+            batch=batch,
         )
 
     # Marker circle
@@ -581,55 +576,55 @@ def run_mapping_test(
         y=circle_y,
         radius=circle_radius,
         color=(0, 255, 0),
-        batch=batch
+        batch=batch,
     )
 
     # Info labels
     heading_label = pyglet.text.Label(
         "Heading: --",
-        font_name='Arial',
+        font_name="Arial",
         font_size=24,
         x=20,
         y=window_height - 30,
         color=(255, 255, 255, 255),
-        batch=batch
+        batch=batch,
     )
 
     pixel_label = pyglet.text.Label(
         "Pixel X: --",
-        font_name='Arial',
+        font_name="Arial",
         font_size=24,
         x=20,
         y=window_height - 60,
         color=(255, 255, 255, 255),
-        batch=batch
+        batch=batch,
     )
 
     braid_label = pyglet.text.Label(
         "Braid: --",
-        font_name='Arial',
+        font_name="Arial",
         font_size=24,
         x=20,
         y=window_height - 90,
         color=(255, 255, 255, 255),
-        batch=batch
+        batch=batch,
     )
 
     status_label = pyglet.text.Label(
         "Enter Braid coordinates in terminal",
-        font_name='Arial',
+        font_name="Arial",
         font_size=18,
         x=window_width // 2,
         y=30,
-        anchor_x='center',
+        anchor_x="center",
         color=(255, 255, 0, 255),
-        batch=batch
+        batch=batch,
     )
 
     def heading_to_pixel(heading_rad):
         """Convert heading to pixel using calibration interpolation."""
         # Linear interpolation using calibration data
-        return int(np.interp(heading_rad, cal_headings, cal_pixels, period=2*np.pi))
+        return int(np.interp(heading_rad, cal_headings, cal_pixels, period=2 * np.pi))
 
     def update_marker(braid_x, braid_y):
         """Update marker position based on Braid coordinates."""
@@ -660,7 +655,7 @@ def run_mapping_test(
                 print("\n" + "-" * 40)
                 braid_input = input("Braid X (or 'q' to quit): ").strip()
 
-                if braid_input.lower() == 'q':
+                if braid_input.lower() == "q":
                     running[0] = False
                     pyglet.app.exit()
                     break

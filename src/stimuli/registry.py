@@ -59,10 +59,7 @@ class StimulusRegistry:
         Returns:
             List of stimulus names that are active
         """
-        return [
-            name for name, stim in self._stimuli.items()
-            if stim.is_active()
-        ]
+        return [name for name, stim in self._stimuli.items() if stim.is_active()]
 
     def initialize_all_rendering(self, batch: pyglet.graphics.Batch) -> None:
         """Initialize rendering for all registered stimuli.
@@ -74,7 +71,7 @@ class StimulusRegistry:
             batch: Pyglet graphics batch
         """
         for name, stimulus in self._stimuli.items():
-            if hasattr(stimulus, 'initialize_rendering'):
+            if hasattr(stimulus, "initialize_rendering"):
                 stimulus.initialize_rendering(batch)
 
     def cleanup_all(self) -> None:
@@ -83,5 +80,5 @@ class StimulusRegistry:
         Called during shutdown to properly release graphics resources.
         """
         for name, stimulus in self._stimuli.items():
-            if hasattr(stimulus, 'cleanup'):
+            if hasattr(stimulus, "cleanup"):
                 stimulus.cleanup()

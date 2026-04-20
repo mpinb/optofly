@@ -58,9 +58,7 @@ def parse_calibration_xml(xml_path: str) -> dict[str, CameraCalibration]:
         # Parse 3x4 projection matrix (rows separated by ';')
         pmat_text = single_cal.find("calibration_matrix").text.strip()
         rows = pmat_text.split(";")
-        projection_matrix = np.array(
-            [[float(v) for v in row.split()] for row in rows]
-        )
+        projection_matrix = np.array([[float(v) for v in row.split()] for row in rows])
 
         # Parse resolution
         res_text = single_cal.find("resolution").text.strip().split()
@@ -77,18 +75,23 @@ def parse_calibration_xml(xml_path: str) -> dict[str, CameraCalibration]:
         p1 = float(nlp.find("p1").text)
         p2 = float(nlp.find("p2").text)
 
-        camera_matrix = np.array([
-            [fx, 0, cx],
-            [0, fy, cy],
-            [0, 0, 1],
-        ])
+        camera_matrix = np.array(
+            [
+                [fx, 0, cx],
+                [0, fy, cy],
+                [0, 0, 1],
+            ]
+        )
         dist_coeffs = np.array([k1, k2, p1, p2])
 
         cameras[cam_id] = CameraCalibration(
             cam_id=cam_id,
             projection_matrix=projection_matrix,
             resolution=resolution,
-            fx=fx, fy=fy, cx=cx, cy=cy,
+            fx=fx,
+            fy=fy,
+            cx=cx,
+            cy=cy,
             dist_coeffs=dist_coeffs,
             camera_matrix=camera_matrix,
         )
@@ -230,9 +233,7 @@ def _detect_aruco(
             vis = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
             if ids is not None:
                 cv2.aruco.drawDetectedMarkers(vis, corners, ids)
-            cv2.aruco.drawDetectedMarkers(
-                vis, rejected, borderColor=(0, 0, 255)
-            )
+            cv2.aruco.drawDetectedMarkers(vis, rejected, borderColor=(0, 0, 255))
             path = os.path.join(debug_dir, f"{cam_id}_detections.png")
             cv2.imwrite(path, vis)
             print(f"    saved detection debug: {path}")
@@ -270,8 +271,13 @@ def _detect_pupil(
                 cv2.polylines(vis, [pts], True, (0, 255, 0), 2)
                 cx, cy = r.center
                 cv2.putText(
-                    vis, str(r.tag_id), (int(cx), int(cy)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2,
+                    vis,
+                    str(r.tag_id),
+                    (int(cx), int(cy)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 255, 0),
+                    2,
                 )
             path = os.path.join(debug_dir, f"{cam_id}_detections.png")
             cv2.imwrite(path, vis)
@@ -287,9 +293,7 @@ def _print_detections(cam_id: str, cam_dets: list[tuple[int, float, float]]) -> 
     )
 
 
-def undistort_points(
-    points: np.ndarray, cal: CameraCalibration
-) -> np.ndarray:
+def undistort_points(points: np.ndarray, cal: CameraCalibration) -> np.ndarray:
     """Undistort 2D pixel coordinates using camera calibration."""
     pts = points.reshape(-1, 1, 2).astype(np.float64)
     undistorted = cv2.undistortPoints(
@@ -347,13 +351,16 @@ def main():
         "--calibration", required=True, help="Path to strand-braid XML calibration file"
     )
     parser.add_argument(
-        "--num-frames", type=int, default=10,
-        help="Number of frames to average per camera (default: 10)"
+        "--num-frames",
+        type=int,
+        default=10,
+        help="Number of frames to average per camera (default: 10)",
     )
     parser.add_argument(
-        "--tag-family", default="tag36h11",
+        "--tag-family",
+        default="tag36h11",
         choices=["tag36h11", "tag25h9", "tag16h5", "tagStandard41h12"],
-        help="AprilTag family (default: tag36h11)"
+        help="AprilTag family (default: tag36h11)",
     )
     parser.add_argument(
         "--images-dir",
@@ -422,7 +429,9 @@ def main():
     print("\n" + "=" * 60)
     print("3D AprilTag positions")
     print("=" * 60)
-    print(f"{'Tag ID':>8s} {'X':>10s} {'Y':>10s} {'Z':>10s} {'Reproj (px)':>12s} {'Cameras':>8s}")
+    print(
+        f"{'Tag ID':>8s} {'X':>10s} {'Y':>10s} {'Z':>10s} {'Reproj (px)':>12s} {'Cameras':>8s}"
+    )
     print("-" * 60)
 
     results = []

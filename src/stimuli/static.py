@@ -15,7 +15,12 @@ class StaticPatternStimulus(BaseStimulus):
     Open-loop stimulus (no interaction with tracking).
     """
 
-    def __init__(self, config: Dict[str, Any], screen_width: int = 7680, screen_height: int = 1080):
+    def __init__(
+        self,
+        config: Dict[str, Any],
+        screen_width: int = 7680,
+        screen_height: int = 1080,
+    ):
         """Initialize static pattern from config.
 
         Args:
@@ -28,7 +33,9 @@ class StaticPatternStimulus(BaseStimulus):
         # Parse configuration
         self.enabled = config.get("enabled", True)
         self.square_color = self._parse_color(config.get("square_color", "black"))
-        self.background_color = self._parse_color(config.get("background_color", "white"))
+        self.background_color = self._parse_color(
+            config.get("background_color", "white")
+        )
         self.pattern_density = max(0.0, min(1.0, config.get("pattern_density", 0.3)))
         self.downscale_factor = max(1, config.get("downscale_factor", 2))
         self.random_seed = config.get("random_seed", None)
@@ -145,7 +152,7 @@ class StaticPatternStimulus(BaseStimulus):
                 "gray": (128, 128, 128),
                 "red": (255, 0, 0),
                 "green": (0, 255, 0),
-                "blue": (0, 0, 255)
+                "blue": (0, 0, 255),
             }
             return color_map.get(color.lower(), (0, 0, 0))
         else:

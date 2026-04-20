@@ -105,8 +105,6 @@ class TrackedObject:
         if velocity_magnitude >= min_velocity:
             heading = np.arctan2(yvel, xvel)
             self.headings.append(heading)
-        # If velocity is below threshold, don't add to heading history
-        # This ensures stationary objects don't accumulate noisy headings
 
         # Update last check time
         self.last_check_time = time.time()

@@ -26,7 +26,7 @@ class GeometryUtils:
         calibration_file: Optional[str] = None,
         use_empirical_calibration: bool = False,
         heading_offset_deg: float = 0.0,
-        scale_factor: float = 1.0
+        scale_factor: float = 1.0,
     ):
         """Initialize geometry utilities.
 
@@ -65,10 +65,13 @@ class GeometryUtils:
                 self._load_calibration(calibration_file)
             except FileNotFoundError:
                 import logging
+
                 logger = logging.getLogger(__name__)
                 logger.error(f"Calibration file not found: {calibration_file}")
                 logger.warning("Falling back to simple linear heading→pixel mapping")
-                logger.warning("Run: python -m src.processes.visual_stimuli --calibrate-mapping")
+                logger.warning(
+                    "Run: python -m src.processes.visual_stimuli --calibrate-mapping"
+                )
 
     def _load_calibration(self, calibration_file: str) -> None:
         """Load empirical calibration model from file.
@@ -77,16 +80,14 @@ class GeometryUtils:
             calibration_file: Path to .npz file with headings and pixels arrays
         """
         data = np.load(calibration_file)
-        headings = data['headings']
-        pixels = data['pixels']
+        headings = data["headings"]
+        pixels = data["pixels"]
 
         # Create circular interpolator (handles 0°/360° wraparound)
         self.interpolator = self._create_circular_interpolator(headings, pixels)
 
     def _create_circular_interpolator(
-        self,
-        headings: np.ndarray,
-        pixels: np.ndarray
+        self, headings: np.ndarray, pixels: np.ndarray
     ) -> callable:
         """Create interpolator that handles angular wraparound.
 
@@ -103,26 +104,24 @@ class GeometryUtils:
         pixels_sorted = pixels[sorted_indices]
 
         # Add wraparound points
-        headings_extended = np.concatenate([
-            headings_sorted[-3:] - 2*np.pi,
-            headings_sorted,
-            headings_sorted[:3] + 2*np.pi
-        ])
-        pixels_extended = np.concatenate([
-            pixels_sorted[-3:],
-            pixels_sorted,
-            pixels_sorted[:3]
-        ])
+        headings_extended = np.concatenate(
+            [
+                headings_sorted[-3:] - 2 * np.pi,
+                headings_sorted,
+                headings_sorted[:3] + 2 * np.pi,
+            ]
+        )
+        pixels_extended = np.concatenate(
+            [pixels_sorted[-3:], pixels_sorted, pixels_sorted[:3]]
+        )
 
         # Create interpolator
-        interpolator = interp1d(headings_extended, pixels_extended, kind='linear')
+        interpolator = interp1d(headings_extended, pixels_extended, kind="linear")
 
         return lambda h: interpolator(h % (2 * np.pi))
 
     def heading_to_pixel_x(
-        self,
-        braid_heading_rad: float,
-        stimulus_offset_deg: float
+        self, braid_heading_rad: float, stimulus_offset_deg: float
     ) -> int:
         """Convert Braid heading + offset to screen pixel x-coordinate.
 
