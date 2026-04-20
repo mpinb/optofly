@@ -28,6 +28,7 @@ class OptoTriggerWorker(WorkerProcess):
         process_name: str = "OptoTriggerWorker",
         log_level: str = "INFO",
         log_color: str = "RED",
+        log_path: str | None = None,
     ):
         """
         Initialize the OptoTriggerWorker process.
@@ -39,6 +40,7 @@ class OptoTriggerWorker(WorkerProcess):
             process_name: Name to display in logs
             log_level: Logging level to use
             log_color: Color for log messages
+            log_path: Path to shared log file (written from child process)
         """
         if event is None:
             raise ValueError("OptoTriggerWorker requires an external stop event.")
@@ -46,6 +48,7 @@ class OptoTriggerWorker(WorkerProcess):
         # Pass parameters to parent class
         super().__init__(
             event=event,
+            log_path=log_path,
             log_level=log_level,
             log_color=log_color,
             process_name=process_name,
@@ -81,9 +84,6 @@ class OptoTriggerWorker(WorkerProcess):
         """
         Initialize the process components.
         """
-        # Initialize logger (must be done in the child process)
-        self._initialize_logger()
-
         self.logger.debug(f"OptoTrigger config: {self.opto_config}")
 
         # Initialize ZMQ socket
@@ -230,12 +230,10 @@ class OptoTriggerWorker(WorkerProcess):
             self.logger.error(f"Error handling trigger: {e}")
             return False
 
-    def run(self):
+    def _run(self):
         """Main process loop."""
         # Check if enabled
         if not self.is_enabled:
-            # Initialize logger even if disabled, so we can log the warning
-            self._initialize_logger()
             self.logger.warning("OptoTriggerWorker is disabled. Exiting.")
             return
 

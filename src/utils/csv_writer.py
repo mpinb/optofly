@@ -1,7 +1,6 @@
 import csv
+import logging
 import os
-
-from src.utils.logger import init_class_logger
 
 
 class CSVWriter:
@@ -27,13 +26,7 @@ class CSVWriter:
         self.file = None
         self.writer = None
 
-        # Initialize logger using the utility function
-        self.logger = init_class_logger(
-            instance=self,
-            log_level=log_level,
-            process_name=process_name,
-            log_color=log_color,
-        )
+        self.logger = logging.getLogger(__name__)
 
         # Check if file exists and has headers
         self._check_file()

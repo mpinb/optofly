@@ -13,7 +13,7 @@ import requests
 import zmq
 
 from src.utils.config import BraidPublisherConfig
-from src.utils.logger import init_class_logger
+from src.utils.logger import configure_process_logging
 from src.utils.worker import WorkerProcess
 
 # Constants
@@ -72,7 +72,8 @@ class BraidPublisher(WorkerProcess):
         event: Optional[mp.Event] = None,
         process_name: str = "BraidPublisher",
         log_level: str = "INFO",
-        log_color: str = "GREEN",  # Use uppercase for consistency
+        log_color: str = "GREEN",
+        log_path: str | None = None,
     ):
         """
         Initialize the BraidPublisher.
@@ -83,10 +84,12 @@ class BraidPublisher(WorkerProcess):
             log_level: Logging level to use
             log_color: Color for log messages
             process_name: Name to display in logs
+            log_path: Path to shared log file (written from child process)
         """
         # Pass parameters to parent class
         super().__init__(
             event=event,
+            log_path=log_path,
             log_level=log_level,
             log_color=log_color,
             process_name=process_name,
@@ -116,8 +119,6 @@ class BraidPublisher(WorkerProcess):
         Returns:
             True if both connections were established successfully, False otherwise
         """
-        # Initialize logger and signal handlers in child process (after spawn)
-        self._initialize_logger()
         signal.signal(signal.SIGINT, self._handle_signal)
         signal.signal(signal.SIGTERM, self._handle_signal)
 
@@ -230,10 +231,12 @@ class BraidPublisher(WorkerProcess):
                             data["msg"]["t_relay"] = time.time()
                             # Publish to ZMQ
                             message = json.dumps(data["msg"])
-                            self.zmq_socket.send_multipart([
-                                self.config.zmq.braid_topic.encode('utf-8'),
-                                message.encode('utf-8')
-                            ])
+                            self.zmq_socket.send_multipart(
+                                [
+                                    self.config.zmq.braid_topic.encode("utf-8"),
+                                    message.encode("utf-8"),
+                                ]
+                            )
                             self.logger.debug(f"Published message: {message[:50]}...")
                     except Exception as e:
                         self.logger.error(f"Error processing chunk: {e}")
@@ -252,14 +255,15 @@ class BraidPublisher(WorkerProcess):
 
         self.logger.debug("Stream processing thread exited")
 
-    def run(self) -> None:
+    def _run(self) -> None:
         """
         Main process function that runs the Braid subscriber.
 
         This starts the stream processing in a separate thread and
         monitors the stop event.
         """
-        if not self.is_connected and not self.initialize():
+        self.initialize()
+        if not self.is_connected:
             self.logger.error("Failed to initialize, exiting process")
             return
 
@@ -331,13 +335,15 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    # Configure logging with command line level
-    logger = init_class_logger(
-        "BraidSubscriber",
-        log_level=args.log_level,
-        log_color="green",
-        process_name="BraidSubscriber",
+    configure_process_logging(
+        None,
+        "BraidPublisher",
+        "BLUE",
+        level=getattr(__import__("logging"), args.log_level.upper(), 20),
     )
+    import logging
+
+    logger = logging.getLogger(__name__)
     logger.info("Starting BraidSubscriber...")
 
     # Create and run subscriber

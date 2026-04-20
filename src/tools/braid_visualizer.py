@@ -123,8 +123,15 @@ class BraidVisualizer(WorkerProcess):
         log_level: str = "INFO",
         log_color: str = "cyan",
         window_duration: float = 10.0,
+        log_path: str | None = None,
     ):
-        super().__init__(event, log_level, log_color, process_name)
+        super().__init__(
+            event=event,
+            log_path=log_path,
+            log_level=log_level,
+            log_color=log_color,
+            process_name=process_name,
+        )
 
         # Load configuration
         if isinstance(config_path, dict):
@@ -141,10 +148,6 @@ class BraidVisualizer(WorkerProcess):
 
         # ReRun client
         self.recording_id = f"braid_visualization_{int(time.time())}"
-
-        # initialize logger
-        self._initialize_logger()
-        self.logger.info("BraidVisualizer initialized")
 
     def initialize(self) -> bool:
         """Initialize the visualizer."""
@@ -366,7 +369,7 @@ class BraidVisualizer(WorkerProcess):
                     ),
                 )
 
-    def run(self) -> None:
+    def _run(self) -> None:
         """Main process loop."""
         if not self.initialize():
             self.logger.error("Failed to initialize, exiting process")

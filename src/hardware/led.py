@@ -14,8 +14,9 @@ from typing import Optional
 import numpy as np
 import serial
 
+import logging
+
 from src.utils.config import OptoTriggerConfig
-from src.utils.logger import init_class_logger
 
 
 class OptoTrigger:
@@ -82,13 +83,7 @@ class OptoTrigger:
         self.serial_conn = None
         self.is_initialized = False
 
-        # Initialize logger
-        self.logger = init_class_logger(
-            instance=self,
-            process_name=process_name,
-            log_level=log_level,
-            log_color=log_color,
-        )
+        self.logger = logging.getLogger(__name__)
 
         # PARAMETER COMBINATION BALANCING
         # Generate all possible parameter combinations for balanced selection

@@ -17,7 +17,7 @@ from scipy import stats
 import zmq
 
 from src.utils.config import TriggerHandlerConfig
-from src.utils.logger import init_class_logger
+from src.utils.logger import configure_process_logging
 from src.utils.worker import WorkerProcess
 
 # Constants
@@ -53,8 +53,8 @@ class TrackedObject:
     current_timestamp: float = 0.0
 
     # Zone membership tracking
-    in_zone: bool = False           # ZONE_ENTER has been emitted for this object
-    zone_enter_time: Optional[float] = None   # when ZONE_ENTER was emitted
+    in_zone: bool = False  # ZONE_ENTER has been emitted for this object
+    zone_enter_time: Optional[float] = None  # when ZONE_ENTER was emitted
 
     # Pre-zone membership tracking (expanded zone for camera/lens pre-triggering)
     in_pre_zone: bool = False
@@ -194,9 +194,11 @@ class TriggerHandler(WorkerProcess):
         process_name: str = "TriggerHandler",
         log_level: str = "INFO",
         log_color: str = "MAGENTA",
+        log_path: str | None = None,
     ):
         super().__init__(
             event=event,
+            log_path=log_path,
             log_level=log_level,
             log_color=log_color,
             process_name=process_name,
@@ -229,7 +231,6 @@ class TriggerHandler(WorkerProcess):
 
     def initialize(self) -> bool:
         """Initialize the trigger handler and ZMQ connections."""
-        self._initialize_logger()
         self.logger.info("Initializing TriggerHandler")
 
         try:
@@ -471,9 +472,14 @@ class TriggerHandler(WorkerProcess):
                     vel_ok = True
                     if mean_vel is not None:
                         speed = np.sqrt(mean_vel[0] ** 2 + mean_vel[1] ** 2)
-                        if speed < self.config.min_velocity or speed > self.config.max_velocity:
+                        if (
+                            speed < self.config.min_velocity
+                            or speed > self.config.max_velocity
+                        ):
                             vel_ok = False
-                    if vel_ok and tracked_obj.is_heading_toward_center(self.config.heading_threshold):
+                    if vel_ok and tracked_obj.is_heading_toward_center(
+                        self.config.heading_threshold
+                    ):
                         tracked_obj.in_pre_zone = True
                         tracked_obj.pre_zone_enter_time = time.time()
                         self._send_pre_zone_enter(tracked_obj)
@@ -606,7 +612,7 @@ class TriggerHandler(WorkerProcess):
             self.logger.debug(f"Removing stale object {obj_id}")
             del self.tracked_objects[obj_id]
 
-    def run(self) -> None:
+    def _run(self) -> None:
         """Main process loop for the trigger handler."""
         if not self.is_initialized and not self.initialize():
             self.logger.error("Failed to initialize, exiting process")
@@ -679,12 +685,16 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    logger = init_class_logger(
-        instance=None,
-        log_level=args.log_level,
-        process_name="TriggerHandler",
-        init_message="Starting TriggerHandler process",
+    import logging
+
+    configure_process_logging(
+        None,
+        "TriggerHandler",
+        "MAGENTA",
+        level=getattr(logging, args.log_level.upper(), 20),
     )
+    logger = logging.getLogger(__name__)
+    logger.info("Starting TriggerHandler process")
     stop_event = mp.Event()
     handler = TriggerHandler(config_path=args.config, event=stop_event)
 

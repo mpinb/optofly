@@ -42,6 +42,7 @@ class VisualStimuliProcess(WorkerProcess):
         log_color: str = "YELLOW",
         standalone: bool = False,
         braid_folder: Optional[str] = None,
+        log_path: str | None = None,
     ):
         """Initialize VisualStimuliProcess.
 
@@ -53,20 +54,15 @@ class VisualStimuliProcess(WorkerProcess):
             log_color: Color for log messages
             standalone: If True, run in standalone testing mode (no ZMQ, small window)
             braid_folder: Path to .braid folder for CSV output (if None, uses current directory)
+            log_path: Path to shared log file (written from child process)
         """
         # Initialize parent WorkerProcess
         super().__init__(
             event=event,
+            log_path=log_path,
             log_level=log_level,
             log_color=log_color,
             process_name=process_name,
-        )
-
-        # Initialize logger
-        self._initialize_logger()
-        mode_str = " (STANDALONE MODE)" if standalone else ""
-        self.logger.info(
-            f"Initializing VisualStimuliProcess{mode_str} with config: {config_path}"
         )
 
         # Load configuration
@@ -154,9 +150,6 @@ class VisualStimuliProcess(WorkerProcess):
             True if initialization successful
         """
         try:
-            # Reinitialize logger in child process (required for multiprocessing)
-            self._initialize_logger()
-
             # Initialize ZMQ (skip in standalone mode)
             if not self.standalone:
                 self._initialize_zmq()
@@ -439,7 +432,7 @@ class VisualStimuliProcess(WorkerProcess):
                 f"(avg: {avg_frame_time * 1000:.2f}ms, max: {max_frame_time * 1000:.2f}ms)"
             )
 
-    def run(self) -> None:
+    def _run(self) -> None:
         """Main process loop."""
         if not self.initialize():
             self.logger.error("Failed to initialize, exiting")

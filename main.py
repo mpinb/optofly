@@ -20,9 +20,8 @@ from src.processes.led import OptoTriggerWorker
 from src.processes.camera import RustCameraProcess as CameraProcess
 from src.processes.lens import LiquidLens
 from src.utils.braid import check_braid_folder_exists, copy_csv_files_to_braid
-from src.utils.logger import setup_file_logging
+from src.utils.logger import configure_process_logging
 from src.utils.metadata import collect_metadata, write_metadata, append_metadata_to_csv
-from src.utils.worker import WorkerProcess
 from src.monitoring.server import run_server
 
 import serial
@@ -70,7 +69,7 @@ def print_experiment_config(config: dict, active_processes: list):
         port = monitoring_config.get("port", 5000)
         # If host is 0.0.0.0, show localhost for user convenience
         display_host = "localhost" if host == "0.0.0.0" else host
-        print(f"\nMonitoring Dashboard:")
+        print("\nMonitoring Dashboard:")
         print(f"  URL: http://{display_host}:{port}")
 
     # Visual stimuli details
@@ -98,7 +97,7 @@ def print_experiment_config(config: dict, active_processes: list):
         color = opto_config.get("color", "unknown")
         intensity = opto_config.get("intensity", "unknown")
         duration = opto_config.get("duration", "unknown")
-        print(f"\nOpto Trigger:")
+        print("\nOpto Trigger:")
         print(f"  Color: {color}")
         print(f"  Intensity: {intensity}")
         print(f"  Duration: {duration} ms")
@@ -108,7 +107,7 @@ def print_experiment_config(config: dict, active_processes: list):
         camera_config = config.get("camera", {})
         fps = camera_config.get("fps", "unknown")
         resolution = camera_config.get("resolution", "unknown")
-        print(f"\nCamera:")
+        print("\nCamera:")
         print(f"  Resolution: {resolution}")
         print(f"  FPS: {fps}")
 
@@ -118,12 +117,12 @@ def print_experiment_config(config: dict, active_processes: list):
         mode = lens_config.get("mode", "diopter")
         kalman_enabled = lens_config.get("kalman", {}).get("enabled", False)
         predictive_enabled = lens_config.get("prediction", {}).get("enabled", False)
-        print(f"\nLiquid Lens:")
+        print("\nLiquid Lens:")
         print(f"  Mode: {mode}")
         if kalman_enabled:
-            print(f"  ✓ Kalman filter (predictive focus)")
+            print("  ✓ Kalman filter (predictive focus)")
         if predictive_enabled:
-            print(f"  ✓ Trajectory prediction")
+            print("  ✓ Trajectory prediction")
 
     print("\nPress Ctrl+C to stop the experiment")
     print("=" * 70 + "\n")
@@ -214,8 +213,7 @@ def main():
 
     # Set up file logging — all processes write to a shared log file
     log_path = str(Path(braid_folder) / "optofly.log")
-    setup_file_logging(log_path)
-    WorkerProcess._log_path = log_path
+    configure_process_logging(log_path, "Main", "WHITE")
     print(f"Logging to: {log_path}")
 
     # Create shared stop event for coordinated shutdown
@@ -236,7 +234,9 @@ def main():
 
         # 1. BraidPublisher - connects to Braid tracking and publishes to ZMQ
         print("  ✓ BraidPublisher")
-        braid_publisher = BraidPublisher(config_path=config_path, event=stop_event)
+        braid_publisher = BraidPublisher(
+            config_path=config_path, event=stop_event, log_path=log_path
+        )
         braid_publisher.start()
         processes.append(("BraidPublisher", braid_publisher))
         active_process_names.append("BraidPublisher")
@@ -244,7 +244,9 @@ def main():
 
         # 2. TriggerHandler - applies spatial/temporal gating
         print("  ✓ TriggerHandler")
-        trigger_handler = TriggerHandler(config_path=config_path, event=stop_event)
+        trigger_handler = TriggerHandler(
+            config_path=config_path, event=stop_event, log_path=log_path
+        )
         trigger_handler.start()
         processes.append(("TriggerHandler", trigger_handler))
         active_process_names.append("TriggerHandler")
@@ -276,7 +278,10 @@ def main():
         if config.get("visual_stimuli", {}).get("active", False):
             print("  ✓ VisualStimuliProcess")
             visual_stimuli = VisualStimuliProcess(
-                config_path=config_path, event=stop_event, braid_folder=braid_folder
+                config_path=config_path,
+                event=stop_event,
+                braid_folder=braid_folder,
+                log_path=log_path,
             )
             visual_stimuli.start()
             processes.append(("VisualStimuliProcess", visual_stimuli))
@@ -294,7 +299,10 @@ def main():
                     / Path(braid_folder).name
                 )
             camera = CameraProcess(
-                config_path=config_path, event=stop_event, save_folder=video_folder
+                config_path=config_path,
+                event=stop_event,
+                save_folder=video_folder,
+                log_path=log_path,
             )
             camera.start()
             processes.append(("CameraProcess", camera))
@@ -302,8 +310,11 @@ def main():
 
             print("  ✓ LiquidLens")
             liquid_lens = LiquidLens(
-                event=stop_event, config_path=config_path, braid_folder=braid_folder,
+                event=stop_event,
+                config_path=config_path,
+                braid_folder=braid_folder,
                 video_folder=video_folder,
+                log_path=log_path,
             )
             liquid_lens.start()
             processes.append(("LiquidLens", liquid_lens))
@@ -313,7 +324,10 @@ def main():
         if config.get("opto_trigger", {}).get("active", False):
             print("  ✓ OptoTriggerWorker")
             opto_trigger = OptoTriggerWorker(
-                event=stop_event, braid_folder=braid_folder, config_path=config_path
+                event=stop_event,
+                braid_folder=braid_folder,
+                config_path=config_path,
+                log_path=log_path,
             )
             opto_trigger.start()
             processes.append(("OptoTriggerWorker", opto_trigger))

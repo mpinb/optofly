@@ -313,14 +313,14 @@ def check_camera_prerequisites(config_path: str = "configs/config.toml") -> dict
         project_root / "optofly-camera" / "target" / "release" / "optofly-camera",
         project_root / "optofly-camera" / "target" / "debug" / "optofly-camera",
     ]
-    found_binary = any(p.exists() for p in binary_candidates) or shutil.which("optofly-camera")
+    found_binary = any(p.exists() for p in binary_candidates) or shutil.which(
+        "optofly-camera"
+    )
     if found_binary:
         results["binary"] = True
     else:
         results["errors"].append("optofly-camera binary not found")
-        results["errors"].append(
-            "Build: cd optofly-camera && cargo build --release"
-        )
+        results["errors"].append("Build: cd optofly-camera && cargo build --release")
 
     # Check 2: ffmpeg available
     if shutil.which("ffmpeg"):
@@ -395,9 +395,11 @@ class CameraProcess(WorkerProcess):
         process_name: str = "CameraProcess",
         log_level: str = "INFO",
         log_color: str = "CYAN",
+        log_path: str | None = None,
     ):
         super().__init__(
             event=event,
+            log_path=log_path,
             log_level=log_level,
             log_color=log_color,
             process_name=process_name,
@@ -412,12 +414,10 @@ class CameraProcess(WorkerProcess):
         # ZMQ config loaded later in run() to avoid fork issues
         self.zmq_config_path = config_path
 
-    def run(self) -> None:
+    def _run(self) -> None:
         """Main capture loop — runs inside the child process."""
         from ximea import Camera, Image
 
-        # Initialize logger in child process
-        self._initialize_logger()
         self.logger.info("Starting CameraProcess")
 
         # Pre-flight checks
@@ -557,7 +557,14 @@ class CameraProcess(WorkerProcess):
 
         def _finish_recording(reason: str = "unknown"):
             """Flush current buffer to encoder and swap to standby."""
-            nonlocal active_idx, buf_idx, state, recording_obj_id, recording_frame, rec_dropped, trigger_frame_idx
+            nonlocal \
+                active_idx, \
+                buf_idx, \
+                state, \
+                recording_obj_id, \
+                recording_frame, \
+                rec_dropped, \
+                trigger_frame_idx
             n_filled = buf_idx
             if n_filled == 0:
                 self.logger.warning("Recording ended with 0 frames, skipping encode")
@@ -653,7 +660,9 @@ class CameraProcess(WorkerProcess):
                     _memmove(
                         buffers[active_idx][buf_idx].ctypes.data, img.bp, frame_bytes
                     )
-                    cam_time_ns = int(img.tsSec) * 1_000_000_000 + int(img.tsUSec) * 1_000
+                    cam_time_ns = (
+                        int(img.tsSec) * 1_000_000_000 + int(img.tsUSec) * 1_000
+                    )
                     meta_buffers[active_idx][buf_idx] = (
                         img.nframe,
                         img.tsSec,
@@ -688,7 +697,10 @@ class CameraProcess(WorkerProcess):
                                 _finish_recording(exit_reason)
                         elif topic_str == zmq_config.pre_zone_exit_topic:
                             msg = json.loads(message.decode())
-                            if msg["obj_id"] == recording_obj_id and trigger_frame_idx is None:
+                            if (
+                                msg["obj_id"] == recording_obj_id
+                                and trigger_frame_idx is None
+                            ):
                                 # Fly left pre-zone without ever reaching real zone — stop recording
                                 exit_reason = msg.get("reason", "left_pre_zone")
                                 self.logger.info(
@@ -762,9 +774,11 @@ class RustCameraProcess(WorkerProcess):
         process_name: str = "RustCamera",
         log_level: str = "INFO",
         log_color: str = "CYAN",
+        log_path: str | None = None,
     ):
         super().__init__(
             event=event,
+            log_path=log_path,
             log_level=log_level,
             log_color=log_color,
             process_name=process_name,
@@ -795,9 +809,8 @@ class RustCameraProcess(WorkerProcess):
             f"Build with: cd optofly-camera && cargo build --release"
         )
 
-    def run(self) -> None:
+    def _run(self) -> None:
         """Launch the Rust binary and wait for it to finish."""
-        self._initialize_logger()
         self.logger.info("Starting RustCameraProcess")
 
         try:
@@ -810,9 +823,12 @@ class RustCameraProcess(WorkerProcess):
 
         cmd = [
             binary,
-            "--config", self.config_path,
-            "--save-folder", self.save_folder,
-            "--log-level", "warn",
+            "--config",
+            self.config_path,
+            "--save-folder",
+            self.save_folder,
+            "--log-level",
+            "warn",
         ]
         self.logger.info("Launching: %s", " ".join(cmd))
 

@@ -101,6 +101,7 @@ class LiquidLens(WorkerProcess):
         process_name: str = "LiquidLens",
         log_level: str = "INFO",
         log_color: str = "GREEN",
+        log_path: str | None = None,
     ):
         """
         Initialize the LiquidLens process.
@@ -112,17 +113,17 @@ class LiquidLens(WorkerProcess):
             process_name: Name to display in logs
             log_level: Logging level to use
             log_color: Color for log messages
+            log_path: Path to shared log file (written from child process)
         """
         if event is None:
             raise ValueError("LiquidLens requires an external stop event.")
         super().__init__(
             event=event,
+            log_path=log_path,
             log_level=log_level,
             log_color=log_color,
             process_name=process_name,
         )
-
-        self._initialize_logger()
 
         self.lens_config = LiquidLensConfig(config_path)
         self.zmq_config = ZMQConfig(config_path)
@@ -496,13 +497,8 @@ class LiquidLens(WorkerProcess):
             self.logger.error(f"Error predicting position for object {obj_id}: {e}")
             return None
 
-    def run(self):
-        try:
-            self.initialize()
-        except Exception as e:
-            self.logger.error(f"Liquid Lens failed to initialize: {e}")
-            return
-
+    def _run(self):
+        self.initialize()
         self.is_running = True
         self.logger.info("Liquid Lens process started.")
 
@@ -516,12 +512,20 @@ class LiquidLens(WorkerProcess):
                 topic, raw_msg = self._receive_message(self.trigger_socket, "trigger")
                 if topic is not None and raw_msg is not None:
                     if (
-                        topic in (self.zmq_config.zone_enter_topic, self.zmq_config.pre_zone_enter_topic)
+                        topic
+                        in (
+                            self.zmq_config.zone_enter_topic,
+                            self.zmq_config.pre_zone_enter_topic,
+                        )
                         and not self.is_tracking
                     ):
                         obj_id = raw_msg.get("obj_id")
                         if obj_id is not None:
-                            event_name = "PRE_ZONE_ENTER" if topic == self.zmq_config.pre_zone_enter_topic else "ZONE_ENTER"
+                            event_name = (
+                                "PRE_ZONE_ENTER"
+                                if topic == self.zmq_config.pre_zone_enter_topic
+                                else "ZONE_ENTER"
+                            )
                             self.logger.info(
                                 f"{event_name}: start tracking object {obj_id}"
                             )
@@ -534,12 +538,20 @@ class LiquidLens(WorkerProcess):
                             self._recording_obj_id = obj_id
                             self._recording_frame = raw_msg.get("frame")
                     elif (
-                        topic in (self.zmq_config.zone_exit_topic, self.zmq_config.pre_zone_exit_topic)
+                        topic
+                        in (
+                            self.zmq_config.zone_exit_topic,
+                            self.zmq_config.pre_zone_exit_topic,
+                        )
                         and self.is_tracking
                     ):
                         if raw_msg.get("obj_id") == self.current_tracked_obj:
                             reason = raw_msg.get("reason", "unknown")
-                            event_name = "PRE_ZONE_EXIT" if topic == self.zmq_config.pre_zone_exit_topic else "ZONE_EXIT"
+                            event_name = (
+                                "PRE_ZONE_EXIT"
+                                if topic == self.zmq_config.pre_zone_exit_topic
+                                else "ZONE_EXIT"
+                            )
                             self.logger.info(
                                 f"{event_name}: stop tracking object {self.current_tracked_obj} "
                                 f"reason={reason}"
@@ -652,21 +664,23 @@ class LiquidLens(WorkerProcess):
                             diopter=dpt,
                             kalman=self.lens_config.kalman_enabled,
                         )
-                        self._timing_rows.append({
-                            "t_braid": braid_data.get("timestamp"),
-                            "t_relay": braid_data.get("t_relay"),
-                            "t_braid_received": t_braid_received,
-                            "t_diopter_sent": t_diopter_sent,
-                            "delay_ms": delay_ms,
-                            "frame": braid_data.get("frame"),
-                            "obj_id": self.current_tracked_obj,
-                            "x": x,
-                            "y": y,
-                            "z": z,
-                            "focus_z": focus_position,
-                            "diopter": dpt,
-                            "kalman": self.lens_config.kalman_enabled,
-                        })
+                        self._timing_rows.append(
+                            {
+                                "t_braid": braid_data.get("timestamp"),
+                                "t_relay": braid_data.get("t_relay"),
+                                "t_braid_received": t_braid_received,
+                                "t_diopter_sent": t_diopter_sent,
+                                "delay_ms": delay_ms,
+                                "frame": braid_data.get("frame"),
+                                "obj_id": self.current_tracked_obj,
+                                "x": x,
+                                "y": y,
+                                "z": z,
+                                "focus_z": focus_position,
+                                "diopter": dpt,
+                                "kalman": self.lens_config.kalman_enabled,
+                            }
+                        )
                     except Exception as e:
                         self.logger.error(f"Error adjusting lens: {e}")
 
