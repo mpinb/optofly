@@ -97,6 +97,7 @@ class LiquidLens(WorkerProcess):
         event: mp.Event,
         config_path: str = "configs/config.toml",
         braid_folder: Optional[str] = None,
+        video_folder: Optional[str] = None,
         process_name: str = "LiquidLens",
         log_level: str = "INFO",
         log_color: str = "GREEN",
@@ -131,6 +132,7 @@ class LiquidLens(WorkerProcess):
         self.is_tracking = False
         self.current_tracked_obj = None
         self.braid_folder = braid_folder
+        self.video_folder = video_folder
         self.csv_writer = None
         self.kalman_filters = {}
 
@@ -208,7 +210,7 @@ class LiquidLens(WorkerProcess):
         if self._recording_obj_id is None:
             return
 
-        save_folder = self.camera_config.save_folder
+        save_folder = self.video_folder or self.camera_config.save_folder
         fname = f"obj_id_{self._recording_obj_id}_frame_{self._recording_frame}_lens_timing.csv"
         csv_path = os.path.join(save_folder, fname)
         try:

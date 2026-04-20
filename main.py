@@ -302,7 +302,8 @@ def main():
 
             print("  ✓ LiquidLens")
             liquid_lens = LiquidLens(
-                event=stop_event, config_path=config_path, braid_folder=braid_folder
+                event=stop_event, config_path=config_path, braid_folder=braid_folder,
+                video_folder=video_folder,
             )
             liquid_lens.start()
             processes.append(("LiquidLens", liquid_lens))
