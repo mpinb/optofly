@@ -156,23 +156,24 @@ class GeometryUtils:
         return int(pixel_x_scaled % self.screen_width)
 
     def degrees_to_pixels(self, angular_size_deg: float) -> int:
-        """Convert angular size to pixel radius.
+        """Convert angular diameter to pixel radius.
 
-        Uses small angle approximation: radius ≈ distance × tan(angle)
+        angular_size_deg is the full subtended angle (diameter), so we use
+        the half-angle to recover the physical radius: r = tan(θ/2) × distance
 
         Args:
-            angular_size_deg: Angular size in degrees
+            angular_size_deg: Full angular diameter in degrees
 
         Returns:
             Radius in pixels (scaled for display)
         """
-        angular_size_rad = np.deg2rad(angular_size_deg)
+        half_angle_rad = np.deg2rad(angular_size_deg / 2)
 
-        # Calculate physical size at viewing distance
-        physical_size_cm = np.tan(angular_size_rad) * self.viewing_distance_cm
+        # Calculate physical radius at viewing distance
+        physical_radius_cm = np.tan(half_angle_rad) * self.viewing_distance_cm
 
         # Convert to pixels (at full resolution)
-        radius_px = physical_size_cm * self.pixels_per_cm
+        radius_px = physical_radius_cm * self.pixels_per_cm
 
         # Scale down for display
         return int(radius_px / self.scale_factor)
