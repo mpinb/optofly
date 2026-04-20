@@ -238,7 +238,10 @@ class TestEncoderLoop:
         assert os.path.exists(csv_path), "CSV metadata not created"
         with open(csv_path) as f:
             lines = f.readlines()
-        assert lines[0].strip() == "frame_idx,nframe,ts_sec,ts_usec,cam_time_ns,trigger_frame_idx"
+        assert (
+            lines[0].strip()
+            == "frame_idx,nframe,ts_sec,ts_usec,cam_time_ns,trigger_frame_idx"
+        )
         assert len(lines) == N_FRAMES + 1  # header + data rows
 
         # Verify debug histogram
