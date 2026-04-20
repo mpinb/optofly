@@ -69,8 +69,10 @@ The ZMQ BRAID feed is only live when the full stack is running. Standalone tools
 
 All processes inherit `WorkerProcess` (`src/utils/worker.py`) and run as `multiprocessing.Process` instances. They:
 - Accept a shared `mp.Event` for coordinated shutdown
-- Initialize ZMQ sockets inside `run()` (not `__init__`) to avoid fork issues
+- Initialize ZMQ sockets inside `_run()` (not `__init__`) to avoid fork issues
 - Receive multipart ZMQ messages: `[topic_bytes, json_bytes]`
+
+**Logging**: each child process calls `configure_process_logging()` (`src/utils/logger.py`) at entry inside `WorkerProcess.run()`, which clears all inherited root-logger handlers and attaches a fresh colored stream handler + optional file handler. Subclasses override `_run()`, not `run()`. Pass `log_path=` to the constructor to get per-process log files. `main.py` calls `configure_process_logging` directly for the main process.
 
 ### ZMQ Message Formats
 
@@ -130,8 +132,10 @@ State machine (Rust binary):
 
 Output files per trial (all in `camera.save_folder`):
 - `obj_id_{N}_frame_{M}.mp4` — encoded video
-- `obj_id_{N}_frame_{M}.csv` — per-frame metadata (`frame_idx`, `nframe`, `ts_sec`, `ts_usec`, `cam_time_ns`)
+- `obj_id_{N}_frame_{M}.csv` — per-frame metadata (`frame_idx`, `nframe`, `ts_sec`, `ts_usec`, `cam_time_ns`, `trigger_frame_idx`). `trigger_frame_idx` repeats on every row — it is the buffer index at which `ZONE_ENTER` fired, marking stimulus onset. Use it to align trials: frames before it are pre-stimulus baseline, frames after are the response.
 - `obj_id_{N}_frame_{M}_lens_timing.csv` — per-adjustment lens timing (`t_braid_received`, `t_diopter_sent`, `delay_ms`, `z`, `diopter`, ...)
+
+**`max_recording_time` vs `zone_timeout`**: `camera.max_recording_time` is a frame-buffer size limit — it counts from `PRE_ZONE_ENTER` (not `ZONE_ENTER`), so it must cover pre-zone transit time + trial duration. `trigger_handler.zone_timeout` is the tracker's dead-reckoning timeout for declaring a fly has left the zone. Set `max_recording_time` ≥ `zone_timeout` + expected pre-zone transit time.
 
 ### Liquid Lens
 
