@@ -350,14 +350,16 @@ def check_camera_prerequisites(config_path: str = "configs/config.toml") -> dict
         config_dir = Path(config_path).parent
         save_path = (config_dir / save_path).resolve()
 
+    # Check that the parent exists and is writable without creating the folder itself.
+    # The actual save folder is determined per-session at runtime.
+    check_path = save_path if save_path.exists() else save_path.parent
     try:
-        save_path.mkdir(parents=True, exist_ok=True)
-        test_file = save_path / ".write_test"
+        test_file = check_path / ".write_test"
         test_file.touch()
         test_file.unlink()
         results["save_folder"] = True
     except Exception as e:
-        results["errors"].append(f"Save folder not writable: {save_path}")
+        results["errors"].append(f"Save folder parent not writable: {check_path}")
         results["errors"].append(f"Error: {e}")
 
     # Check 4: ZMQ port reachable

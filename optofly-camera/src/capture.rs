@@ -470,6 +470,11 @@ fn finish_recording(
         return;
     }
 
+    if let Err(e) = std::fs::create_dir_all(save_folder) {
+        log::error!("Cannot create save folder {}: {}", save_folder, e);
+        *state = State::Idle;
+        return;
+    }
     let base_name = format!("{}/obj_id_{}_frame_{}", save_folder, obj_id, frame);
 
     // Take the buffer out, leaving None in its slot.

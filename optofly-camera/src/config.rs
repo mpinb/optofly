@@ -1,6 +1,5 @@
 use serde::Deserialize;
 use std::fs;
-use std::path::Path;
 
 #[derive(Debug, Deserialize)]
 struct TomlRoot {
@@ -74,10 +73,6 @@ impl AppConfig {
             .map(String::from)
             .or(cam.save_folder)
             .unwrap_or_else(|| "camera_videos".to_string());
-
-        // Ensure save folder exists
-        fs::create_dir_all(Path::new(&save_folder))
-            .map_err(|e| format!("Cannot create save folder {}: {}", save_folder, e))?;
 
         Ok(AppConfig {
             width: cam.resolution[0],
