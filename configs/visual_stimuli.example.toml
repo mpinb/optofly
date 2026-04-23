@@ -78,6 +78,9 @@ circle_color = [0, 0, 0]         # RGB color (black)
 # 0° = ahead, 90° = right, -90° = left, 180° = behind
 positions_deg = [-90, 0, 90]
 
+# Sham trials: proportion of triggers where no stimulus is displayed (0.0 = none, 1.0 = all)
+sham_probability = 0.0
+
 # ------------------------------------------------------------------------------
 # Stimulus: Vertical Bar
 # ------------------------------------------------------------------------------
@@ -103,6 +106,9 @@ cooldown_duration_ms = 3000
 # System automatically balances presentations across positions
 # 0° = ahead, 90° = right, -90° = left, 180° = behind
 positions_deg = [90, 0, 180]
+
+# Sham trials: proportion of triggers where no stimulus is displayed (0.0 = none, 1.0 = all)
+sham_probability = 0.0
 
 # ------------------------------------------------------------------------------
 # Stimulus: Sweeping Bar

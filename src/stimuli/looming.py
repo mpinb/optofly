@@ -1,5 +1,6 @@
 """Looming stimulus with L/V ratio expansion dynamics."""
 
+import random
 import time
 import numpy as np
 import pyglet.shapes
@@ -60,6 +61,7 @@ class LoomingStimulusRenderer(BaseStimulus):
         self.expansion_duration_ms = None
         self.hold_time_ms = None
 
+        self.sham_probability: float = config.get("sham_probability", 0.0)
         self.expansion_type = config.get("expansion_type", "lv_ratio")
         self.lv_ratio_ms = config.get("lv_ratio_ms", 40.0)
         self.circle_color = self._parse_color(config.get("circle_color", "black"))
@@ -132,10 +134,9 @@ class LoomingStimulusRenderer(BaseStimulus):
             )
             return
 
-        # Select balanced position
+        # Select all parameters before sham check so balanced randomization is
+        # maintained and the CSV records what would have been shown.
         self.selected_position_deg = self._select_balanced_position()
-
-        # Randomly select parameters from options
         self.initial_size_deg = np.random.choice(self.initial_size_deg_options)
         self.final_size_deg = np.random.choice(self.final_size_deg_options)
         self.expansion_duration_ms = np.random.choice(
@@ -143,24 +144,25 @@ class LoomingStimulusRenderer(BaseStimulus):
         )
         self.hold_time_ms = np.random.choice(self.hold_time_ms_options)
 
-        # Calculate screen position
         fly_heading_rad = trigger_data["mean_heading"]
         self.center_x = self.geometry.heading_to_pixel_x(
             fly_heading_rad, self.selected_position_deg
         )
 
-        # Initialize expansion
+        is_sham = random.random() < self.sham_probability
+
+        self._log_stimulus_event(
+            trigger_data, self.selected_position_deg, fly_heading_rad, is_sham
+        )
+
+        if is_sham:
+            self.logger.info(f"Sham looming for obj_id={trigger_data['obj_id']}")
+            return
+
         self.state = self.EXPANDING
         self.elapsed_time = 0.0
         self.trigger_data = trigger_data
-
-        # Calculate initial radius
         self.current_radius_px = self.geometry.degrees_to_pixels(self.initial_size_deg)
-
-        # Log event to CSV
-        self._log_stimulus_event(
-            trigger_data, self.selected_position_deg, fly_heading_rad
-        )
 
         self.logger.info(
             f"Looming started: obj_id={trigger_data['obj_id']}, "
@@ -361,14 +363,9 @@ class LoomingStimulusRenderer(BaseStimulus):
         trigger_data: Dict[str, Any],
         selected_position_deg: float,
         fly_heading_rad: float,
+        sham: bool,
     ) -> None:
-        """Log complete stimulus parameters to CSV.
-
-        Args:
-            trigger_data: Trigger message data
-            selected_position_deg: Selected position offset
-            fly_heading_rad: Fly heading in radians
-        """
+        """Log complete stimulus parameters to CSV."""
         fly_heading_deg = np.rad2deg(fly_heading_rad)
         absolute_angle_deg = fly_heading_deg + selected_position_deg
 
@@ -378,6 +375,7 @@ class LoomingStimulusRenderer(BaseStimulus):
             "frame": trigger_data.get("frame"),
             "trigger_timestamp": trigger_data.get("timestamp"),
             "stimulus_type": "looming",
+            "sham": sham,
             "fly_heading_rad": fly_heading_rad,
             "fly_heading_deg": fly_heading_deg,
             "stimulus_offset_deg": selected_position_deg,

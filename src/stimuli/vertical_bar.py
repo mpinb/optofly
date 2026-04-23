@@ -5,6 +5,7 @@ the fly's heading when triggered. Used to test attractive/repulsive
 responses and reorientation behavior.
 """
 
+import random
 import time
 import numpy as np
 import pyglet.shapes
@@ -66,6 +67,8 @@ class VerticalBarStimulus(BaseStimulus):
 
         # Basic enable/disable
         self.enabled = config.get("enabled", True)
+
+        self.sham_probability: float = config.get("sham_probability", 0.0)
 
         # Bar appearance
         # -------------------------------------------------------------
@@ -262,66 +265,32 @@ class VerticalBarStimulus(BaseStimulus):
             )
             return
 
-        # ============================================================
-        # SELECT POSITION (BALANCED)
-        # ============================================================
-
-        # Choose position with least usage to ensure balanced presentation
-        # If configured with [-90, 0, 90], this ensures each gets equal usage
+        # Select all parameters before sham check so balanced randomization is
+        # maintained and the CSV records what would have been shown.
         self.selected_position_deg = self._select_balanced_position()
-
-        # ============================================================
-        # RANDOMIZE PARAMETERS
-        # ============================================================
-
-        # Randomly select duration from options
-        # Example: If display_duration_ms = [1000, 2000, 3000],
-        #          randomly pick one of these values
         self.display_duration_ms = np.random.choice(self.display_duration_ms_options)
-
-        # Randomly select cooldown duration from options
         self.cooldown_duration_ms = np.random.choice(self.cooldown_duration_ms_options)
 
-        # ============================================================
-        # CALCULATE SCREEN POSITION
-        # ============================================================
-
-        # Get fly's current heading from trigger data (radians)
         fly_heading_rad = trigger_data["mean_heading"]
-
-        # Convert fly heading + position offset to pixel x-coordinate
-        # This is where GeometryUtils does the heavy lifting!
-        # Example: Fly facing East (90°), offset +90° → show at South (180°)
         self.bar_x = self.geometry.heading_to_pixel_x(
             fly_heading_rad, self.selected_position_deg
         )
-
-        # Center bar vertically on screen
         self.bar_y = (self.window_height - self.actual_bar_height) // 2
 
-        # ============================================================
-        # ACTIVATE STIMULUS
-        # ============================================================
+        is_sham = random.random() < self.sham_probability
 
-        # Transition to ACTIVE state
-        self.state = self.ACTIVE
-
-        # Reset elapsed time counter
-        self.elapsed_time = 0.0
-
-        # Store trigger data for logging
-        self.trigger_data = trigger_data
-
-        # ============================================================
-        # LOG EVENT
-        # ============================================================
-
-        # Record complete event details to CSV for later analysis
         self._log_stimulus_event(
-            trigger_data, self.selected_position_deg, fly_heading_rad
+            trigger_data, self.selected_position_deg, fly_heading_rad, is_sham
         )
 
-        # Log to console for real-time monitoring
+        if is_sham:
+            self.logger.info(f"Sham vertical_bar for obj_id={trigger_data['obj_id']}")
+            return
+
+        self.state = self.ACTIVE
+        self.elapsed_time = 0.0
+        self.trigger_data = trigger_data
+
         self.logger.info(
             f"VerticalBar started: obj_id={trigger_data['obj_id']}, "
             f"heading={np.rad2deg(fly_heading_rad):.1f}°, "
@@ -562,53 +531,32 @@ class VerticalBarStimulus(BaseStimulus):
         trigger_data: Dict[str, Any],
         selected_position_deg: float,
         fly_heading_rad: float,
+        sham: bool,
     ) -> None:
-        """Log complete stimulus parameters to CSV.
-
-        Records all relevant information about this stimulus presentation
-        for later analysis.
-
-        Args:
-            trigger_data: Original trigger message data
-            selected_position_deg: Position offset used (degrees)
-            fly_heading_rad: Fly heading when triggered (radians)
-        """
-        # Convert angles to degrees for readability
+        """Log complete stimulus parameters to CSV."""
         fly_heading_deg = np.rad2deg(fly_heading_rad)
-
-        # Calculate absolute angle on screen
-        # Example: Fly at 90°, offset +90° → bar at 180°
         absolute_angle_deg = fly_heading_deg + selected_position_deg
 
-        # Prepare log entry with all relevant data
         log_data = {
-            # Timestamps
-            "timestamp": time.time(),  # When logged
+            "timestamp": time.time(),
             "trigger_timestamp": trigger_data.get("timestamp"),
-            # Tracking data
-            "obj_id": trigger_data["obj_id"],  # Fly ID
-            "frame": trigger_data["frame"],  # Camera frame
-            # Stimulus identification
+            "obj_id": trigger_data["obj_id"],
+            "frame": trigger_data["frame"],
             "stimulus_type": "vertical_bar",
-            # Fly state
+            "sham": sham,
             "fly_heading_rad": fly_heading_rad,
             "fly_heading_deg": fly_heading_deg,
-            # Stimulus position
-            "stimulus_offset_deg": selected_position_deg,  # Relative to fly
-            "stimulus_absolute_angle_deg": absolute_angle_deg,  # Absolute on screen
-            # Screen coordinates
+            "stimulus_offset_deg": selected_position_deg,
+            "stimulus_absolute_angle_deg": absolute_angle_deg,
             "pixel_x": self.bar_x,
             "pixel_y": self.bar_y,
-            # Bar appearance
             "bar_width_px": self.bar_width_px,
             "bar_height_px": self.actual_bar_height,
             "bar_color": str(self.bar_color),
-            # Timing parameters
             "display_duration_ms": self.display_duration_ms,
             "cooldown_duration_ms": self.cooldown_duration_ms,
         }
 
-        # Write to CSV file
         self.csv_writer.append(log_data)
 
     def _parse_color(self, color) -> tuple:
