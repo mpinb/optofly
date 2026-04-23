@@ -140,6 +140,9 @@ dmypy.json
 # Web UI (WIP - lives on webui branch)
 web/
 
+# Camera video output (fallback folder created at runtime)
+camera_videos/
+
 # Data files / output logs
 visual_stimuli.csv
 visual_stimuli.csv.*.bak
