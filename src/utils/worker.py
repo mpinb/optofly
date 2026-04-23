@@ -19,7 +19,7 @@ class WorkerProcess(Process):
         self.log_level = log_level
         self.log_color = log_color
         self.process_name = process_name
-        self.logger: logging.Logger | None = None
+        self.logger = logging.getLogger(self.__class__.__module__)
 
     def start(self):
         original = signal.getsignal(signal.SIGINT)

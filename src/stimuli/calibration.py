@@ -33,7 +33,9 @@ def run_screen_identification(
     print("=== Screen Identification Calibration ===")
     print("This will display labels on each screen.")
     print(f"Current screen_mapping: {screen_mapping}")
-    print("Verify the labels match the physical layout. If not, update screen_mapping in configs/visual_stimuli.toml.")
+    print(
+        "Verify the labels match the physical layout. If not, update screen_mapping in configs/visual_stimuli.toml."
+    )
     print("Press ESC to exit.")
     print()
 
@@ -96,7 +98,9 @@ def run_screen_identification(
     signal.signal(signal.SIGINT, sigint_handler)
 
     print("Displaying screen labels...")
-    print("If labels do not match physical layout, update screen_mapping in configs/visual_stimuli.toml.")
+    print(
+        "If labels do not match physical layout, update screen_mapping in configs/visual_stimuli.toml."
+    )
     print()
 
     pyglet.app.run()

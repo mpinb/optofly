@@ -557,7 +557,9 @@ if __name__ == "__main__":
         window_width=vis_cfg.get("window_width", 7680),
         window_height=vis_cfg.get("window_height", 1080),
         window_x_offset=vis_cfg.get("window_x_offset", 3840),
-        screen_mapping=vis_cfg.get("screen_mapping", ["West", "North", "East", "South"]),
+        screen_mapping=vis_cfg.get(
+            "screen_mapping", ["West", "North", "East", "South"]
+        ),
     )
 
     # Handle calibration modes

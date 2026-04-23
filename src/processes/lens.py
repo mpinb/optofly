@@ -141,7 +141,6 @@ class LiquidLens(WorkerProcess):
     def _flush_timing_csv(self):
         if not self._timing_rows or self._recording_obj_id is None:
             return
-
         save_folder = self.video_folder or self.camera_config.save_folder
         fname = f"obj_id_{self._recording_obj_id}_frame_{self._recording_frame}_lens_timing.csv"
         csv_path = os.path.join(save_folder, fname)
