@@ -20,9 +20,9 @@ The camera subsystem has two layers:
 Single-process design with a background encoder thread:
 
 1. **Capture loop** (`capture.rs`) — opens XIMEA camera via `xiapi`, captures frames at 500fps into a linear double-buffer
-2. **State machine** — `Idle` polls ZMQ for `PRE_ZONE_ENTER` or `ZONE_ENTER`; on either, transitions to `Recording`. In `Recording`, captures frames linearly, stamps `trigger_frame_idx` when the real `ZONE_ENTER` arrives, and polls for `ZONE_EXIT` / `PRE_ZONE_EXIT`. On exit (or buffer full), hands buffer to encoder
+2. **State machine** — `Idle` polls ZMQ for `ZONE_ENTER`; on receipt, transitions to `Recording`. In `Recording`, captures frames linearly and polls for `ZONE_EXIT`. On exit (or buffer full), hands the buffer to the encoder
 3. **Encoder thread** (`encoder.rs`) — pipes raw frames to ffmpeg stdin (single contiguous write), writes CSV metadata
-4. **Config** (`config.rs`) — reads `[camera]` and `[zmq]` sections from the shared TOML config, including `pre_zone_enter_topic` and `pre_zone_exit_topic`
+4. **Config** (`config.rs`) — reads `[camera]` and `[zmq]` sections from the shared TOML config
 
 **Double-buffer pattern:** Two pre-allocated `Vec<u8>` buffers sized for `max_recording_time + 1s`. On recording completion, the active buffer is swapped via `std::mem::replace` and enqueued for encoding. The encoder reads the old buffer while capture continues into the new one.
 
@@ -84,20 +84,16 @@ exposure_time = 900
 max_recording_time = 3.0   # seconds, controls buffer size
 
 [zmq]
-trigger_address = "tcp://localhost:5556"
+trigger_port = 5556
 zone_enter_topic = "ZONE_ENTER"
 zone_exit_topic = "ZONE_EXIT"
-pre_zone_enter_topic = "PRE_ZONE_ENTER"
-pre_zone_exit_topic  = "PRE_ZONE_EXIT"
 ```
 
 ## ZMQ Protocol
 
-Subscribes to topics `PRE_ZONE_ENTER`, `PRE_ZONE_EXIT`, `ZONE_ENTER`, `ZONE_EXIT`, and `kill` on port 5556 (multipart):
+Subscribes to topics `ZONE_ENTER`, `ZONE_EXIT`, and `kill` on port 5556 (multipart):
 ```
-[b"PRE_ZONE_ENTER", b'{"obj_id": 123, "frame": 4567, "x": 0.01, "y": -0.02, "z": 0.18, "mean_heading": 0.52}']
 [b"ZONE_ENTER",     b'{"obj_id": 123, "frame": 4589, "x": 0.01, "y": -0.02, "z": 0.18, "mean_heading": 0.52}']
-[b"PRE_ZONE_EXIT",  b'{"obj_id": 123, "reason": "left_pre_zone", "timestamp": 1234.78, "duration": 0.22}']
 [b"ZONE_EXIT",      b'{"obj_id": 123, "reason": "left_fov", "timestamp": 1234.80, "duration": 0.20}']
 ```
 
@@ -107,10 +103,7 @@ Kill signal: `[b"kill", b""]`
 
 | State | Event | Action |
 |-------|-------|--------|
-| IDLE | `PRE_ZONE_ENTER` | → RECORDING; `trigger_frame_idx = None` |
-| IDLE | `ZONE_ENTER` | → RECORDING; `trigger_frame_idx = 0` (backward-compat when `pre_zone_expansion = 0`) |
-| RECORDING | `ZONE_ENTER` | stamp `trigger_frame_idx = current_buf_idx`; log pre-trigger frame count |
-| RECORDING | `PRE_ZONE_EXIT` (no ZONE_ENTER seen) | abort — fly left pre-zone without entering real zone |
+| IDLE | `ZONE_ENTER` | → RECORDING; `trigger_frame_idx = 0` |
 | RECORDING | `ZONE_EXIT` | finish and hand buffer to encoder |
 
 ## Output

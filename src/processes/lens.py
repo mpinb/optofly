@@ -87,12 +87,7 @@ class LiquidLens(WorkerProcess):
         self.trigger_socket.connect(
             self.zmq_config.get_subscriber_address(self.zmq_config.trigger_port)
         )
-        for topic in (
-            self.zmq_config.zone_enter_topic,
-            self.zmq_config.zone_exit_topic,
-            self.zmq_config.pre_zone_enter_topic,
-            self.zmq_config.pre_zone_exit_topic,
-        ):
+        for topic in (self.zmq_config.zone_enter_topic, self.zmq_config.zone_exit_topic):
             self.trigger_socket.setsockopt_string(zmq.SUBSCRIBE, topic)
         self.logger.debug("Connected to BraidPublisher and TriggerHandler.")
 
@@ -163,163 +158,118 @@ class LiquidLens(WorkerProcess):
             self._recording_obj_id = None
             self._recording_frame = None
 
-    def _stop_tracking(self, reason: str = ""):
+    def _stop_tracking(self):
         self._flush_timing_csv()
         self.kalman = None
         self.is_tracking = False
         self.current_tracked_obj = None
-        if reason:
-            self.logger.debug(f"Stopped tracking: {reason}")
+
+    def _drain_braid_idle(self):
+        """Discard queued BRAID traffic while no trial is active."""
+        while True:
+            try:
+                self.braid_socket.recv_multipart(flags=zmq.NOBLOCK)
+            except zmq.Again:
+                break
+
+    def _get_latest_update_for_current_object(self):
+        """Return the newest queued BRAID update for the tracked object."""
+        latest_update = None
+        saw_death = False
+
+        while True:
+            try:
+                _, raw = self.braid_socket.recv_multipart(flags=zmq.NOBLOCK)
+            except zmq.Again:
+                break
+
+            braid_msg = json.loads(raw)
+
+            if "Death" in braid_msg and braid_msg["Death"] == self.current_tracked_obj:
+                saw_death = True
+                continue
+
+            if "Update" not in braid_msg:
+                continue
+
+            update = braid_msg["Update"]
+            if update.get("obj_id") != self.current_tracked_obj:
+                continue
+
+            latest_update = update
+        return latest_update, saw_death
 
     def _run(self):
         self.initialize()
         self.is_running = True
         self.logger.info("Liquid Lens process started.")
 
-        position_timeout = self.lens_config.zone_timeout
-        # Both topics treated identically — PRE_ZONE_ENTER just arrives earlier,
-        # giving the lens a head-start before the fly reaches the actual trigger zone.
-        enter_topics = (
-            self.zmq_config.zone_enter_topic,
-            self.zmq_config.pre_zone_enter_topic,
-        )
-        exit_topics = (
-            self.zmq_config.zone_exit_topic,
-            self.zmq_config.pre_zone_exit_topic,
-        )
-
         while self.is_running and not self.stop_event.is_set():
             try:
-                # ----------------------------------------------------------------
-                # 1. Check for zone events from TriggerHandler (non-blocking).
-                #    These start/stop tracking regardless of whether a Braid
-                #    position update is available this iteration.
-                # ----------------------------------------------------------------
+                # Handle trigger events.
                 try:
                     topic_b, raw = self.trigger_socket.recv_multipart(flags=zmq.NOBLOCK)
                     topic = topic_b.decode()
                     msg = json.loads(raw)
 
-                    # If we're not tracking AND it's an enter_zone topic
-                    if topic in enter_topics and not self.is_tracking:
+                    if topic == self.zmq_config.zone_enter_topic and not self.is_tracking:
                         obj_id = msg.get("obj_id")
                         if obj_id is not None:
-                            event_name = (
-                                "PRE_ZONE_ENTER"
-                                if topic == self.zmq_config.pre_zone_enter_topic
-                                else "ZONE_ENTER"
-                            )
-                            self.logger.info(
-                                f"{event_name}: start tracking object {obj_id}"
-                            )
+                            self.logger.info(f"ZONE_ENTER: start tracking object {obj_id}")
 
-                            # Start tracking this object and log the event.
-                            # The actual lens adjustments will begin when the next Braid position update arrives,
-                            # which should be shortly since the trigger was just activated.
                             self.is_tracking = True
                             self.current_tracked_obj = obj_id
                             self.last_position_time = time.time()
-                            self._log_csv(event_name.lower(), obj_id=obj_id)
+                            self._log_csv("zone_enter", obj_id=obj_id)
 
-                            # Reset per-trial buffers; Kalman starts fresh each trial.
                             self._timing_rows = []
                             self._recording_obj_id = obj_id
                             self._recording_frame = msg.get("frame")
                             self.kalman = None
 
-                    # If we're tracking AND it's an exit_zone topic for the currently tracked object, stop tracking.
-                    elif topic in exit_topics and self.is_tracking:
+                    elif topic == self.zmq_config.zone_exit_topic and self.is_tracking:
                         if msg.get("obj_id") == self.current_tracked_obj:
                             reason = msg.get("reason", "unknown")
-                            event_name = (
-                                "PRE_ZONE_EXIT"
-                                if topic == self.zmq_config.pre_zone_exit_topic
-                                else "ZONE_EXIT"
-                            )
                             self.logger.info(
-                                f"{event_name}: stop tracking object {self.current_tracked_obj} reason={reason}"
+                                f"ZONE_EXIT: stop tracking object {self.current_tracked_obj} reason={reason}"
                             )
                             self._log_csv(
-                                event_name.lower(),
+                                "zone_exit",
                                 obj_id=self.current_tracked_obj,
                                 reason=reason,
                             )
                             self._stop_tracking()
 
                 except zmq.Again:
-                    pass  # no trigger message this iteration — normal
+                    pass
 
-                # ----------------------------------------------------------------
-                # 2. If not tracking, nothing to do — sleep and loop.
-                # ----------------------------------------------------------------
+                # Stay current while idle.
                 if not self.is_tracking:
+                    self._drain_braid_idle()
                     time.sleep(0.01)
                     continue
 
-                # ----------------------------------------------------------------
-                # 3. Pull the latest position update from Braid (non-blocking).
-                #    t_braid_received is stamped here so the per-row delay
-                #    reflects end-to-end latency from message arrival to lens cmd.
-                # ----------------------------------------------------------------
-                t_braid_received = time.time()
-                try:
-                    _, raw = self.braid_socket.recv_multipart(flags=zmq.NOBLOCK)
-                    braid_msg = json.loads(raw)
-                except zmq.Again:
-                    # No update available. If the gap exceeds position_timeout,
-                    # assume the fly left without a clean ZONE_EXIT (e.g. Braid
-                    # tracking dropout) and stop tracking defensively.
-                    if time.time() - self.last_position_time > position_timeout:
-                        self.logger.warning(
-                            f"No position data for {position_timeout}s, stopping tracking"
-                        )
-                        self._log_csv(
-                            "timeout",
-                            obj_id=self.current_tracked_obj,
-                            reason="position_timeout",
-                        )
-                        self._stop_tracking()
-                    else:
-                        time.sleep(0.001)
+                # Use only the newest update for the tracked object.
+                update, saw_death = self._get_latest_update_for_current_object()
+
+                if saw_death:
+                    self.logger.warning(
+                        "BRAID reported death for tracked object %s before ZONE_EXIT",
+                        self.current_tracked_obj,
+                    )
+
+                if update is None:
+                    time.sleep(0.001)
                     continue
 
-                # ----------------------------------------------------------------
-                # 4. Handle Braid message types.
-                #    Death  → stop tracking immediately (fly lost by Braid).
-                #    Update → proceed to focus adjustment below.
-                #    Other  → skip (Birth, CalibrationFlydraXml, etc.)
-                # ----------------------------------------------------------------
-                if "Death" in braid_msg:
-                    if braid_msg["Death"] == self.current_tracked_obj:
-                        self.logger.info(
-                            f"Tracked object {self.current_tracked_obj} died"
-                        )
-                        self._log_csv(
-                            "death",
-                            obj_id=self.current_tracked_obj,
-                            reason="object_death",
-                        )
-                        self._stop_tracking()
-                    continue
-
-                if "Update" not in braid_msg:
-                    continue
-                u = braid_msg["Update"]
-
-                # Ignore updates for objects we're not tracking (multi-fly arena).
-                if u.get("obj_id") != self.current_tracked_obj:
-                    continue
-
+                u = update
                 self.last_position_time = time.time()
                 x, y, z = u["x"], u["y"], u["z"]
                 vx, vy, vz = u.get("xvel", 0.0), u.get("yvel", 0.0), u.get("zvel", 0.0)
                 timestamp = u.get("timestamp")
+                t_relay = u.get("t_relay")
 
-                # ----------------------------------------------------------------
-                # 5. Update Kalman filter with the new measurement.
-                #    First update of a trial initialises the filter; subsequent
-                #    updates fuse position + velocity into the 6D state estimate.
-                # ----------------------------------------------------------------
+                # Update the predictor.
                 if self.lens_config.kalman_enabled:
                     if self.kalman is None:
                         self.kalman = KalmanFilter(
@@ -331,13 +281,7 @@ class LiquidLens(WorkerProcess):
                     else:
                         self.kalman.update((x, y, z), (vx, vy, vz), timestamp)
 
-                # ----------------------------------------------------------------
-                # 6. Determine the z to focus at.
-                #    With Kalman: predict system_latency + prediction_horizon
-                #    seconds ahead so the lens is already focused when the fly
-                #    arrives, compensating for serial command + mechanical settle.
-                #    Without Kalman: use current z directly.
-                # ----------------------------------------------------------------
+                # Pick the focus depth.
                 focus_z = z
                 if self.lens_config.kalman_enabled and self.kalman is not None:
                     prediction_time = (
@@ -347,22 +291,14 @@ class LiquidLens(WorkerProcess):
                     predicted = self.kalman.predict(prediction_time)
                     if predicted is not None:
                         focus_z = predicted[2]
-                        self.logger.debug(
-                            f"Predicted z={focus_z:.3f} (current z={z:.3f})"
-                        )
 
-                # ----------------------------------------------------------------
-                # 7. Convert z → diopters and send to lens hardware.
-                #    Timing is recorded for post-hoc latency analysis.
-                # ----------------------------------------------------------------
+                # Command the lens and record timing.
                 try:
                     dpt = self.lens_calibration.get_dpt(focus_z)
+                    t_braid_received = time.time()
                     self.lens_driver.set_diopter(dpt)
                     t_diopter_sent = time.time()
                     delay_ms = (t_diopter_sent - t_braid_received) * 1000.0
-                    self.logger.debug(
-                        f"Setting lens to {dpt:.3f} dpt for z={focus_z:.3f} (delay={delay_ms:.2f} ms)"
-                    )
                     self._log_csv(
                         "focus",
                         obj_id=self.current_tracked_obj,
@@ -376,7 +312,7 @@ class LiquidLens(WorkerProcess):
                     self._timing_rows.append(
                         {
                             "t_braid": timestamp,
-                            "t_relay": u.get("t_relay"),
+                            "t_relay": t_relay,
                             "t_braid_received": t_braid_received,
                             "t_diopter_sent": t_diopter_sent,
                             "delay_ms": delay_ms,

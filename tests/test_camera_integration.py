@@ -92,8 +92,8 @@ def test_trigger_simulation(
     # Wait for camera to be ready
     time.sleep(2)
 
-    # Send test triggers
-    print(f"\nSending test triggers for {duration}s...")
+    # Send test zone-enter events
+    print(f"\nSending test ZONE_ENTER events for {duration}s...")
     start_time = time.time()
     trigger_count = 0
 
@@ -104,10 +104,10 @@ def test_trigger_simulation(
                 "frame": trigger_count * 100,
             }
             message = json.dumps(trigger_msg)
-            publisher.send_multipart([b"TRIGGER", message.encode()])
+            publisher.send_multipart([b"ZONE_ENTER", message.encode()])
             trigger_count += 1
             print(
-                f"  Sent trigger {trigger_count}: obj_id=999, frame={trigger_count * 100}"
+                f"  Sent ZONE_ENTER {trigger_count}: obj_id=999, frame={trigger_count * 100}"
             )
             time.sleep(1.5)
 
@@ -124,7 +124,7 @@ def test_trigger_simulation(
     publisher.close()
     context.term()
 
-    print(f"\nSent {trigger_count} triggers successfully")
+    print(f"\nSent {trigger_count} ZONE_ENTER events successfully")
 
     # Check for output files
     print("\nChecking for output files...")
@@ -170,7 +170,7 @@ def main():
     print("Ready to run trigger simulation test.")
     print("This will:")
     print("  1. Start the camera process")
-    print("  2. Send simulated TRIGGER messages")
+    print("  2. Send simulated ZONE_ENTER messages")
     print("  3. Record short video clips")
     print("=" * 60)
 

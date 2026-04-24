@@ -1,3 +1,10 @@
+"""
+Manual ZMQ publisher for sending synthetic ZONE_ENTER events.
+
+This file is not part of the automated pytest suite.
+Real trigger behavior coverage lives in tests/test_trigger_handler.py.
+"""
+
 import zmq
 import json
 from dataclasses import dataclass
