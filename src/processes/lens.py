@@ -172,9 +172,9 @@ class LiquidLens(WorkerProcess):
             except zmq.Again:
                 break
 
-    def _get_latest_update_for_current_object(self):
-        """Return the newest queued BRAID update for the tracked object."""
-        latest_update = None
+    def _get_next_update_for_current_object(self, scan_ahead: int = 0):
+        """Return the next usable BRAID update for the tracked object."""
+        candidate = None
         saw_death = False
 
         while True:
@@ -196,8 +196,32 @@ class LiquidLens(WorkerProcess):
             if update.get("obj_id") != self.current_tracked_obj:
                 continue
 
-            latest_update = update
-        return latest_update, saw_death
+            candidate = update
+            break
+
+        if candidate is None:
+            return None, saw_death
+
+        for _ in range(max(scan_ahead, 0)):
+            try:
+                _, raw = self.braid_socket.recv_multipart(flags=zmq.NOBLOCK)
+            except zmq.Again:
+                break
+
+            braid_msg = json.loads(raw)
+
+            if "Death" in braid_msg and braid_msg["Death"] == self.current_tracked_obj:
+                saw_death = True
+                continue
+
+            if "Update" not in braid_msg:
+                continue
+
+            update = braid_msg["Update"]
+            if update.get("obj_id") == self.current_tracked_obj:
+                candidate = update
+
+        return candidate, saw_death
 
     def _run(self):
         self.initialize()
@@ -212,6 +236,7 @@ class LiquidLens(WorkerProcess):
                     topic = topic_b.decode()
                     msg = json.loads(raw)
 
+                    # If we see a zone enter for an object and we're not already tracking, start tracking it.
                     if topic == self.zmq_config.zone_enter_topic and not self.is_tracking:
                         obj_id = msg.get("obj_id")
                         if obj_id is not None:
@@ -227,6 +252,7 @@ class LiquidLens(WorkerProcess):
                             self._recording_frame = msg.get("frame")
                             self.kalman = None
 
+                    # If we see a zone exit for the currently tracked object, stop tracking it.
                     elif topic == self.zmq_config.zone_exit_topic and self.is_tracking:
                         if msg.get("obj_id") == self.current_tracked_obj:
                             reason = msg.get("reason", "unknown")
@@ -250,7 +276,7 @@ class LiquidLens(WorkerProcess):
                     continue
 
                 # Use only the newest update for the tracked object.
-                update, saw_death = self._get_latest_update_for_current_object()
+                update, saw_death = self._get_next_update_for_current_object()
 
                 if saw_death:
                     self.logger.warning(
