@@ -96,7 +96,10 @@ class LiquidLens(WorkerProcess):
         self.trigger_socket.connect(
             self.zmq_config.get_subscriber_address(self.zmq_config.trigger_port)
         )
-        for topic in (self.zmq_config.zone_enter_topic, self.zmq_config.zone_exit_topic):
+        for topic in (
+            self.zmq_config.zone_enter_topic,
+            self.zmq_config.zone_exit_topic,
+        ):
             self.trigger_socket.setsockopt_string(zmq.SUBSCRIBE, topic)
         self.logger.debug("Connected to BraidPublisher and TriggerHandler.")
 
@@ -181,9 +184,13 @@ class LiquidLens(WorkerProcess):
             except zmq.Again:
                 break
 
-    def _get_next_update_for_current_object(self, scan_ahead: int = 0):
-        """Return the next usable BRAID update for the tracked object."""
-        candidate = None
+    def _get_next_update_for_current_object(self):
+        """Drain the queue and return the most recent BRAID update for the tracked object.
+
+        Older queued updates are discarded — the Kalman predictor extrapolates
+        from the freshest measurement, so chasing stale positions is wasted work.
+        """
+        latest = None
         saw_death = False
 
         while True:
@@ -205,86 +212,70 @@ class LiquidLens(WorkerProcess):
             if update.get("obj_id") != self.current_tracked_obj:
                 continue
 
-            candidate = update
-            break
+            latest = update
 
-        if candidate is None:
-            return None, saw_death
+        return latest, saw_death
 
-        for _ in range(max(scan_ahead, 0)):
+    def _drain_trigger_socket(self):
+        """Process all pending zone enter/exit events."""
+        while True:
             try:
-                _, raw = self.braid_socket.recv_multipart(flags=zmq.NOBLOCK)
+                topic_b, raw = self.trigger_socket.recv_multipart(flags=zmq.NOBLOCK)
             except zmq.Again:
-                break
+                return
+            topic = topic_b.decode()
+            msg = json.loads(raw)
 
-            braid_msg = json.loads(raw)
+            if topic == self.zmq_config.zone_enter_topic and not self.is_tracking:
+                obj_id = msg.get("obj_id")
+                if obj_id is not None:
+                    self.logger.info(f"ZONE_ENTER: start tracking object {obj_id}")
+                    self.is_tracking = True
+                    self.current_tracked_obj = obj_id
+                    self.last_position_time = time.time()
+                    self._log_csv("zone_enter", obj_id=obj_id)
+                    self._timing_rows = []
+                    self._recording_obj_id = obj_id
+                    self._recording_frame = msg.get("frame")
+                    self.kalman = None
 
-            if "Death" in braid_msg and braid_msg["Death"] == self.current_tracked_obj:
-                saw_death = True
-                continue
-
-            if "Update" not in braid_msg:
-                continue
-
-            update = braid_msg["Update"]
-            if update.get("obj_id") == self.current_tracked_obj:
-                candidate = update
-
-        return candidate, saw_death
+            elif topic == self.zmq_config.zone_exit_topic and self.is_tracking:
+                if msg.get("obj_id") == self.current_tracked_obj:
+                    reason = msg.get("reason", "unknown")
+                    self.logger.info(
+                        f"ZONE_EXIT: stop tracking object {self.current_tracked_obj} reason={reason}"
+                    )
+                    self._log_csv(
+                        "zone_exit",
+                        obj_id=self.current_tracked_obj,
+                        reason=reason,
+                    )
+                    self._stop_tracking()
 
     def _run(self):
         self.initialize()
         self.is_running = True
         self.logger.info("Liquid Lens process started.")
 
+        poller = zmq.Poller()
+        poller.register(self.trigger_socket, zmq.POLLIN)
+        poller.register(self.braid_socket, zmq.POLLIN)
+
         while self.is_running and not self.stop_event.is_set():
             try:
-                # Handle trigger events.
-                try:
-                    topic_b, raw = self.trigger_socket.recv_multipart(flags=zmq.NOBLOCK)
-                    topic = topic_b.decode()
-                    msg = json.loads(raw)
+                events = dict(poller.poll(timeout=10))
 
-                    # If we see a zone enter for an object and we're not already tracking, start tracking it.
-                    if topic == self.zmq_config.zone_enter_topic and not self.is_tracking:
-                        obj_id = msg.get("obj_id")
-                        if obj_id is not None:
-                            self.logger.info(f"ZONE_ENTER: start tracking object {obj_id}")
+                if self.trigger_socket in events:
+                    self._drain_trigger_socket()
 
-                            self.is_tracking = True
-                            self.current_tracked_obj = obj_id
-                            self.last_position_time = time.time()
-                            self._log_csv("zone_enter", obj_id=obj_id)
-
-                            self._timing_rows = []
-                            self._recording_obj_id = obj_id
-                            self._recording_frame = msg.get("frame")
-                            self.kalman = None
-
-                    # If we see a zone exit for the currently tracked object, stop tracking it.
-                    elif topic == self.zmq_config.zone_exit_topic and self.is_tracking:
-                        if msg.get("obj_id") == self.current_tracked_obj:
-                            reason = msg.get("reason", "unknown")
-                            self.logger.info(
-                                f"ZONE_EXIT: stop tracking object {self.current_tracked_obj} reason={reason}"
-                            )
-                            self._log_csv(
-                                "zone_exit",
-                                obj_id=self.current_tracked_obj,
-                                reason=reason,
-                            )
-                            self._stop_tracking()
-
-                except zmq.Again:
-                    pass
-
-                # Stay current while idle.
                 if not self.is_tracking:
-                    self._drain_braid_idle()
-                    time.sleep(0.01)
+                    if self.braid_socket in events:
+                        self._drain_braid_idle()
                     continue
 
-                # Use only the newest update for the tracked object.
+                if self.braid_socket not in events:
+                    continue
+
                 update, saw_death = self._get_next_update_for_current_object()
 
                 if saw_death:
@@ -294,7 +285,6 @@ class LiquidLens(WorkerProcess):
                     )
 
                 if update is None:
-                    time.sleep(0.001)
                     continue
 
                 u = update
