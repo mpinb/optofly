@@ -17,13 +17,22 @@ from src.hardware.lens import LensDriver
 
 
 class LensCalibration:
-    """Maps z position to lens diopter via degree-2 polynomial fit."""
+    """Maps z position to lens diopter via linear model (A*z + B).
+
+    Coefficients are fit once at construction from calibration data.
+    z is clamped to the calibration range to prevent extrapolation.
+    """
 
     def __init__(self, z_values, dpt_values):
-        self.coeffs = np.polyfit(np.array(z_values), np.array(dpt_values), 2)
+        z = np.array(z_values)
+        dpt = np.array(dpt_values)
+        self.a, self.b = np.polyfit(z, dpt, 1)
+        self.z_min = float(z.min())
+        self.z_max = float(z.max())
 
     def get_dpt(self, z: float) -> float:
-        return float(np.polyval(self.coeffs, z))
+        z = max(self.z_min, min(self.z_max, z))
+        return self.a * z + self.b
 
 
 def setup_lens_calibration(calibration_file: str) -> LensCalibration:
