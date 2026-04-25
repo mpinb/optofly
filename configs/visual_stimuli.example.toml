@@ -23,7 +23,7 @@ target_fps = 60
 
 # Screen identification (set after running --calibrate)
 # Order corresponds to: DP-0.1, DP-0.2, DP-2.1, DP-2.2
-screen_mapping = ["West", "North", "South", "East"]
+screen_mapping = ["South", "West", "North", "East"]
 
 # ------------------------------------------------------------------------------
 # Calibration Settings
