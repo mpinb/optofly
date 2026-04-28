@@ -127,14 +127,21 @@ class LiquidLens(WorkerProcess):
         self.csv_writer = CSVWriter(csv_path, strict=False)
         self.logger.info(f"CSV logging to: {csv_path}")
 
-        if self.lens_config.kalman_enabled:
+        mode = self.lens_config.predictor
+        if mode == "kalman":
             self.logger.info(
-                f"Kalman filter enabled with process_noise={self.lens_config.process_noise}, "
+                f"Predictor: kalman (process_noise={self.lens_config.process_noise}, "
                 f"measurement_noise={self.lens_config.measurement_noise}, "
-                f"prediction_horizon={self.lens_config.prediction_horizon}s"
+                f"system_latency={self.lens_config.system_latency}s, "
+                f"prediction_horizon={self.lens_config.prediction_horizon}s)"
+            )
+        elif mode == "linear":
+            self.logger.info(
+                f"Predictor: linear (system_latency={self.lens_config.system_latency}s, "
+                f"prediction_horizon={self.lens_config.prediction_horizon}s)"
             )
         else:
-            self.logger.info("Kalman filter is disabled")
+            self.logger.info("Predictor: none (raw z from Braid)")
 
         self.logger.info("Liquid Lens process initialized.")
 
@@ -294,36 +301,41 @@ class LiquidLens(WorkerProcess):
                 timestamp = u.get("timestamp")
                 t_relay = u.get("t_relay")
 
-                # Update the predictor.
-                if self.lens_config.kalman_enabled:
+                # Pick the focus depth according to predictor mode.
+                predictor = self.lens_config.predictor
+                if predictor == "kalman":
                     if self.kalman is None:
                         self.kalman = KalmanFilter(
                             process_noise=self.lens_config.process_noise,
                             measurement_noise=self.lens_config.measurement_noise,
                             initial_covariance=self.lens_config.initial_covariance,
+                            velocity_noise=self.lens_config.velocity_noise,
                         )
                         self.kalman.init((x, y, z), (vx, vy, vz), timestamp)
                     else:
                         self.kalman.update((x, y, z), (vx, vy, vz), timestamp)
-
-                # Pick the focus depth.
-                focus_z = z
-                if self.lens_config.kalman_enabled and self.kalman is not None:
                     prediction_time = (
                         self.lens_config.system_latency
                         + self.lens_config.prediction_horizon
                     )
                     predicted = self.kalman.predict(prediction_time)
-                    if predicted is not None:
-                        focus_z = predicted[2]
+                    focus_z = predicted[2] if predicted is not None else z
+                elif predictor == "linear":
+                    prediction_time = (
+                        self.lens_config.system_latency
+                        + self.lens_config.prediction_horizon
+                    )
+                    focus_z = z + vz * prediction_time
+                else:
+                    focus_z = z
 
                 # Command the lens and record timing.
                 try:
                     dpt = self.lens_calibration.get_dpt(focus_z)
-                    t_braid_received = time.time()
+                    t_serial_start = time.time()
                     self.lens_driver.set_diopter(dpt)
                     t_diopter_sent = time.time()
-                    delay_ms = (t_diopter_sent - t_braid_received) * 1000.0
+                    delay_ms = (t_diopter_sent - t_serial_start) * 1000.0
                     self._log_csv(
                         "focus",
                         obj_id=self.current_tracked_obj,
@@ -332,13 +344,13 @@ class LiquidLens(WorkerProcess):
                         z=z,
                         focus_z=focus_z,
                         diopter=dpt,
-                        kalman=self.lens_config.kalman_enabled,
+                        predictor=self.lens_config.predictor,
                     )
                     self._timing_rows.append(
                         {
                             "t_braid": timestamp,
                             "t_relay": t_relay,
-                            "t_braid_received": t_braid_received,
+                            "t_serial_start": t_serial_start,
                             "t_diopter_sent": t_diopter_sent,
                             "delay_ms": delay_ms,
                             "frame": u.get("frame"),
@@ -348,7 +360,7 @@ class LiquidLens(WorkerProcess):
                             "z": z,
                             "focus_z": focus_z,
                             "diopter": dpt,
-                            "kalman": self.lens_config.kalman_enabled,
+                            "predictor": self.lens_config.predictor,
                         }
                     )
                 except Exception as e:

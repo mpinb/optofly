@@ -51,17 +51,14 @@ Braid HTTP SSE (http://host:8397/events)
     ↓
 BraidPublisher  →  ZMQ PUB  topic=BRAID  port=5555
     ↓
-TriggerHandler  →  ZMQ PUB  topics=PRE_ZONE_ENTER/PRE_ZONE_EXIT
-                             topics=ZONE_ENTER/ZONE_EXIT        port=5556
+TriggerHandler  →  ZMQ PUB  topics=ZONE_ENTER/ZONE_EXIT  port=5556
     ↓
-    ├── RustCameraProcess    (starts recording on PRE_ZONE_ENTER; stamps trigger_frame_idx on ZONE_ENTER)
-    ├── LiquidLens           (starts pre-focusing on PRE_ZONE_ENTER via BRAID; writes lens_timing.csv per video)
-    ├── OptoTriggerWorker    (fires LED on ZONE_ENTER only, one-shot)
-    ├── VisualStimuliProcess (renders stimuli on ZONE_ENTER only, one-shot)
+    ├── RustCameraProcess    (starts recording on ZONE_ENTER; stamps trigger_frame_idx on ZONE_ENTER)
+    ├── LiquidLens           (starts focusing on ZONE_ENTER via BRAID; writes lens_timing.csv per video)
+    ├── OptoTriggerWorker    (fires LED on ZONE_ENTER, one-shot)
+    ├── VisualStimuliProcess (renders stimuli on ZONE_ENTER, one-shot)
     └── Monitoring Server    (web dashboard, optional)
 ```
-
-**Pre-trigger zone**: TriggerHandler maintains two concentric zones. The outer zone (camera FOV + `pre_zone_expansion` metres on every side) fires `PRE_ZONE_ENTER`/`PRE_ZONE_EXIT` so the camera and lens can get a head-start before the fly reaches the actual trigger zone. Opto and visual stimuli still fire only on `ZONE_ENTER`. Setting `pre_zone_expansion = 0` makes both zones identical, restoring the old single-zone behaviour.
 
 The ZMQ BRAID feed is only live when the full stack is running. Standalone tools (calibration, simulators) that need tracking data must connect directly to the Braid HTTP SSE endpoint (`/events`).
 
@@ -83,12 +80,12 @@ All processes inherit `WorkerProcess` (`src/utils/worker.py`) and run as `multip
 {"Death": {"obj_id": 1}}
 ```
 
-**ZONE_ENTER / PRE_ZONE_ENTER** (from TriggerHandler — identical format):
+**ZONE_ENTER** (from TriggerHandler):
 ```json
 {"obj_id": 1, "frame": 12345, "timestamp": 1234.56, "x": 0.01, "y": -0.02, "z": 0.18, "mean_heading": 0.52}
 ```
 
-**ZONE_EXIT / PRE_ZONE_EXIT** (from TriggerHandler — identical format):
+**ZONE_EXIT** (from TriggerHandler):
 ```json
 {"obj_id": 1, "reason": "left_fov", "timestamp": 1234.78, "duration": 0.22}
 ```
@@ -97,13 +94,10 @@ All processes inherit `WorkerProcess` (`src/utils/worker.py`) and run as `multip
 
 `src/utils/config.py` has typed config classes (e.g. `LiquidLensConfig`, `ZMQConfig`) that load from TOML sections. Pass `config_path` to each process; don't read TOML directly elsewhere. `trigger_handler.zone_timeout` is the single global timeout used by TriggerHandler, CameraProcess (buffer sizing), and LiquidLens (focus tracking).
 
-Key new parameters (all in `configs/config.toml`):
+Key parameters (all in `configs/config.toml`):
 
 | Section | Key | Default | Purpose |
 |---|---|---|---|
-| `[trigger_handler]` | `pre_zone_expansion` | `0.0` | Metres added to each FOV edge and z bound for the pre-trigger zone |
-| `[zmq]` | `pre_zone_enter_topic` | `"PRE_ZONE_ENTER"` | Topic for pre-zone entry events |
-| `[zmq]` | `pre_zone_exit_topic` | `"PRE_ZONE_EXIT"` | Topic for pre-zone exit events |
 | `[liquid_lens.kalman]` | `velocity_noise` | `1.0` | Measurement noise for Braid velocity estimates fed into the Kalman filter |
 
 ### Visual Stimuli
@@ -124,21 +118,18 @@ Heading-to-pixel conversion uses `GeometryUtils` (`src/stimuli/geometry.py`). Wi
 `RustCameraProcess` (`src/processes/camera.py`) launches the `optofly-camera` Rust binary (`optofly-camera/`) as a subprocess. The binary captures frames via the XIMEA SDK (`xiapi` crate) into a linear double-buffer and pipes raw frames to ffmpeg for H.264 encoding (NVENC with x264 fallback). On shutdown, the Python wrapper sends a ZMQ `kill` message for graceful exit. Requires `ffmpeg` on PATH and the XIMEA SDK. Build: `cd optofly-camera && cargo build --release`.
 
 State machine (Rust binary):
-- **IDLE + `PRE_ZONE_ENTER`** → start recording; `trigger_frame_idx = None`
-- **IDLE + `ZONE_ENTER`** → start recording (backward-compat path when `pre_zone_expansion = 0`); `trigger_frame_idx = 0`
-- **RECORDING + `ZONE_ENTER`** → stamp `trigger_frame_idx = current_buf_idx`; log pre-trigger frame count
-- **RECORDING + `PRE_ZONE_EXIT`** (no `ZONE_ENTER` seen) → abort recording
+- **IDLE + `ZONE_ENTER`** → start recording; `trigger_frame_idx = 0`
 - **RECORDING + `ZONE_EXIT`** → finish and encode
 
 Output files per trial (all in `camera.save_folder`):
 - `obj_id_{N}_frame_{M}.mp4` — encoded video
 - `obj_id_{N}_frame_{M}.csv` — per-frame metadata (`frame_idx`, `nframe`, `ts_sec`, `ts_usec`, `cam_time_ns`, `trigger_frame_idx`). `trigger_frame_idx` repeats on every row — it is the buffer index at which `ZONE_ENTER` fired, marking stimulus onset. Use it to align trials: frames before it are pre-stimulus baseline, frames after are the response.
-- `obj_id_{N}_frame_{M}_lens_timing.csv` — per-adjustment lens timing (`t_braid_received`, `t_diopter_sent`, `delay_ms`, `z`, `diopter`, ...)
+- `obj_id_{N}_frame_{M}_lens_timing.csv` — per-adjustment lens timing (`t_serial_start`, `t_diopter_sent`, `delay_ms`, `z`, `diopter`, ...)
 
-**`max_recording_time` vs `zone_timeout`**: `camera.max_recording_time` is a frame-buffer size limit — it counts from `PRE_ZONE_ENTER` (not `ZONE_ENTER`), so it must cover pre-zone transit time + trial duration. `trigger_handler.zone_timeout` is the tracker's dead-reckoning timeout for declaring a fly has left the zone. Set `max_recording_time` ≥ `zone_timeout` + expected pre-zone transit time.
+**`max_recording_time` vs `zone_timeout`**: `camera.max_recording_time` is a frame-buffer size limit — it counts from `ZONE_ENTER`. `trigger_handler.zone_timeout` is the tracker's dead-reckoning timeout for declaring a fly has left the zone. Set `max_recording_time` ≥ `zone_timeout`.
 
 ### Liquid Lens
 
-`LiquidLens` (`src/processes/lens.py`) responds to `PRE_ZONE_ENTER` to begin pre-focusing before the fly reaches the actual trigger zone, giving the Optotune lens time to settle. It subscribes to BRAID position updates and calls `LensDriver.set_diopter()` on every update while tracking.
+`LiquidLens` (`src/processes/lens.py`) responds to `ZONE_ENTER` and subscribes to BRAID position updates, calling `LensDriver.set_diopter()` on every update while tracking.
 
 **Kalman filter** (`src/utils/kalman_filter.py`): 6D state `[x, y, z, vx, vy, vz]`, DWNA process noise model. When enabled, predicts z position `system_latency + prediction_horizon` seconds ahead to compensate for lens settling time. Velocity from Braid is fused as a proper sequential measurement update (controlled by `velocity_noise`) rather than overwriting the state — keeping the covariance matrix consistent. Covariance updates use the Joseph form for numerical stability.

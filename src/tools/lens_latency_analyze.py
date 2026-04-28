@@ -8,8 +8,8 @@ recommended ``system_latency`` value to feed back into
 
 Stages (computed only when both timestamps are populated):
 
-* ``usb_ms``      = ``t_diopter_sent - t_braid_received`` (USB serial write)
-* ``pubsub_ms``   = ``t_braid_received - t_relay``        (BraidPublisher → LiquidLens)
+* ``usb_ms``      = ``t_diopter_sent - t_serial_start`` (USB serial write)
+* ``pubsub_ms``   = ``t_serial_start - t_relay``        (BraidPublisher → LiquidLens)
 * ``software_ms`` = ``t_diopter_sent - t_relay``          (end-to-end software path)
 
 Run with ``python -m src.tools.lens_latency_analyze /mnt/data/videos/<braid_dir>``.
@@ -114,19 +114,19 @@ def collect_stage_samples(
             for row in reader:
                 total += 1
                 t_relay = _maybe_float(row.get("t_relay", ""))
-                t_braid_received = _maybe_float(row.get("t_braid_received", ""))
+                t_serial_start = _maybe_float(row.get("t_serial_start", ""))
                 t_diopter_sent = _maybe_float(row.get("t_diopter_sent", ""))
 
-                if t_braid_received is not None and t_diopter_sent is not None:
+                if t_serial_start is not None and t_diopter_sent is not None:
                     samples["usb_ms"].append(
-                        (t_diopter_sent - t_braid_received) * 1000.0
+                        (t_diopter_sent - t_serial_start) * 1000.0
                     )
 
                 if t_relay is not None:
                     relay_filled += 1
-                    if t_braid_received is not None:
+                    if t_serial_start is not None:
                         samples["pubsub_ms"].append(
-                            (t_braid_received - t_relay) * 1000.0
+                            (t_serial_start - t_relay) * 1000.0
                         )
                     if t_diopter_sent is not None:
                         samples["software_ms"].append(
