@@ -29,7 +29,7 @@ screen_mapping = ["South", "West", "North", "East"]
 # Calibration Settings
 # ------------------------------------------------------------------------------
 
-use_empirical_calibration = false  # Enable after running --calibrate-mapping
+use_empirical_calibration = true  # Enable after running --calibrate-mapping
 calibration_mapping_file = "calibrations/heading_mapping_model.npz"
 heading_offset_deg = 0.0           # Fallback offset if empirical unavailable
 arena_center_to_screen_cm = 25.0   # Distance from arena center to screens
@@ -42,7 +42,7 @@ arena_center_to_screen_cm = 25.0   # Distance from arena center to screens
 enabled = true
 square_color = "black"           # Pattern color
 background_color = "white"       # Background color
-pattern_density = 0.5            # Pattern density (0.0-1.0)
+pattern_density = 0.25            # Pattern density (0.0-1.0)
 downscale_factor = 32             # Resolution divisor: 1=full, 2=half, 4=quarter
 random_seed = 42                 # For reproducible patterns
 
@@ -61,7 +61,7 @@ final_size_deg = 72.0
 # final_size_deg = [60.0, 70.0, 80.0, 90.0]
 
 # Timing parameters (milliseconds)
-expansion_duration_ms = 500
+expansion_duration_ms = 300
 # expansion_duration_ms = [300, 400, 500, 600]
 
 hold_time_ms = 200
@@ -76,10 +76,10 @@ circle_color = [0, 0, 0]         # RGB color (black)
 
 # Position offsets (degrees from fly heading)
 # 0° = ahead, 90° = right, -90° = left, 180° = behind
-positions_deg = [-90, 0, 90]
+positions_deg = [-90, -45, 0, 45, 90]
 
 # Sham trials: proportion of triggers where no stimulus is displayed (0.0 = none, 1.0 = all)
-sham_probability = 0.0
+sham_probability = 0.1
 
 # ------------------------------------------------------------------------------
 # Stimulus: Vertical Bar
@@ -105,7 +105,7 @@ cooldown_duration_ms = 3000
 # Position offsets (degrees from fly heading)
 # System automatically balances presentations across positions
 # 0° = ahead, 90° = right, -90° = left, 180° = behind
-positions_deg = [90, 0, 180]
+positions_deg = [90, 45, 0, -45, -90]
 
 # Sham trials: proportion of triggers where no stimulus is displayed (0.0 = none, 1.0 = all)
 sham_probability = 0.0
