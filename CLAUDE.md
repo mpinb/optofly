@@ -61,8 +61,6 @@ TriggerHandler  →  ZMQ PUB  topics=PRE_ZONE_ENTER/PRE_ZONE_EXIT
     └── Monitoring Server    (web dashboard, optional)
 ```
 
-**Pre-trigger zone**: TriggerHandler maintains two concentric zones. The outer zone (camera FOV + `pre_zone_expansion` metres on every side) fires `PRE_ZONE_ENTER`/`PRE_ZONE_EXIT` so the camera and lens can get a head-start before the fly reaches the actual trigger zone. Opto and visual stimuli still fire only on `ZONE_ENTER`. Setting `pre_zone_expansion = 0` makes both zones identical, restoring the old single-zone behaviour.
-
 The ZMQ BRAID feed is only live when the full stack is running. Standalone tools (calibration, simulators) that need tracking data must connect directly to the Braid HTTP SSE endpoint (`/events`).
 
 ### Process Model
@@ -97,13 +95,10 @@ All processes inherit `WorkerProcess` (`src/utils/worker.py`) and run as `multip
 
 `src/utils/config.py` has typed config classes (e.g. `LiquidLensConfig`, `ZMQConfig`) that load from TOML sections. Pass `config_path` to each process; don't read TOML directly elsewhere. `trigger_handler.zone_timeout` is the single global timeout used by TriggerHandler, CameraProcess (buffer sizing), and LiquidLens (focus tracking).
 
-Key new parameters (all in `configs/config.toml`):
+Key parameters (all in `configs/config.toml`):
 
 | Section | Key | Default | Purpose |
 |---|---|---|---|
-| `[trigger_handler]` | `pre_zone_expansion` | `0.0` | Metres added to each FOV edge and z bound for the pre-trigger zone |
-| `[zmq]` | `pre_zone_enter_topic` | `"PRE_ZONE_ENTER"` | Topic for pre-zone entry events |
-| `[zmq]` | `pre_zone_exit_topic` | `"PRE_ZONE_EXIT"` | Topic for pre-zone exit events |
 | `[liquid_lens.kalman]` | `velocity_noise` | `1.0` | Measurement noise for Braid velocity estimates fed into the Kalman filter |
 
 ### Visual Stimuli
@@ -125,7 +120,7 @@ Heading-to-pixel conversion uses `GeometryUtils` (`src/stimuli/geometry.py`). Wi
 
 State machine (Rust binary):
 - **IDLE + `PRE_ZONE_ENTER`** → start recording; `trigger_frame_idx = None`
-- **IDLE + `ZONE_ENTER`** → start recording (backward-compat path when `pre_zone_expansion = 0`); `trigger_frame_idx = 0`
+- **IDLE + `ZONE_ENTER`** → start recording; `trigger_frame_idx = 0`
 - **RECORDING + `ZONE_ENTER`** → stamp `trigger_frame_idx = current_buf_idx`; log pre-trigger frame count
 - **RECORDING + `PRE_ZONE_EXIT`** (no `ZONE_ENTER` seen) → abort recording
 - **RECORDING + `ZONE_EXIT`** → finish and encode
