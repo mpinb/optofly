@@ -70,6 +70,18 @@ class TriggerHandlerConfig(ConfigBase):
         self.fov_x_max: float = camera_config.fov_x_max
         self.fov_y_min: float = camera_config.fov_y_min
         self.fov_y_max: float = camera_config.fov_y_max
+        self.fov_frustum: bool = camera_config.fov_frustum
+        if self.fov_frustum:
+            self.fov_near_z: float = camera_config.fov_near_z
+            self.fov_near_x_min: float = camera_config.fov_near_x_min
+            self.fov_near_x_max: float = camera_config.fov_near_x_max
+            self.fov_near_y_min: float = camera_config.fov_near_y_min
+            self.fov_near_y_max: float = camera_config.fov_near_y_max
+            self.fov_far_z: float = camera_config.fov_far_z
+            self.fov_far_x_min: float = camera_config.fov_far_x_min
+            self.fov_far_x_max: float = camera_config.fov_far_x_max
+            self.fov_far_y_min: float = camera_config.fov_far_y_min
+            self.fov_far_y_max: float = camera_config.fov_far_y_max
 
         # Trigger zone z bounds (from trigger_handler section)
         self.z_min: float = float(config.get("z_min", 0.0))
@@ -409,15 +421,39 @@ class CameraConfig(ConfigBase):
         self.save_folder: str = config.get("save_folder", "camera_videos")
 
         fov_config = config.get("FOV", {})
-        self.fov_x_min: float = float(fov_config.get("x_min", -0.1))
-        self.fov_x_max: float = float(fov_config.get("x_max", 0.1))
-        self.fov_y_min: float = float(fov_config.get("y_min", -0.1))
-        self.fov_y_max: float = float(fov_config.get("y_max", 0.1))
+        near = fov_config.get("near")
+        far = fov_config.get("far")
 
-        if self.fov_x_min >= self.fov_x_max:
-            raise ValueError("camera.FOV.x_min must be less than x_max")
-        if self.fov_y_min >= self.fov_y_max:
-            raise ValueError("camera.FOV.y_min must be less than y_max")
+        if near and far:
+            self.fov_frustum: bool = True
+            self.fov_near_z: float = float(near["z"])
+            self.fov_near_x_min: float = float(near["x_min"])
+            self.fov_near_x_max: float = float(near["x_max"])
+            self.fov_near_y_min: float = float(near["y_min"])
+            self.fov_near_y_max: float = float(near["y_max"])
+            self.fov_far_z: float = float(far["z"])
+            self.fov_far_x_min: float = float(far["x_min"])
+            self.fov_far_x_max: float = float(far["x_max"])
+            self.fov_far_y_min: float = float(far["y_min"])
+            self.fov_far_y_max: float = float(far["y_max"])
+            if self.fov_near_z >= self.fov_far_z:
+                raise ValueError("camera.FOV.near.z must be less than camera.FOV.far.z")
+            # Flat attributes: use far-plane values so other consumers (LiquidLens, etc.) work unchanged
+            self.fov_x_min: float = self.fov_far_x_min
+            self.fov_x_max: float = self.fov_far_x_max
+            self.fov_y_min: float = self.fov_far_y_min
+            self.fov_y_max: float = self.fov_far_y_max
+        else:
+            self.fov_frustum = False
+            self.fov_x_min: float = float(fov_config.get("x_min", -0.1))
+            self.fov_x_max: float = float(fov_config.get("x_max", 0.1))
+            self.fov_y_min: float = float(fov_config.get("y_min", -0.1))
+            self.fov_y_max: float = float(fov_config.get("y_max", 0.1))
+
+            if self.fov_x_min >= self.fov_x_max:
+                raise ValueError("camera.FOV.x_min must be less than x_max")
+            if self.fov_y_min >= self.fov_y_max:
+                raise ValueError("camera.FOV.y_min must be less than y_max")
 
         self.braid_ximea_calibration_file: str | None = config.get(
             "braid_ximea_calibration_file", None
