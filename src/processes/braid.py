@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 
 import requests
 import zmq
+from requests.adapters import HTTPAdapter
 
 from src.utils.config import BraidPublisherConfig
 from src.utils.logger import configure_process_logging
@@ -20,6 +21,9 @@ from src.utils.worker import WorkerProcess
 DATA_PREFIX = "data: "
 MAX_RETRIES = 5
 RETRY_DELAY = 2
+# Warn if the wall-clock gap between SSE event boundaries exceeds this.
+# Braid runs at 100 Hz (10 ms cadence), so >25 ms means an upstream stall.
+BOUNDARY_GAP_WARN_S = 0.025
 
 # Configure logging
 
@@ -99,6 +103,9 @@ class BraidPublisher(WorkerProcess):
         self.config = BraidPublisherConfig(config_path)
         self.stop_event = event if event is not None else mp.Event()
 
+        # Pre-encode constants used on the per-event hot path.
+        self._topic_bytes = self.config.zmq.braid_topic.encode("utf-8")
+
         # Connection objects (initialized later)
         self.session = None
         self.events_url = None
@@ -142,6 +149,11 @@ class BraidPublisher(WorkerProcess):
         self.logger.debug(f"Connecting to Braid server at {self.config.url}")
 
         self.session = requests.Session()
+        # Reconnect policy is owned by our outer loop in `_process_stream`;
+        # disable urllib3's hidden retry path so failures surface immediately.
+        no_retry_adapter = HTTPAdapter(max_retries=0)
+        self.session.mount("http://", no_retry_adapter)
+        self.session.mount("https://", no_retry_adapter)
 
         # Test the connection
         for attempt in range(MAX_RETRIES):
@@ -193,13 +205,52 @@ class BraidPublisher(WorkerProcess):
         except zmq.ZMQError as e:
             raise Exception(f"Failed to set up ZMQ publisher: {e}")
 
+    def _dispatch_event(self, data_str: str) -> None:
+        """Parse one SSE `data:` payload and forward it to ZMQ.
+
+        Errors in a single event log and skip — they never abort the stream
+        or drop sibling events.
+        """
+        if self.zmq_socket is None:
+            return
+
+        try:
+            data = json.loads(data_str)
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Failed to parse SSE data JSON: {e}")
+            return
+
+        if "msg" not in data:
+            return
+
+        # Inject relay wall-clock into the inner payload (Update/Birth) so
+        # consumers can read t_relay alongside the other fields. Death is a
+        # scalar obj_id, skip it.
+        msg = data["msg"]
+        t_relay = time.time()
+        for key in ("Update", "Birth"):
+            inner = msg.get(key)
+            if isinstance(inner, dict):
+                inner["t_relay"] = t_relay
+                break
+
+        message = json.dumps(msg)
+        self.zmq_socket.send_multipart([self._topic_bytes, message.encode("utf-8")])
+        self.logger.debug(f"Published message: {message[:50]}...")
+
     def _process_stream(self) -> None:
-        """Process the event stream in a separate thread."""
+        """Process the event stream in a separate thread.
+
+        Uses a line-driven SSE parser per the W3C spec: accumulates
+        `event:` and `data:` fields across lines and dispatches on a blank
+        line. This is robust to TCP coalescing multiple events into one read
+        and to a single event split across reads — both of which silently
+        dropped events under the previous chunk-based parser.
+        """
         connection_attempts = 0
 
         while not self.stop_event.is_set():
             try:
-                # Get event stream with timeout
                 if self.session is None or self.events_url is None:
                     self.logger.error("Session or events URL not initialized")
                     time.sleep(1)
@@ -216,37 +267,48 @@ class BraidPublisher(WorkerProcess):
 
                 self.logger.debug("Connected to event stream, processing events...")
 
-                # Process events
-                for chunk in response.iter_content(
-                    chunk_size=None, decode_unicode=True
-                ):
+                event_type: Optional[str] = None
+                data_buf: list[str] = []
+                last_boundary = time.monotonic()
+
+                for line in response.iter_lines(decode_unicode=True):
                     if self.stop_event.is_set():
                         break
+                    # iter_lines can yield None on keepalive whitespace.
+                    if line is None:
+                        continue
 
-                    try:
-                        data = parse_chunk(chunk)
+                    if line == "":
+                        # Blank line = event boundary. Dispatch and reset.
+                        if event_type == "braid" and data_buf:
+                            self._dispatch_event("\n".join(data_buf))
+                        event_type = None
+                        data_buf = []
 
-                        if "msg" in data and self.zmq_socket is not None:
-                            # Inject relay wall-clock into the inner payload
-                            # (Update/Birth) so consumers can read t_relay alongside
-                            # the other fields. Death is a scalar obj_id, skip it.
-                            msg = data["msg"]
-                            t_relay = time.time()
-                            for key in ("Update", "Birth"):
-                                inner = msg.get(key)
-                                if isinstance(inner, dict):
-                                    inner["t_relay"] = t_relay
-                                    break
-                            message = json.dumps(msg)
-                            self.zmq_socket.send_multipart(
-                                [
-                                    self.config.zmq.braid_topic.encode("utf-8"),
-                                    message.encode("utf-8"),
-                                ]
+                        now = time.monotonic()
+                        gap = now - last_boundary
+                        if gap > BOUNDARY_GAP_WARN_S:
+                            self.logger.warning(
+                                f"SSE boundary gap {gap * 1000:.1f} ms "
+                                f"(>{BOUNDARY_GAP_WARN_S * 1000:.0f} ms) — "
+                                "upstream stall or coalesced batch"
                             )
-                            self.logger.debug(f"Published message: {message[:50]}...")
-                    except Exception as e:
-                        self.logger.error(f"Error processing chunk: {e}")
+                        last_boundary = now
+                        continue
+
+                    if line.startswith(":"):
+                        # SSE comment / keepalive — ignore.
+                        continue
+                    if line.startswith("event:"):
+                        event_type = line[len("event:") :].strip()
+                    elif line.startswith("data:"):
+                        # Per spec, strip a single leading space if present.
+                        payload = line[len("data:") :]
+                        if payload.startswith(" "):
+                            payload = payload[1:]
+                        data_buf.append(payload)
+                    # `id:`, `retry:`, and unknown fields are intentionally
+                    # ignored — Braid does not use them.
 
             except (requests.RequestException, ConnectionError) as e:
                 if self.stop_event.is_set():
