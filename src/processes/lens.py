@@ -16,29 +16,75 @@ from src.utils.kalman_filter import KalmanFilter
 from src.hardware.lens import LensDriver
 
 
-class LensCalibration:
-    """Maps z position to lens diopter via linear model (A*z + B).
+VALID_CALIBRATION_MODELS = ("linear", "quadratic", "power", "inverse")
 
-    Coefficients are fit once at construction from calibration data.
+
+class LensCalibration:
+    """Maps z position (m) → diopter via a user-selected model.
+
+    The model is fit once at construction; ``get_dpt`` does only fast
+    floating-point arithmetic (no numpy/scipy on the hot path).
+
+    Supported models:
+        linear    — dpt = a·z + b
+        quadratic — dpt = a·z² + b·z + c  (recommended)
+        power     — dpt = a·(z + shift)^b + c
+        inverse   — dpt = a/(z − b) + c
+
     z is clamped to the calibration range to prevent extrapolation.
     """
 
-    def __init__(self, z_values, dpt_values):
-        z = np.array(z_values)
-        dpt = np.array(dpt_values)
-        self.a, self.b = np.polyfit(z, dpt, 1)
+    def __init__(self, z_values, dpt_values, model: str = "quadratic"):
+        if model not in VALID_CALIBRATION_MODELS:
+            raise ValueError(
+                f"calibration_model must be one of {VALID_CALIBRATION_MODELS}, got {model!r}"
+            )
+        z = np.array(z_values, dtype=float)
+        dpt = np.array(dpt_values, dtype=float)
         self.z_min = float(z.min())
         self.z_max = float(z.max())
+        self.model = model
+
+        if model == "linear":
+            # polyfit returns [a, b] for degree 1: dpt = a*z + b
+            _a, _b = np.polyfit(z, dpt, 1)
+            self._predict = lambda z_val, a=float(_a), b=float(_b): a * z_val + b
+        elif model == "quadratic":
+            # polyfit returns [a, b, c] for degree 2: dpt = a*z² + b*z + c
+            _a, _b, _c = np.polyfit(z, dpt, 2)
+            self._predict = lambda z_val, a=float(_a), b=float(_b), c=float(_c): (a * z_val + b) * z_val + c
+        elif model == "power":
+            from scipy.optimize import curve_fit
+            # dpt = a * z^b + c; initial guess derived from data range
+            popt, _ = curve_fit(
+                lambda z, a, b, c: a * z ** b + c,
+                z, dpt, p0=[20.0, 1.5, -1.0],
+                bounds=([0, 0.1, -np.inf], [np.inf, 5.0, np.inf]),
+                maxfev=10000,
+            )
+            _a, _b, _c = (float(v) for v in popt)
+            self._predict = lambda z_val, a=_a, b=_b, c=_c: a * z_val ** b + c
+        else:  # inverse
+            from scipy.optimize import curve_fit
+            # dpt = a / (z - b) + c; b must be negative (pole below measurement range)
+            popt, _ = curve_fit(
+                lambda z, a, b, c: a / (z - b) + c,
+                z, dpt, p0=[0.05, -0.3, 5.0],
+                bounds=([0, -np.inf, -np.inf], [np.inf, 0, np.inf]),
+                maxfev=10000,
+            )
+            _a, _b, _c = (float(v) for v in popt)
+            self._predict = lambda z_val, a=_a, b=_b, c=_c: a / (z_val - b) + c
 
     def get_dpt(self, z: float) -> float:
         z = max(self.z_min, min(self.z_max, z))
-        return self.a * z + self.b
+        return self._predict(z)
 
 
-def setup_lens_calibration(calibration_file: str) -> LensCalibration:
+def setup_lens_calibration(calibration_file: str, model: str = "quadratic") -> LensCalibration:
     try:
         data = np.genfromtxt(calibration_file, delimiter=",", names=True)
-        return LensCalibration(data["z"], data["dpt"])
+        return LensCalibration(data["z"], data["dpt"], model=model)
     except Exception as e:
         raise RuntimeError(f"Error setting up lens calibration: {e}")
 
@@ -105,9 +151,12 @@ class LiquidLens(WorkerProcess):
 
         # Calibration
         self.lens_calibration = setup_lens_calibration(
-            self.lens_config.calibration_file
+            self.lens_config.calibration_file,
+            model=self.lens_config.calibration_model,
         )
-        self.logger.debug("Lens calibration loaded.")
+        self.logger.debug(
+            f"Lens calibration loaded: model={self.lens_config.calibration_model}"
+        )
 
         # Lens hardware
         self.lens_driver = LensDriver(port=self.lens_config.port)

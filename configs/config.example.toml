@@ -92,6 +92,14 @@ sham_probability = 0.0           # Probability of sham trials (0.0-1.0)
 port = "/dev/optotune_ld"
 mode = "diopter"
 calibration_file = "calibrations/liquid_lens.csv"
+
+# Model used to fit the z → diopter calibration curve (fit once at startup):
+#   "linear"    — dpt = a·z + b                      (fast, R²≈0.94)
+#   "quadratic" — dpt = a·z² + b·z + c               (recommended, R²≈0.995)
+#   "power"     — dpt = a·(z + shift)^b + c          (physically motivated)
+#   "inverse"   — dpt = a/(z − b) + c                (thin-lens theory)
+calibration_model = "quadratic"
+
 # Zone timeout is global (from [trigger_handler] section)
 
 # Predictor mode — controls how the lens target depth is computed each update:

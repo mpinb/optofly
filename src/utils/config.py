@@ -115,6 +115,13 @@ class LiquidLensConfig(ConfigBase):
         self.calibration_file: str = config.get(
             "calibration_file", "calibrations/liquid_lens.csv"
         )
+        calibration_model = config.get("calibration_model", "quadratic")
+        valid = ("linear", "quadratic", "power", "inverse")
+        if calibration_model not in valid:
+            raise ValueError(
+                f"liquid_lens.calibration_model must be one of {valid}, got {calibration_model!r}"
+            )
+        self.calibration_model: str = calibration_model
         # Zone timeout is now global — read from trigger_handler config
         trigger_config = TriggerHandlerConfig(config_path)
         self.zone_timeout: float = trigger_config.zone_timeout
