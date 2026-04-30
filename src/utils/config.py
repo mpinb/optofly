@@ -167,18 +167,27 @@ class ZMQConfig(ConfigBase):
         # Ports
         self.braid_port: int = config["braid_port"]
         self.trigger_port: int = config["trigger_port"]
+        self.active_braid_port: int = int(config.get("active_braid_port", 5557))
 
         # Topics
         self.braid_topic: str = config["braid_topic"]
         self.zone_enter_topic: str = config.get("zone_enter_topic", "ZONE_ENTER")
         self.zone_exit_topic: str = config.get("zone_exit_topic", "ZONE_EXIT")
+        self.active_braid_topic: str = config.get("active_braid_topic", "ACTIVE_BRAID")
+
+        # Queue policy
+        self.braid_pub_hwm: int = int(config.get("braid_pub_hwm", 1000))
+        self.lens_update_conflate: bool = bool(config.get("lens_update_conflate", True))
         # Validate configuration
         self._validate_config()
 
     def _validate_config(self):
         """Validate the ZMQ configuration."""
-        if self.braid_port == self.trigger_port:
-            raise ValueError("Braid and trigger ports must be different")
+        ports = {self.braid_port, self.trigger_port, self.active_braid_port}
+        if len(ports) != 3:
+            raise ValueError("Braid, trigger, and active braid ports must be different")
+        if self.braid_pub_hwm <= 0:
+            raise ValueError("zmq.braid_pub_hwm must be positive")
 
     def get_subscriber_address(self, port: int):
         """Get the subscriber address for a given port."""

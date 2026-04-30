@@ -7,7 +7,7 @@ import multiprocessing as mp
 import signal
 import time
 from threading import Thread
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Iterator, Optional
 
 import requests
 import zmq
@@ -25,41 +25,37 @@ RETRY_DELAY = 2
 # Braid runs at 100 Hz (10 ms cadence), so >25 ms means an upstream stall.
 BOUNDARY_GAP_WARN_S = 0.025
 
-# Configure logging
+def iter_sse_events(lines: Iterable[str]) -> Iterator[tuple[Optional[str], str]]:
+    """Yield complete SSE events from an iterable of decoded lines."""
+    event_type: Optional[str] = None
+    data_buf: list[str] = []
 
+    def flush_event():
+        nonlocal event_type, data_buf
+        if data_buf:
+            yield event_type, "\n".join(data_buf)
+        event_type = None
+        data_buf = []
 
-def parse_chunk(chunk: str) -> Dict[str, Any]:
-    """Parse a Server-Sent Events (SSE) chunk from Braid server.
+    for line in lines:
+        if line is None:
+            continue
 
-    Args:
-        chunk: Raw chunk data from the event stream
+        if line == "":
+            yield from flush_event()
+            continue
 
-    Returns:
-        Parsed JSON data from the chunk
+        if line.startswith(":"):
+            continue
+        if line.startswith("event:"):
+            event_type = line[len("event:") :].strip()
+        elif line.startswith("data:"):
+            payload = line[len("data:") :]
+            if payload.startswith(" "):
+                payload = payload[1:]
+            data_buf.append(payload)
 
-    Raises:
-        ValueError: If the chunk format is invalid
-    """
-    lines = chunk.strip().split("\n")
-
-    if len(lines) != 2:
-        raise ValueError(f"Expected 2 lines in chunk, got {len(lines)}")
-
-    if lines[0] != "event: braid":
-        raise ValueError(f"Expected 'event: braid', got '{lines[0]}'")
-
-    if not lines[1].startswith(DATA_PREFIX):
-        raise ValueError(
-            f"Expected line starting with '{DATA_PREFIX}', got '{lines[1]}'"
-        )
-
-    data_str = lines[1][len(DATA_PREFIX) :]
-
-    try:
-        data = json.loads(data_str)
-        return data
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Failed to parse JSON: {e}")
+    yield from flush_event()
 
 
 class BraidPublisher(WorkerProcess):
@@ -105,12 +101,16 @@ class BraidPublisher(WorkerProcess):
 
         # Pre-encode constants used on the per-event hot path.
         self._topic_bytes = self.config.zmq.braid_topic.encode("utf-8")
+        self._active_topic_bytes = self.config.zmq.active_braid_topic.encode("utf-8")
+        self._active_obj_id: Optional[int] = None
 
         # Connection objects (initialized later)
         self.session = None
         self.events_url = None
         self.zmq_context = None
         self.zmq_socket = None
+        self.active_braid_socket = None
+        self.trigger_socket = None
         self.stream_thread = None
         self.is_connected = False
 
@@ -189,6 +189,7 @@ class BraidPublisher(WorkerProcess):
             # Initialize ZMQ context and socket
             self.zmq_context = zmq.Context()
             self.zmq_socket = self.zmq_context.socket(zmq.PUB)
+            self.zmq_socket.setsockopt(zmq.SNDHWM, self.config.zmq.braid_pub_hwm)
             bind_address = self.config.zmq.get_publisher_address(
                 self.config.zmq.braid_port
             )
@@ -196,14 +197,65 @@ class BraidPublisher(WorkerProcess):
             self.logger.debug(f"Binding ZMQ publisher to {bind_address}")
             self.zmq_socket.bind(bind_address)
 
+            self.active_braid_socket = self.zmq_context.socket(zmq.PUB)
+            self.active_braid_socket.setsockopt(zmq.SNDHWM, 1)
+            active_bind_address = self.config.zmq.get_publisher_address(
+                self.config.zmq.active_braid_port
+            )
+            self.logger.debug(f"Binding active BRAID publisher to {active_bind_address}")
+            self.active_braid_socket.bind(active_bind_address)
+
+            self.trigger_socket = self.zmq_context.socket(zmq.SUB)
+            self.trigger_socket.setsockopt(zmq.RCVHWM, 100)
+            trigger_address = self.config.zmq.get_subscriber_address(
+                self.config.zmq.trigger_port
+            )
+            self.logger.debug(f"Connecting trigger subscriber to {trigger_address}")
+            self.trigger_socket.connect(trigger_address)
+            for topic in (
+                self.config.zmq.zone_enter_topic,
+                self.config.zmq.zone_exit_topic,
+            ):
+                self.trigger_socket.setsockopt_string(zmq.SUBSCRIBE, topic)
+
             # Small delay to allow ZMQ to establish connection
             time.sleep(0.1)
 
             self.logger.info(
-                f"ZMQ publisher bound to port {self.config.zmq.braid_port} with topic '{self.config.zmq.braid_topic}'"
+                f"ZMQ publisher bound to port {self.config.zmq.braid_port} with topic '{self.config.zmq.braid_topic}'; "
+                f"active lens updates on port {self.config.zmq.active_braid_port} "
+                f"with topic '{self.config.zmq.active_braid_topic}'"
             )
         except zmq.ZMQError as e:
             raise Exception(f"Failed to set up ZMQ publisher: {e}")
+
+    def _handle_trigger_message(self, topic: str, payload: Dict[str, Any]) -> None:
+        if topic == self.config.zmq.zone_enter_topic:
+            obj_id = payload.get("obj_id")
+            if obj_id is not None:
+                self._active_obj_id = obj_id
+        elif (
+            topic == self.config.zmq.zone_exit_topic
+            and payload.get("obj_id") == self._active_obj_id
+        ):
+            self._active_obj_id = None
+
+    def _drain_trigger_events(self) -> None:
+        if self.trigger_socket is None:
+            return
+
+        while True:
+            try:
+                topic_b, raw = self.trigger_socket.recv_multipart(flags=zmq.NOBLOCK)
+            except zmq.Again:
+                return
+
+            try:
+                self._handle_trigger_message(
+                    topic_b.decode("utf-8"), json.loads(raw.decode("utf-8"))
+                )
+            except Exception as e:
+                self.logger.error(f"Failed to process trigger event in BraidPublisher: {e}")
 
     def _dispatch_event(self, data_str: str) -> None:
         """Parse one SSE `data:` payload and forward it to ZMQ.
@@ -236,6 +288,21 @@ class BraidPublisher(WorkerProcess):
 
         message = json.dumps(msg)
         self.zmq_socket.send_multipart([self._topic_bytes, message.encode("utf-8")])
+
+        death_obj_id = msg.get("Death")
+        if death_obj_id == self._active_obj_id:
+            self._active_obj_id = None
+
+        update = msg.get("Update")
+        if (
+            self.active_braid_socket is not None
+            and isinstance(update, dict)
+            and update.get("obj_id") == self._active_obj_id
+        ):
+            active_message = json.dumps(update)
+            self.active_braid_socket.send_multipart(
+                [self._active_topic_bytes, active_message.encode("utf-8")]
+            )
         self.logger.debug(f"Published message: {message[:50]}...")
 
     def _process_stream(self) -> None:
@@ -267,48 +334,26 @@ class BraidPublisher(WorkerProcess):
 
                 self.logger.debug("Connected to event stream, processing events...")
 
-                event_type: Optional[str] = None
-                data_buf: list[str] = []
                 last_boundary = time.monotonic()
 
-                for line in response.iter_lines(decode_unicode=True):
+                for event_type, data_str in iter_sse_events(
+                    response.iter_lines(decode_unicode=True)
+                ):
                     if self.stop_event.is_set():
                         break
-                    # iter_lines can yield None on keepalive whitespace.
-                    if line is None:
-                        continue
 
-                    if line == "":
-                        # Blank line = event boundary. Dispatch and reset.
-                        if event_type == "braid" and data_buf:
-                            self._dispatch_event("\n".join(data_buf))
-                        event_type = None
-                        data_buf = []
+                    self._drain_trigger_events()
+                    if event_type == "braid":
+                        self._dispatch_event(data_str)
 
-                        now = time.monotonic()
-                        gap = now - last_boundary
-                        if gap > BOUNDARY_GAP_WARN_S:
-                            self.logger.warning(
-                                f"SSE boundary gap {gap * 1000:.1f} ms "
-                                f"(>{BOUNDARY_GAP_WARN_S * 1000:.0f} ms) — "
-                                "upstream stall or coalesced batch"
-                            )
-                        last_boundary = now
-                        continue
-
-                    if line.startswith(":"):
-                        # SSE comment / keepalive — ignore.
-                        continue
-                    if line.startswith("event:"):
-                        event_type = line[len("event:") :].strip()
-                    elif line.startswith("data:"):
-                        # Per spec, strip a single leading space if present.
-                        payload = line[len("data:") :]
-                        if payload.startswith(" "):
-                            payload = payload[1:]
-                        data_buf.append(payload)
-                    # `id:`, `retry:`, and unknown fields are intentionally
-                    # ignored — Braid does not use them.
+                    now = time.monotonic()
+                    gap = now - last_boundary
+                    if gap > BOUNDARY_GAP_WARN_S:
+                        self.logger.warning(
+                            f"SSE boundary gap {gap * 1000:.1f} ms "
+                            f"(>{BOUNDARY_GAP_WARN_S * 1000:.0f} ms)"
+                        )
+                    last_boundary = now
 
             except (requests.RequestException, ConnectionError) as e:
                 if self.stop_event.is_set():
@@ -360,11 +405,18 @@ class BraidPublisher(WorkerProcess):
         # Set stop event to signal threads to exit
         self.stop_event.set()
 
-        # Close ZMQ socket and context
-        if self.zmq_socket:
-            self.logger.debug("Closing ZMQ socket")
-            self.zmq_socket.close()
-            self.zmq_socket = None
+        # Wait for stream thread to exit before closing sockets it uses.
+        if self.stream_thread and self.stream_thread.is_alive():
+            self.logger.debug("Waiting for stream thread to exit")
+            self.stream_thread.join(timeout=2)
+
+        # Close ZMQ sockets and context
+        for sock_attr in ("zmq_socket", "active_braid_socket", "trigger_socket"):
+            sock = getattr(self, sock_attr, None)
+            if sock:
+                self.logger.debug(f"Closing {sock_attr}")
+                sock.close()
+                setattr(self, sock_attr, None)
 
         if self.zmq_context:
             self.logger.debug("Terminating ZMQ context")
@@ -376,11 +428,6 @@ class BraidPublisher(WorkerProcess):
             self.logger.debug("Closing requests session")
             self.session.close()
             self.session = None
-
-        # Wait for stream thread to exit
-        if self.stream_thread and self.stream_thread.is_alive():
-            self.logger.debug("Waiting for stream thread to exit")
-            self.stream_thread.join(timeout=2)
 
         self.is_connected = False
         self.logger.info("BraidSubscriber closed successfully")
