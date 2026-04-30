@@ -227,10 +227,17 @@ class BraidPublisher(WorkerProcess):
                         data = parse_chunk(chunk)
 
                         if "msg" in data and self.zmq_socket is not None:
-                            # Inject relay wall-clock time for latency profiling
-                            data["msg"]["t_relay"] = time.time()
-                            # Publish to ZMQ
-                            message = json.dumps(data["msg"])
+                            # Inject relay wall-clock into the inner payload
+                            # (Update/Birth) so consumers can read t_relay alongside
+                            # the other fields. Death is a scalar obj_id, skip it.
+                            msg = data["msg"]
+                            t_relay = time.time()
+                            for key in ("Update", "Birth"):
+                                inner = msg.get(key)
+                                if isinstance(inner, dict):
+                                    inner["t_relay"] = t_relay
+                                    break
+                            message = json.dumps(msg)
                             self.zmq_socket.send_multipart(
                                 [
                                     self.config.zmq.braid_topic.encode("utf-8"),

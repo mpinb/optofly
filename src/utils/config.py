@@ -115,6 +115,13 @@ class LiquidLensConfig(ConfigBase):
         self.calibration_file: str = config.get(
             "calibration_file", "calibrations/liquid_lens.csv"
         )
+        calibration_model = config.get("calibration_model", "quadratic")
+        valid = ("linear", "quadratic", "power", "inverse")
+        if calibration_model not in valid:
+            raise ValueError(
+                f"liquid_lens.calibration_model must be one of {valid}, got {calibration_model!r}"
+            )
+        self.calibration_model: str = calibration_model
         # Zone timeout is now global — read from trigger_handler config
         trigger_config = TriggerHandlerConfig(config_path)
         self.zone_timeout: float = trigger_config.zone_timeout
@@ -126,20 +133,24 @@ class LiquidLensConfig(ConfigBase):
         self.fov_y_min = camera_config.fov_y_min
         self.fov_y_max = camera_config.fov_y_max
 
-        # Kalman filter settings
+        # Predictor mode: "none", "linear", or "kalman"
+        predictor = config.get("predictor", "none")
+        if predictor not in ("none", "linear", "kalman"):
+            raise ValueError(
+                f"liquid_lens.predictor must be 'none', 'linear', or 'kalman', got '{predictor}'"
+            )
+        self.predictor: str = predictor
+
+        # Prediction parameters (used by "linear" and "kalman" modes)
         kalman_config = config.get("kalman", {})
-        # Enable/disable Kalman filtering
-        self.kalman_enabled: bool = kalman_config.get("enabled", True)
-        # Process noise covariance (how quickly velocity can change)
-        self.process_noise: float = kalman_config.get("process_noise", 0.01)
-        # Measurement noise covariance (accuracy of position measurements)
-        self.measurement_noise: float = kalman_config.get("measurement_noise", 0.1)
-        # Initial state covariance (uncertainty in initial state)
-        self.initial_covariance: float = kalman_config.get("initial_covariance", 1.0)
-        # System latency in seconds (message processing + lens adjustment time)
         self.system_latency: float = kalman_config.get("system_latency", 0.05)
-        # How far in the future to predict (in seconds) for Kalman filter
-        self.prediction_horizon: float = kalman_config.get("prediction_horizon", 0.1)
+        self.prediction_horizon: float = kalman_config.get("prediction_horizon", 0.05)
+
+        # Kalman-only parameters
+        self.process_noise: float = kalman_config.get("process_noise", 0.01)
+        self.measurement_noise: float = kalman_config.get("measurement_noise", 0.1)
+        self.initial_covariance: float = kalman_config.get("initial_covariance", 1.0)
+        self.velocity_noise: float = kalman_config.get("velocity_noise", 1.0)
 
         # ZMQ configuration
         self.zmq = ZMQConfig(config_path)

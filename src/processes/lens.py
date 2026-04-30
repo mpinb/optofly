@@ -16,29 +16,75 @@ from src.utils.kalman_filter import KalmanFilter
 from src.hardware.lens import LensDriver
 
 
-class LensCalibration:
-    """Maps z position to lens diopter via linear model (A*z + B).
+VALID_CALIBRATION_MODELS = ("linear", "quadratic", "power", "inverse")
 
-    Coefficients are fit once at construction from calibration data.
+
+class LensCalibration:
+    """Maps z position (m) → diopter via a user-selected model.
+
+    The model is fit once at construction; ``get_dpt`` does only fast
+    floating-point arithmetic (no numpy/scipy on the hot path).
+
+    Supported models:
+        linear    — dpt = a·z + b
+        quadratic — dpt = a·z² + b·z + c  (recommended)
+        power     — dpt = a·(z + shift)^b + c
+        inverse   — dpt = a/(z − b) + c
+
     z is clamped to the calibration range to prevent extrapolation.
     """
 
-    def __init__(self, z_values, dpt_values):
-        z = np.array(z_values)
-        dpt = np.array(dpt_values)
-        self.a, self.b = np.polyfit(z, dpt, 1)
+    def __init__(self, z_values, dpt_values, model: str = "quadratic"):
+        if model not in VALID_CALIBRATION_MODELS:
+            raise ValueError(
+                f"calibration_model must be one of {VALID_CALIBRATION_MODELS}, got {model!r}"
+            )
+        z = np.array(z_values, dtype=float)
+        dpt = np.array(dpt_values, dtype=float)
         self.z_min = float(z.min())
         self.z_max = float(z.max())
+        self.model = model
+
+        if model == "linear":
+            # polyfit returns [a, b] for degree 1: dpt = a*z + b
+            _a, _b = np.polyfit(z, dpt, 1)
+            self._predict = lambda z_val, a=float(_a), b=float(_b): a * z_val + b
+        elif model == "quadratic":
+            # polyfit returns [a, b, c] for degree 2: dpt = a*z² + b*z + c
+            _a, _b, _c = np.polyfit(z, dpt, 2)
+            self._predict = lambda z_val, a=float(_a), b=float(_b), c=float(_c): (a * z_val + b) * z_val + c
+        elif model == "power":
+            from scipy.optimize import curve_fit
+            # dpt = a * z^b + c; initial guess derived from data range
+            popt, _ = curve_fit(
+                lambda z, a, b, c: a * z ** b + c,
+                z, dpt, p0=[20.0, 1.5, -1.0],
+                bounds=([0, 0.1, -np.inf], [np.inf, 5.0, np.inf]),
+                maxfev=10000,
+            )
+            _a, _b, _c = (float(v) for v in popt)
+            self._predict = lambda z_val, a=_a, b=_b, c=_c: a * z_val ** b + c
+        else:  # inverse
+            from scipy.optimize import curve_fit
+            # dpt = a / (z - b) + c; b must be negative (pole below measurement range)
+            popt, _ = curve_fit(
+                lambda z, a, b, c: a / (z - b) + c,
+                z, dpt, p0=[0.05, -0.3, 5.0],
+                bounds=([0, -np.inf, -np.inf], [np.inf, 0, np.inf]),
+                maxfev=10000,
+            )
+            _a, _b, _c = (float(v) for v in popt)
+            self._predict = lambda z_val, a=_a, b=_b, c=_c: a / (z_val - b) + c
 
     def get_dpt(self, z: float) -> float:
         z = max(self.z_min, min(self.z_max, z))
-        return self.a * z + self.b
+        return self._predict(z)
 
 
-def setup_lens_calibration(calibration_file: str) -> LensCalibration:
+def setup_lens_calibration(calibration_file: str, model: str = "quadratic") -> LensCalibration:
     try:
         data = np.genfromtxt(calibration_file, delimiter=",", names=True)
-        return LensCalibration(data["z"], data["dpt"])
+        return LensCalibration(data["z"], data["dpt"], model=model)
     except Exception as e:
         raise RuntimeError(f"Error setting up lens calibration: {e}")
 
@@ -96,15 +142,21 @@ class LiquidLens(WorkerProcess):
         self.trigger_socket.connect(
             self.zmq_config.get_subscriber_address(self.zmq_config.trigger_port)
         )
-        for topic in (self.zmq_config.zone_enter_topic, self.zmq_config.zone_exit_topic):
+        for topic in (
+            self.zmq_config.zone_enter_topic,
+            self.zmq_config.zone_exit_topic,
+        ):
             self.trigger_socket.setsockopt_string(zmq.SUBSCRIBE, topic)
         self.logger.debug("Connected to BraidPublisher and TriggerHandler.")
 
         # Calibration
         self.lens_calibration = setup_lens_calibration(
-            self.lens_config.calibration_file
+            self.lens_config.calibration_file,
+            model=self.lens_config.calibration_model,
         )
-        self.logger.debug("Lens calibration loaded.")
+        self.logger.debug(
+            f"Lens calibration loaded: model={self.lens_config.calibration_model}"
+        )
 
         # Lens hardware
         self.lens_driver = LensDriver(port=self.lens_config.port)
@@ -124,14 +176,21 @@ class LiquidLens(WorkerProcess):
         self.csv_writer = CSVWriter(csv_path, strict=False)
         self.logger.info(f"CSV logging to: {csv_path}")
 
-        if self.lens_config.kalman_enabled:
+        mode = self.lens_config.predictor
+        if mode == "kalman":
             self.logger.info(
-                f"Kalman filter enabled with process_noise={self.lens_config.process_noise}, "
+                f"Predictor: kalman (process_noise={self.lens_config.process_noise}, "
                 f"measurement_noise={self.lens_config.measurement_noise}, "
-                f"prediction_horizon={self.lens_config.prediction_horizon}s"
+                f"system_latency={self.lens_config.system_latency}s, "
+                f"prediction_horizon={self.lens_config.prediction_horizon}s)"
+            )
+        elif mode == "linear":
+            self.logger.info(
+                f"Predictor: linear (system_latency={self.lens_config.system_latency}s, "
+                f"prediction_horizon={self.lens_config.prediction_horizon}s)"
             )
         else:
-            self.logger.info("Kalman filter is disabled")
+            self.logger.info("Predictor: none (raw z from Braid)")
 
         self.logger.info("Liquid Lens process initialized.")
 
@@ -181,9 +240,13 @@ class LiquidLens(WorkerProcess):
             except zmq.Again:
                 break
 
-    def _get_next_update_for_current_object(self, scan_ahead: int = 0):
-        """Return the next usable BRAID update for the tracked object."""
-        candidate = None
+    def _get_next_update_for_current_object(self):
+        """Drain the queue and return the most recent BRAID update for the tracked object.
+
+        Older queued updates are discarded — the Kalman predictor extrapolates
+        from the freshest measurement, so chasing stale positions is wasted work.
+        """
+        latest = None
         saw_death = False
 
         while True:
@@ -205,86 +268,70 @@ class LiquidLens(WorkerProcess):
             if update.get("obj_id") != self.current_tracked_obj:
                 continue
 
-            candidate = update
-            break
+            latest = update
 
-        if candidate is None:
-            return None, saw_death
+        return latest, saw_death
 
-        for _ in range(max(scan_ahead, 0)):
+    def _drain_trigger_socket(self):
+        """Process all pending zone enter/exit events."""
+        while True:
             try:
-                _, raw = self.braid_socket.recv_multipart(flags=zmq.NOBLOCK)
+                topic_b, raw = self.trigger_socket.recv_multipart(flags=zmq.NOBLOCK)
             except zmq.Again:
-                break
+                return
+            topic = topic_b.decode()
+            msg = json.loads(raw)
 
-            braid_msg = json.loads(raw)
+            if topic == self.zmq_config.zone_enter_topic and not self.is_tracking:
+                obj_id = msg.get("obj_id")
+                if obj_id is not None:
+                    self.logger.info(f"ZONE_ENTER: start tracking object {obj_id}")
+                    self.is_tracking = True
+                    self.current_tracked_obj = obj_id
+                    self.last_position_time = time.time()
+                    self._log_csv("zone_enter", obj_id=obj_id)
+                    self._timing_rows = []
+                    self._recording_obj_id = obj_id
+                    self._recording_frame = msg.get("frame")
+                    self.kalman = None
 
-            if "Death" in braid_msg and braid_msg["Death"] == self.current_tracked_obj:
-                saw_death = True
-                continue
-
-            if "Update" not in braid_msg:
-                continue
-
-            update = braid_msg["Update"]
-            if update.get("obj_id") == self.current_tracked_obj:
-                candidate = update
-
-        return candidate, saw_death
+            elif topic == self.zmq_config.zone_exit_topic and self.is_tracking:
+                if msg.get("obj_id") == self.current_tracked_obj:
+                    reason = msg.get("reason", "unknown")
+                    self.logger.info(
+                        f"ZONE_EXIT: stop tracking object {self.current_tracked_obj} reason={reason}"
+                    )
+                    self._log_csv(
+                        "zone_exit",
+                        obj_id=self.current_tracked_obj,
+                        reason=reason,
+                    )
+                    self._stop_tracking()
 
     def _run(self):
         self.initialize()
         self.is_running = True
         self.logger.info("Liquid Lens process started.")
 
+        poller = zmq.Poller()
+        poller.register(self.trigger_socket, zmq.POLLIN)
+        poller.register(self.braid_socket, zmq.POLLIN)
+
         while self.is_running and not self.stop_event.is_set():
             try:
-                # Handle trigger events.
-                try:
-                    topic_b, raw = self.trigger_socket.recv_multipart(flags=zmq.NOBLOCK)
-                    topic = topic_b.decode()
-                    msg = json.loads(raw)
+                events = dict(poller.poll(timeout=10))
 
-                    # If we see a zone enter for an object and we're not already tracking, start tracking it.
-                    if topic == self.zmq_config.zone_enter_topic and not self.is_tracking:
-                        obj_id = msg.get("obj_id")
-                        if obj_id is not None:
-                            self.logger.info(f"ZONE_ENTER: start tracking object {obj_id}")
+                if self.trigger_socket in events:
+                    self._drain_trigger_socket()
 
-                            self.is_tracking = True
-                            self.current_tracked_obj = obj_id
-                            self.last_position_time = time.time()
-                            self._log_csv("zone_enter", obj_id=obj_id)
-
-                            self._timing_rows = []
-                            self._recording_obj_id = obj_id
-                            self._recording_frame = msg.get("frame")
-                            self.kalman = None
-
-                    # If we see a zone exit for the currently tracked object, stop tracking it.
-                    elif topic == self.zmq_config.zone_exit_topic and self.is_tracking:
-                        if msg.get("obj_id") == self.current_tracked_obj:
-                            reason = msg.get("reason", "unknown")
-                            self.logger.info(
-                                f"ZONE_EXIT: stop tracking object {self.current_tracked_obj} reason={reason}"
-                            )
-                            self._log_csv(
-                                "zone_exit",
-                                obj_id=self.current_tracked_obj,
-                                reason=reason,
-                            )
-                            self._stop_tracking()
-
-                except zmq.Again:
-                    pass
-
-                # Stay current while idle.
                 if not self.is_tracking:
-                    self._drain_braid_idle()
-                    time.sleep(0.01)
+                    if self.braid_socket in events:
+                        self._drain_braid_idle()
                     continue
 
-                # Use only the newest update for the tracked object.
+                if self.braid_socket not in events:
+                    continue
+
                 update, saw_death = self._get_next_update_for_current_object()
 
                 if saw_death:
@@ -294,7 +341,6 @@ class LiquidLens(WorkerProcess):
                     )
 
                 if update is None:
-                    time.sleep(0.001)
                     continue
 
                 u = update
@@ -304,36 +350,41 @@ class LiquidLens(WorkerProcess):
                 timestamp = u.get("timestamp")
                 t_relay = u.get("t_relay")
 
-                # Update the predictor.
-                if self.lens_config.kalman_enabled:
+                # Pick the focus depth according to predictor mode.
+                predictor = self.lens_config.predictor
+                if predictor == "kalman":
                     if self.kalman is None:
                         self.kalman = KalmanFilter(
                             process_noise=self.lens_config.process_noise,
                             measurement_noise=self.lens_config.measurement_noise,
                             initial_covariance=self.lens_config.initial_covariance,
+                            velocity_noise=self.lens_config.velocity_noise,
                         )
                         self.kalman.init((x, y, z), (vx, vy, vz), timestamp)
                     else:
                         self.kalman.update((x, y, z), (vx, vy, vz), timestamp)
-
-                # Pick the focus depth.
-                focus_z = z
-                if self.lens_config.kalman_enabled and self.kalman is not None:
                     prediction_time = (
                         self.lens_config.system_latency
                         + self.lens_config.prediction_horizon
                     )
                     predicted = self.kalman.predict(prediction_time)
-                    if predicted is not None:
-                        focus_z = predicted[2]
+                    focus_z = predicted[2] if predicted is not None else z
+                elif predictor == "linear":
+                    prediction_time = (
+                        self.lens_config.system_latency
+                        + self.lens_config.prediction_horizon
+                    )
+                    focus_z = z + vz * prediction_time
+                else:
+                    focus_z = z
 
                 # Command the lens and record timing.
                 try:
                     dpt = self.lens_calibration.get_dpt(focus_z)
-                    t_braid_received = time.time()
+                    t_serial_start = time.time()
                     self.lens_driver.set_diopter(dpt)
                     t_diopter_sent = time.time()
-                    delay_ms = (t_diopter_sent - t_braid_received) * 1000.0
+                    delay_ms = (t_diopter_sent - t_serial_start) * 1000.0
                     self._log_csv(
                         "focus",
                         obj_id=self.current_tracked_obj,
@@ -342,13 +393,13 @@ class LiquidLens(WorkerProcess):
                         z=z,
                         focus_z=focus_z,
                         diopter=dpt,
-                        kalman=self.lens_config.kalman_enabled,
+                        predictor=self.lens_config.predictor,
                     )
                     self._timing_rows.append(
                         {
                             "t_braid": timestamp,
                             "t_relay": t_relay,
-                            "t_braid_received": t_braid_received,
+                            "t_serial_start": t_serial_start,
                             "t_diopter_sent": t_diopter_sent,
                             "delay_ms": delay_ms,
                             "frame": u.get("frame"),
@@ -358,7 +409,7 @@ class LiquidLens(WorkerProcess):
                             "z": z,
                             "focus_z": focus_z,
                             "diopter": dpt,
-                            "kalman": self.lens_config.kalman_enabled,
+                            "predictor": self.lens_config.predictor,
                         }
                     )
                 except Exception as e:
