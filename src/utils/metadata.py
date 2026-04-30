@@ -5,10 +5,48 @@ Provides interactive prompts for experiment metadata (experimenter, cross, dates
 and writes them to experiment_data.toml in the braid recording folder.
 """
 
+import tomllib
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 import csv
+
+
+def extract_config_columns(config_path: str) -> dict[str, Any]:
+    """
+    Extract opto_trigger and enabled visual stimuli parameters from config as flat CSV columns.
+
+    Returns a dict with prefixed keys:
+    - opto_<field> for opto_trigger section
+    - <stim_name>_<param> for each enabled stimulus in the visual stimuli config
+    """
+    try:
+        with open(config_path, "rb") as f:
+            config = tomllib.load(f)
+    except FileNotFoundError:
+        return {}
+
+    columns: dict[str, Any] = {}
+
+    opto = config.get("opto_trigger", {})
+    for key in ("active", "duration", "intensity", "frequency", "color", "sham_probability"):
+        columns[f"opto_{key}"] = opto.get(key, None)
+
+    visual_config_file = config.get("visual_stimuli", {}).get(
+        "config_file", "configs/visual_stimuli.toml"
+    )
+    try:
+        with open(visual_config_file, "rb") as f:
+            visual_config = tomllib.load(f)
+        stimuli = visual_config.get("visual_stimuli", {})
+        for stim_name, stim_cfg in stimuli.items():
+            if isinstance(stim_cfg, dict) and stim_cfg.get("enabled", False):
+                for param, value in stim_cfg.items():
+                    columns[f"{stim_name}_{param}"] = value
+    except FileNotFoundError:
+        pass
+
+    return columns
 
 
 def collect_metadata() -> dict[str, Any]:
@@ -117,33 +155,41 @@ def write_metadata(metadata: dict[str, Any], braid_folder: str) -> None:
     print(f"✓ Metadata written to {output_file}")
 
 
-def append_metadata_to_csv(metadata: dict[str, Any], braid_folder: str) -> None:
+def append_metadata_to_csv(
+    metadata: dict[str, Any],
+    braid_folder: str,
+    config_columns: dict[str, Any] | None = None,
+) -> None:
     """
     Append experiment metadata to a central CSV file in the user's home directory.
 
     Args:
         metadata: Dict with experiment metadata fields
         braid_folder: Path to the .braid recording folder
+        config_columns: Optional flat dict of config-derived columns to append
     """
     csv_path = Path.home() / "optofly_experiments.csv"
 
-    # Derive the .braidz filename
     braid_name = Path(braid_folder).name
     if braid_name.endswith(".braid"):
         braid_file = braid_name.replace(".braid", ".braidz")
     else:
         braid_file = f"{braid_name}.braidz"
 
-    # Prepare row data
     row = metadata.copy()
+    if config_columns:
+        row.update(config_columns)
     row["braid_file"] = braid_file
 
     file_exists = csv_path.exists() and csv_path.stat().st_size > 0
 
     try:
         with open(csv_path, mode="a", newline="") as f:
-            # Fieldnames: metadata keys + braid_file
-            fieldnames = list(metadata.keys()) + ["braid_file"]
+            fieldnames = (
+                list(metadata.keys())
+                + list(config_columns.keys() if config_columns else [])
+                + ["braid_file"]
+            )
             writer = csv.DictWriter(f, fieldnames=fieldnames)
 
             if not file_exists:
