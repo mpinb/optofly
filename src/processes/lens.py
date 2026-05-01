@@ -360,15 +360,14 @@ class LiquidLens(WorkerProcess):
                             initial_covariance=self.lens_config.initial_covariance,
                             velocity_noise=self.lens_config.velocity_noise,
                         )
-                        self.kalman.init((x, y, z), (vx, vy, vz), timestamp)
+                        self.kalman.init(z, vz, timestamp)
                     else:
-                        self.kalman.update((x, y, z), (vx, vy, vz), timestamp)
+                        self.kalman.update(z, vz, timestamp)
                     prediction_time = (
                         self.lens_config.system_latency
                         + self.lens_config.prediction_horizon
                     )
-                    predicted = self.kalman.predict(prediction_time)
-                    focus_z = predicted[2] if predicted is not None else z
+                    focus_z = self.kalman.predict(prediction_time)
                 elif predictor == "linear":
                     prediction_time = (
                         self.lens_config.system_latency
