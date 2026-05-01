@@ -4,11 +4,11 @@ Fits a 3×4 projection matrix P from N≥6 correspondences:
     [u, v, 1] ∝ P @ [x, y, z, 1]
 
 Typical use:
-    cal = BraidToCameraCalibration()
+    cal = BraidToXimeaCalibration()
     cal.fit(world_pts, pixel_pts)
-    cal.save("calibrations/braid_to_camera.npz")
+    cal.save("calibrations/braid_to_ximea.npz")
 
-    cal = BraidToCameraCalibration.load("calibrations/braid_to_camera.npz")
+    cal = BraidToXimeaCalibration.load("calibrations/braid_to_ximea.npz")
     u, v = cal.project(x, y, z)
     x, y = cal.backproject(u, v, z)
     fov = cal.compute_fov(width=2112, height=2112, z=0.2)
@@ -18,7 +18,7 @@ import numpy as np
 from pathlib import Path
 
 
-class BraidToCameraCalibration:
+class BraidToXimeaCalibration:
     """3D→2D projection calibration via DLT."""
 
     def __init__(self) -> None:
@@ -149,7 +149,7 @@ class BraidToCameraCalibration:
         np.savez(path, P=self._P)
 
     @classmethod
-    def load(cls, path: str) -> "BraidToCameraCalibration":
+    def load(cls, path: str) -> "BraidToXimeaCalibration":
         data = np.load(path)
         cal = cls()
         cal._P = data["P"]

@@ -171,13 +171,13 @@ Points spread across the full frame improve conditioning. More points = better a
 2. Launch the calibration tool:
 
    ```bash
-   python -m src.tools.calibrate_braid_camera --config configs/config.toml
+   python -m src.tools.calibrate_braid_ximea --config configs/config.toml
    ```
 
    Or, for an offline image (no camera required):
 
    ```bash
-   python -m src.tools.calibrate_braid_camera --image /path/to/frame.png --config configs/config.toml
+   python -m src.tools.calibrate_braid_ximea --image /path/to/frame.png --config configs/config.toml
    ```
 
 3. A window opens showing the camera feed (or static image). Follow the on-screen counter at the top of the window.
@@ -230,7 +230,7 @@ Add the calibration file path to `configs/config.toml`:
 
 ```toml
 [camera]
-braid_camera_calibration_file = "calibrations/braid_to_camera.npz"
+braid_ximea_calibration_file = "calibrations/braid_to_ximea.npz"
 ```
 
 The tool offers to do this automatically when you press `s`.
@@ -249,7 +249,7 @@ from N ≥ 6 point correspondences. The system is solved as a 2N×12 linear syst
 
 ### Output File
 
-`calibrations/braid_to_camera.npz` contains:
+`calibrations/braid_to_ximea.npz` contains:
 
 | Key | Description |
 |-----|-------------|

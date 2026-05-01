@@ -136,10 +136,10 @@ python -m src.processes.visual --calibrate-mapping
 python -m src.processes.visual --test-calibration
 
 # BRAID-to-camera DLT calibration (interactive, requires Braid + camera)
-python -m src.tools.calibrate_braid_camera --config configs/config.toml
+python -m src.tools.calibrate_braid_ximea --config configs/config.toml
 
 # Offline mode (static image, no hardware)
-python -m src.tools.calibrate_braid_camera --image /path/to/frame.png --config configs/config.toml
+python -m src.tools.calibrate_braid_ximea --image /path/to/frame.png --config configs/config.toml
 ```
 
 See [docs/calibration.md](calibration.md) for full procedures.

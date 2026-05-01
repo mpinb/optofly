@@ -1,9 +1,9 @@
 """Interactive BRAID-to-camera calibration tool.
 
 Usage:
-    uv run python -m src.tools.calibrate_braid_camera
-    uv run python -m src.tools.calibrate_braid_camera --config configs/config.toml
-    uv run python -m src.tools.calibrate_braid_camera --out calibrations/braid_to_camera.npz
+    uv run python -m src.tools.calibrate_braid_ximea
+    uv run python -m src.tools.calibrate_braid_ximea --config configs/config.toml
+    uv run python -m src.tools.calibrate_braid_ximea --out calibrations/braid_to_ximea.npz
 
 Workflow:
     1. Live camera feed opens in an OpenCV window.
@@ -35,7 +35,7 @@ import zmq
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from src.utils.calibration import BraidToCameraCalibration
+from src.utils.calibration import BraidToXimeaCalibration
 from src.utils.config import ZMQConfig
 
 
@@ -234,7 +234,7 @@ def _ask_z_ref(default: float | None, world_pts: list) -> float:
 
 
 def _compute_fov(
-    calibration: BraidToCameraCalibration,
+    calibration: BraidToXimeaCalibration,
     frame_w: int,
     frame_h: int,
     z_ref: float,
@@ -281,7 +281,7 @@ def main():
     parser.add_argument("--config", default="configs/config.toml")
     parser.add_argument(
         "--out",
-        default="calibrations/braid_to_camera.npz",
+        default="calibrations/braid_to_ximea.npz",
         help="Output projection calibration file",
     )
     parser.add_argument(
@@ -329,7 +329,7 @@ def main():
 
     world_pts: list[tuple[float, float, float]] = []
     pixel_pts: list[tuple[float, float]] = []
-    calibration = BraidToCameraCalibration()
+    calibration = BraidToXimeaCalibration()
     reprojection_error: float | None = None
     fov: dict | None = None
     fov_pixels: list[tuple[int, int]] | None = None
