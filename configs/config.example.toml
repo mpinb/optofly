@@ -112,7 +112,7 @@ calibration_model = "quadratic"
 # Predictor mode — controls how the lens target depth is computed each update:
 #   "none"   — use raw z from Braid directly (no lookahead)
 #   "linear" — z + vz * (system_latency + prediction_horizon)
-#   "kalman" — 6-state Kalman filter with predictive lookahead
+#   "kalman" — 2-state Kalman filter [z, vz] with predictive lookahead
 predictor = "none"
 
 [liquid_lens.kalman]
