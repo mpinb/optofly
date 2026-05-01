@@ -1,4 +1,6 @@
-"""Interactive BRAID-to-camera calibration tool.
+"""Interactive BRAID-to-Ximea calibration tool.
+
+Requires: Ximea camera connected, BRAID running and tracking.
 
 Usage:
     uv run python -m src.tools.calibrate_braid_ximea
@@ -6,12 +8,13 @@ Usage:
     uv run python -m src.tools.calibrate_braid_ximea --out calibrations/braid_to_ximea.npz
 
 Workflow:
-    1. Live camera feed opens in an OpenCV window.
-    2. A live BRAID ZMQ subscriber tracks the current fly/target position (x, y, z).
-    3. Position a target and LEFT-CLICK on it in the video window.
+    1. The Ximea camera feed opens in an OpenCV window.
+    2. A live BRAID ZMQ subscriber tracks the current laser/target position (x, y, z).
+    3. Aim the laser pointer at a position in the arena. Wait for a stable BRAID fix,
+       then LEFT-CLICK on the laser dot in the camera window.
        Each click records the current BRAID (x, y, z) and the clicked pixel (u, v).
-    4. Collect ≥6 points.  For the best FOV accuracy, place some targets near the
-       four corners of the frame.
+    4. Collect ≥6 points. For best FOV accuracy, aim the laser near all 4 corners of
+       the frame first, then add ≥2 interior points at different heights.
     5. Press 'f' to fit the projection matrix and check reprojection error.
     6. Press 'v' to compute the camera FOV.  The tool asks for a reference height
        (the z value at which the FOV is measured) and draws the projected boundary
@@ -23,6 +26,7 @@ Workflow:
 """
 
 import argparse
+import ctypes
 import json
 import re
 import sys
@@ -88,11 +92,48 @@ class _BraidTracker(threading.Thread):
 # ---------------------------------------------------------------------------
 
 
-def _open_camera(index: int = 0) -> cv2.VideoCapture:
-    cap = cv2.VideoCapture(index)
-    if not cap.isOpened():
-        raise RuntimeError(f"Cannot open camera index {index}")
-    return cap
+def _open_ximea_camera(
+    width: int = 2112,
+    height: int = 2112,
+    fps: float = 10.0,
+    exposure_us: int = 2000,
+) -> tuple:
+    """Open and configure the Ximea camera for calibration preview.
+
+    Returns:
+        (cam, img, actual_width, actual_height)
+    """
+    from ximea import Camera, Image
+
+    cam = Camera()
+    cam.open_device()
+    cam.set_imgdataformat("XI_MONO8")
+    cam.set_exposure(exposure_us)
+    cam.enable_bpc()
+    cam.set_column_fpn_correction("XI_ON")
+
+    cam.set_width(width)
+    cam.set_height(height)
+    sensor_w = cam.get_width_maximum()
+    sensor_h = cam.get_height_maximum()
+    offset_x = (sensor_w - width) // 2
+    offset_y = (sensor_h - height) // 2
+    inc_x = cam.get_offsetX_increment()
+    inc_y = cam.get_offsetY_increment()
+    offset_x = (offset_x // inc_x) * inc_x
+    offset_y = (offset_y // inc_y) * inc_y
+    cam.set_offsetX(offset_x)
+    cam.set_offsetY(offset_y)
+
+    cam.set_acq_timing_mode("XI_ACQ_TIMING_MODE_FRAME_RATE_LIMIT")
+    cam.set_framerate(fps)
+
+    actual_w = cam.get_width()
+    actual_h = cam.get_height()
+
+    cam.start_acquisition()
+    img = Image()
+    return cam, img, actual_w, actual_h
 
 
 # ---------------------------------------------------------------------------
@@ -285,12 +326,10 @@ def main():
         help="Output projection calibration file",
     )
     parser.add_argument(
-        "--camera-index", type=int, default=0, help="OpenCV camera index"
+        "--fps", type=float, default=10.0, help="Preview frame rate in Hz (default: 10)"
     )
     parser.add_argument(
-        "--image",
-        default=None,
-        help="Use a static image instead of live camera (for offline calibration)",
+        "--exposure", type=int, default=2000, help="Exposure time in microseconds (default: 2000)"
     )
     parser.add_argument(
         "--z-ref",
@@ -309,23 +348,15 @@ def main():
     tracker.start()
     print(f"Subscribed to BRAID on port {braid_port}")
 
-    if args.image:
-        static_frame = cv2.imread(args.image)
-        if static_frame is None:
-            print(f"ERROR: Cannot read image: {args.image}")
-            sys.exit(1)
-        cap = None
-        print(f"Using static image: {args.image}")
-    else:
-        try:
-            cap = _open_camera(args.camera_index)
-            static_frame = None
-            print(f"Camera {args.camera_index} opened")
-        except RuntimeError as e:
-            print(f"ERROR: {e}")
-            print("Use --image <path> to calibrate against a static snapshot.")
-            stop_event.set()
-            sys.exit(1)
+    try:
+        cam, img_obj, frame_w, frame_h = _open_ximea_camera(
+            fps=args.fps, exposure_us=args.exposure
+        )
+        print(f"Ximea camera opened: {frame_w}×{frame_h} @ {args.fps} fps")
+    except Exception as e:
+        print(f"ERROR: Cannot open Ximea camera: {e}")
+        stop_event.set()
+        sys.exit(1)
 
     world_pts: list[tuple[float, float, float]] = []
     pixel_pts: list[tuple[float, float]] = []
@@ -334,6 +365,9 @@ def main():
     fov: dict | None = None
     fov_pixels: list[tuple[int, int]] | None = None
     z_ref: float | None = args.z_ref
+
+    # Pre-allocate grayscale buffer (avoids per-frame malloc)
+    gray_buf = np.empty((frame_h, frame_w), dtype=np.uint8)
 
     click_pending: list[tuple[int, int]] = []
 
@@ -360,7 +394,7 @@ def main():
         "\n  For best accuracy, vary z height across the set."
         "\n"
         "\n  Steps:"
-        "\n  1. Place a target at each corner of the frame (as seen in the video)."
+        "\n  1. Aim the laser pointer at each corner of the camera frame."
         "\n     Wait for a stable BRAID fix, then LEFT-CLICK on it."
         "\n  2. Repeat for 2+ interior positions (any x/y, ideally different z)."
         "\n  3. Press 'f' to fit.  Aim for < 3 px RMS reprojection error."
@@ -374,19 +408,14 @@ def main():
     print()
 
     try:
-        frame_w = frame_h = None
-
         while True:
-            if cap is not None:
-                ret, frame = cap.read()
-                if not ret:
-                    print("Camera read failed")
-                    break
-            else:
-                frame = static_frame.copy()
-
-            if frame_w is None:
-                frame_h, frame_w = frame.shape[:2]
+            try:
+                cam.get_image(img_obj, timeout=2000)
+            except Exception as e:
+                print(f"Camera read failed: {e}")
+                break
+            ctypes.memmove(gray_buf.ctypes.data, img_obj.bp, frame_w * frame_h)
+            frame = cv2.cvtColor(gray_buf, cv2.COLOR_GRAY2BGR)
 
             # Process pending clicks
             if click_pending:
@@ -514,8 +543,11 @@ def main():
 
     finally:
         stop_event.set()
-        if cap is not None:
-            cap.release()
+        try:
+            cam.stop_acquisition()
+            cam.close_device()
+        except Exception:
+            pass
         cv2.destroyAllWindows()
         tracker.join(timeout=2)
 
