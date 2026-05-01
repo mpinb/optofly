@@ -142,3 +142,126 @@ At startup, `LensCalibration` fits a degree-2 polynomial to the CSV data and bui
 - **Serial port not found**: run `ls -l /dev/ttyUSB*` and check permissions with `sudo chmod 666 /dev/ttyUSB1`
 - **Lens not responding**: verify the handshake by running `LensDriver` interactively with `debug=True`
 - **Poor focus across z-range**: add more calibration points, especially at the extremes
+
+---
+
+## BRAID-to-Camera Calibration
+
+Maps BRAID 3D world coordinates (x, y, z in metres) to camera pixel positions (u, v). Used at runtime to centre the depth-from-focus ROI on the fly. Also computes the camera field of view (FOV) automatically, replacing the manual laser-pointer workflow.
+
+### Prerequisites
+
+- Camera connected and Braid running with tracked objects
+- OptoFly environment activated (`uv sync`)
+- A flat, textured target you can place at known BRAID positions (a printed checkerboard or any trackable object works)
+
+### Point Layout
+
+The DLT projection matrix has 11 degrees of freedom and requires at least 6 point correspondences. For best accuracy and FOV coverage:
+
+- **You must click all 4 frame corners** (top-left, top-right, bottom-right, bottom-left). Corner points span the full sensor and are essential for an accurate FOV computation.
+- **You must add at least 2 interior points** anywhere else in the frame to meet the 6-point minimum.
+
+Points spread across the full frame improve conditioning. More points = better accuracy.
+
+### Procedure
+
+1. Open a live camera frame and a Braid tracking window side-by-side.
+
+2. Launch the calibration tool:
+
+   ```bash
+   python -m src.tools.calibrate_braid_camera --config configs/config.toml
+   ```
+
+   Or, for an offline image (no camera required):
+
+   ```bash
+   python -m src.tools.calibrate_braid_camera --image /path/to/frame.png --config configs/config.toml
+   ```
+
+3. A window opens showing the camera feed (or static image). Follow the on-screen counter at the top of the window.
+
+4. For each calibration point:
+   - Place (or note) the tracked object at a specific position in the arena.
+   - Read its (x, y, z) coordinates from the Braid browser or the terminal — the tool streams BRAID updates live.
+   - **Left-click** the corresponding pixel in the camera image.
+   - Enter the BRAID coordinates when prompted in the terminal.
+   - The point is drawn on the frame (red = corner, blue = interior).
+
+5. Collect all 4 corners first, then at least 2 more interior points. The status line updates:
+   - `"3 corner point(s) still needed"`
+   - `"All 4 corners collected — add ≥2 more interior points"`
+   - `"≥6 points collected — press 'f' to fit"`
+
+6. Press **`f`** to fit the DLT matrix. Reprojection errors are printed; < 5 px is good.
+
+### Key Bindings
+
+| Key | Action |
+|-----|--------|
+| Left-click | Add calibration point (prompts for BRAID coordinates) |
+| `f` | Fit the DLT matrix (requires ≥ 6 points) |
+| `v` | Visualise the FOV: back-projects frame corners and draws an orange rectangle |
+| `s` | Save the calibration; offers to update `[camera.FOV]` in `config.toml` |
+| `d` | Delete the last point |
+| `r` | Reset all points |
+| `q` / ESC | Quit |
+
+### Computing the Camera FOV
+
+After fitting (`f`), press **`v`** to visualise the field of view. The tool:
+
+1. Back-projects each of the 4 frame corners through the DLT matrix at a reference z height (you are prompted to confirm or change this).
+2. Draws an orange rectangle on the frame showing the sensor boundary in world space.
+3. Prints the derived `x_min`, `x_max`, `y_min`, `y_max` values.
+
+When you save with **`s`**, the tool asks:
+
+```
+Update [camera.FOV] in configs/config.toml? [y/N]
+```
+
+Answer `y` to write the values directly into the config file. No manual editing required.
+
+### Enabling the Calibration
+
+Add the calibration file path to `configs/config.toml`:
+
+```toml
+[camera]
+braid_camera_calibration_file = "calibrations/braid_to_camera.npz"
+```
+
+The tool offers to do this automatically when you press `s`.
+
+### Theory
+
+The DLT fits a 3×4 projection matrix **P** (11 DOF) via SVD such that:
+
+```
+[u, v, 1]ᵀ ∝ P @ [x, y, z, 1]ᵀ
+```
+
+from N ≥ 6 point correspondences. The system is solved as a 2N×12 linear system (each point contributes 2 equations) and the solution is the right singular vector corresponding to the smallest singular value.
+
+**Backprojection at known z**: given pixel (u, v) and z, the tool solves a 3×3 linear system to recover (x, y) in world space. This is used both for FOV computation and for placing the DFF ROI at the fly's projected position.
+
+### Output File
+
+`calibrations/braid_to_camera.npz` contains:
+
+| Key | Description |
+|-----|-------------|
+| `P` | 3×4 DLT projection matrix |
+| `points_3d` | Collected world points (N×3) |
+| `points_2d` | Collected pixel points (N×2) |
+| `reprojection_errors` | Per-point pixel error |
+| `mean_reprojection_error` | Mean pixel error |
+
+### Troubleshooting
+
+- **"Need at least 6 points"**: you must collect all 4 corners plus at least 2 interior points before fitting.
+- **High reprojection error (> 10 px)**: delete outlier points with `d`, re-collect them, and refit. Ensure the BRAID coordinates were read while the object was stationary.
+- **FOV looks wrong**: verify `z_ref` matches the typical flight height (not the floor or ceiling). Re-press `v` with a different z if needed.
+- **"Singular matrix" error during backprojection**: the DLT matrix is degenerate — usually caused by all points being nearly coplanar in 3D. Add points at different z heights.

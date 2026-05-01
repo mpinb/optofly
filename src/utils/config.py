@@ -419,6 +419,10 @@ class CameraConfig(ConfigBase):
         if self.fov_y_min >= self.fov_y_max:
             raise ValueError("camera.FOV.y_min must be less than y_max")
 
+        self.braid_camera_calibration_file: str | None = config.get(
+            "braid_camera_calibration_file", None
+        )
+
     def __str__(self):
         """Return a string representation of the configuration."""
         fov_width_mm = (self.fov_x_max - self.fov_x_min) * 1000

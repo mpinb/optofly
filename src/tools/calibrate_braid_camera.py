@@ -1,0 +1,537 @@
+"""Interactive BRAID-to-camera calibration tool.
+
+Usage:
+    uv run python -m src.tools.calibrate_braid_camera
+    uv run python -m src.tools.calibrate_braid_camera --config configs/config.toml
+    uv run python -m src.tools.calibrate_braid_camera --out calibrations/braid_to_camera.npz
+
+Workflow:
+    1. Live camera feed opens in an OpenCV window.
+    2. A live BRAID ZMQ subscriber tracks the current fly/target position (x, y, z).
+    3. Position a target and LEFT-CLICK on it in the video window.
+       Each click records the current BRAID (x, y, z) and the clicked pixel (u, v).
+    4. Collect ≥6 points.  For the best FOV accuracy, place some targets near the
+       four corners of the frame.
+    5. Press 'f' to fit the projection matrix and check reprojection error.
+    6. Press 'v' to compute the camera FOV.  The tool asks for a reference height
+       (the z value at which the FOV is measured) and draws the projected boundary
+       on the frame so you can verify it visually.
+    7. Press 's' to save.  The tool asks whether to write the FOV to config.toml.
+    8. Press 'u' to undo the last point; 'q' to quit.
+
+    At least 6 non-coplanar correspondences are needed for a valid DLT fit.
+"""
+
+import argparse
+import json
+import re
+import sys
+import threading
+from pathlib import Path
+
+import cv2
+import numpy as np
+import zmq
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from src.utils.calibration import BraidToCameraCalibration
+from src.utils.config import ZMQConfig
+
+
+# ---------------------------------------------------------------------------
+# BRAID tracker thread
+# ---------------------------------------------------------------------------
+
+
+class _BraidTracker(threading.Thread):
+    def __init__(self, braid_port: int, stop_event: threading.Event) -> None:
+        super().__init__(daemon=True, name="braid-tracker")
+        self._port = braid_port
+        self._stop = stop_event
+        self._lock = threading.Lock()
+        self._pos: tuple[float, float, float] | None = None
+
+    @property
+    def position(self) -> tuple[float, float, float] | None:
+        with self._lock:
+            return self._pos
+
+    def run(self) -> None:
+        ctx = zmq.Context()
+        sub = ctx.socket(zmq.SUB)
+        sub.connect(f"tcp://localhost:{self._port}")
+        sub.setsockopt_string(zmq.SUBSCRIBE, "BRAID")
+        sub.setsockopt(zmq.RCVTIMEO, 200)
+        while not self._stop.is_set():
+            try:
+                _, raw = sub.recv_multipart()
+                msg = json.loads(raw)
+                update = msg.get("Update") or msg.get("Birth")
+                if update:
+                    with self._lock:
+                        self._pos = (
+                            float(update["x"]),
+                            float(update["y"]),
+                            float(update["z"]),
+                        )
+            except zmq.Again:
+                continue
+            except Exception:
+                pass
+        sub.close()
+        ctx.term()
+
+
+# ---------------------------------------------------------------------------
+# Camera stream
+# ---------------------------------------------------------------------------
+
+
+def _open_camera(index: int = 0) -> cv2.VideoCapture:
+    cap = cv2.VideoCapture(index)
+    if not cap.isOpened():
+        raise RuntimeError(f"Cannot open camera index {index}")
+    return cap
+
+
+# ---------------------------------------------------------------------------
+# Config FOV writer
+# ---------------------------------------------------------------------------
+
+
+def _write_fov_to_config(config_path: str, fov: dict[str, float]) -> None:
+    """Overwrite [camera.FOV] x_min/x_max/y_min/y_max values in-place.
+
+    Uses regex so all comments and surrounding formatting are preserved.
+    Raises RuntimeError if the [camera.FOV] section is not found.
+    """
+    text = Path(config_path).read_text()
+    if not re.search(r"^\[camera\.FOV\]", text, re.MULTILINE):
+        raise RuntimeError(
+            f"[camera.FOV] section not found in {config_path}. "
+            "Add it manually first (see configs/config.example.toml)."
+        )
+    for key, val in fov.items():
+        pattern = rf"^({re.escape(key)}\s*=\s*)[-\d.e+]+"
+        replacement = rf"\g<1>{val:.5f}"
+        new_text, n = re.subn(pattern, replacement, text, flags=re.MULTILINE)
+        if n == 0:
+            raise RuntimeError(
+                f"Key '{key}' not found under [camera.FOV] in {config_path}"
+            )
+        text = new_text
+    Path(config_path).write_text(text)
+
+
+# ---------------------------------------------------------------------------
+# Overlay drawing
+# ---------------------------------------------------------------------------
+
+_GREEN = (0, 220, 0)
+_YELLOW = (0, 200, 220)
+_WHITE = (240, 240, 240)
+_CYAN = (220, 200, 0)
+_ORANGE = (0, 140, 255)
+_FONT = cv2.FONT_HERSHEY_SIMPLEX
+
+
+def _draw_overlay(
+    frame: np.ndarray,
+    world_pts: list,
+    pixel_pts: list,
+    braid_pos: tuple | None,
+    reprojection_error: float | None,
+    fov_pixels: list[tuple[int, int]] | None,  # projected FOV corner pixels
+    fov: dict | None,
+    z_ref: float | None,
+) -> np.ndarray:
+    vis = frame.copy()
+    h, w = vis.shape[:2]
+
+    # Draw FOV boundary rectangle (if computed)
+    if fov_pixels is not None and len(fov_pixels) == 4:
+        pts = np.array(fov_pixels, dtype=np.int32).reshape((-1, 1, 2))
+        cv2.polylines(vis, [pts], isClosed=True, color=_ORANGE, thickness=2)
+        cv2.putText(
+            vis,
+            f"FOV boundary @ z={z_ref:.3f} m",
+            (fov_pixels[0][0] + 6, fov_pixels[0][1] + 18),
+            _FONT, 0.45, _ORANGE, 1, cv2.LINE_AA,
+        )
+
+    # Collected correspondence points
+    for i, (pp, wp) in enumerate(zip(pixel_pts, world_pts)):
+        u, v = int(pp[0]), int(pp[1])
+        cv2.drawMarker(vis, (u, v), _GREEN, cv2.MARKER_CROSS, 14, 2)
+        cv2.putText(
+            vis,
+            f"{i+1}: ({wp[0]:.3f},{wp[1]:.3f},{wp[2]:.3f})",
+            (u + 8, v - 6),
+            _FONT, 0.38, _GREEN, 1, cv2.LINE_AA,
+        )
+
+    # Status panel (top-left)
+    lines: list[tuple[str, tuple]] = [
+        (f"Points: {len(world_pts)}/6+", _WHITE),
+        (
+            f"BRAID: {braid_pos[0]:.3f}, {braid_pos[1]:.3f}, {braid_pos[2]:.3f}"
+            if braid_pos else "BRAID: no fix",
+            _WHITE,
+        ),
+    ]
+    if reprojection_error is not None:
+        lines.append((f"RMS reprojection: {reprojection_error:.2f} px", _WHITE))
+    if fov is not None and z_ref is not None:
+        lines.append((f"FOV @ z={z_ref:.3f} m:", _CYAN))
+        lines.append((
+            f"  x [{fov['x_min']:.4f}, {fov['x_max']:.4f}]  "
+            f"({(fov['x_max']-fov['x_min'])*1000:.1f} mm wide)",
+            _CYAN,
+        ))
+        lines.append((
+            f"  y [{fov['y_min']:.4f}, {fov['y_max']:.4f}]  "
+            f"({(fov['y_max']-fov['y_min'])*1000:.1f} mm tall)",
+            _CYAN,
+        ))
+
+    for i, (line, color) in enumerate(lines):
+        cv2.putText(vis, line, (10, 24 + i * 22), _FONT, 0.52, color, 1, cv2.LINE_AA)
+
+    help_text = "CLICK: add | u: undo | f: fit | v: FOV | s: save | q: quit"
+    cv2.putText(vis, help_text, (10, h - 10), _FONT, 0.45, _YELLOW, 1, cv2.LINE_AA)
+
+    return vis
+
+
+# ---------------------------------------------------------------------------
+# FOV computation
+# ---------------------------------------------------------------------------
+
+
+def _ask_z_ref(default: float | None, world_pts: list) -> float:
+    """Prompt the user for a z reference height in the terminal."""
+    if default is not None:
+        return default
+
+    median_z = float(np.median([w[2] for w in world_pts])) if world_pts else 0.2
+
+    print(
+        "\n  The FOV depends on the height (z) at which it is measured."
+        "\n  Choose a z value near the middle of the arena where flies typically travel."
+        f"\n  Your calibration points span z = "
+        f"{min(w[2] for w in world_pts):.3f} – {max(w[2] for w in world_pts):.3f} m  "
+        f"(median {median_z:.3f} m)."
+    )
+    raw = input(f"  Enter z reference in metres [default {median_z:.3f}]: ").strip()
+    if raw == "":
+        return median_z
+    try:
+        return float(raw)
+    except ValueError:
+        print(f"  Invalid value, using median {median_z:.3f}")
+        return median_z
+
+
+def _compute_fov(
+    calibration: BraidToCameraCalibration,
+    frame_w: int,
+    frame_h: int,
+    z_ref: float,
+) -> tuple[dict, list[tuple[int, int]]]:
+    """Compute FOV dict and the projected pixel corners of the FOV rectangle."""
+    fov = calibration.compute_fov(frame_w, frame_h, z_ref)
+
+    # Project the four world-space FOV corners back to pixels for visual overlay
+    corners_world = [
+        (fov["x_min"], fov["y_min"], z_ref),
+        (fov["x_max"], fov["y_min"], z_ref),
+        (fov["x_max"], fov["y_max"], z_ref),
+        (fov["x_min"], fov["y_max"], z_ref),
+    ]
+    fov_pixels = []
+    for x, y, z in corners_world:
+        u, v = calibration.project(x, y, z)
+        fov_pixels.append((int(round(u)), int(round(v))))
+
+    return fov, fov_pixels
+
+
+def _print_fov(fov: dict, z_ref: float, frame_w: int, frame_h: int) -> None:
+    print(f"\n  Camera FOV at z = {z_ref:.3f} m  ({frame_w}×{frame_h} px):")
+    print(f"    x_min = {fov['x_min']:.5f}")
+    print(f"    x_max = {fov['x_max']:.5f}")
+    print(f"    y_min = {fov['y_min']:.5f}")
+    print(f"    y_max = {fov['y_max']:.5f}")
+    print(
+        f"    width  = {(fov['x_max'] - fov['x_min'])*1000:.1f} mm  "
+        f"height = {(fov['y_max'] - fov['y_min'])*1000:.1f} mm"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Interactive BRAID-to-camera calibration (projection + FOV)"
+    )
+    parser.add_argument("--config", default="configs/config.toml")
+    parser.add_argument(
+        "--out",
+        default="calibrations/braid_to_camera.npz",
+        help="Output projection calibration file",
+    )
+    parser.add_argument(
+        "--camera-index", type=int, default=0, help="OpenCV camera index"
+    )
+    parser.add_argument(
+        "--image",
+        default=None,
+        help="Use a static image instead of live camera (for offline calibration)",
+    )
+    parser.add_argument(
+        "--z-ref",
+        type=float,
+        default=None,
+        help="Z height (metres) for FOV computation. "
+             "If omitted, the tool prompts you when you press 'v' or 's'.",
+    )
+    args = parser.parse_args()
+
+    zmq_cfg = ZMQConfig(args.config)
+    braid_port = zmq_cfg.braid_port
+
+    stop_event = threading.Event()
+    tracker = _BraidTracker(braid_port, stop_event)
+    tracker.start()
+    print(f"Subscribed to BRAID on port {braid_port}")
+
+    if args.image:
+        static_frame = cv2.imread(args.image)
+        if static_frame is None:
+            print(f"ERROR: Cannot read image: {args.image}")
+            sys.exit(1)
+        cap = None
+        print(f"Using static image: {args.image}")
+    else:
+        try:
+            cap = _open_camera(args.camera_index)
+            static_frame = None
+            print(f"Camera {args.camera_index} opened")
+        except RuntimeError as e:
+            print(f"ERROR: {e}")
+            print("Use --image <path> to calibrate against a static snapshot.")
+            stop_event.set()
+            sys.exit(1)
+
+    world_pts: list[tuple[float, float, float]] = []
+    pixel_pts: list[tuple[float, float]] = []
+    calibration = BraidToCameraCalibration()
+    reprojection_error: float | None = None
+    fov: dict | None = None
+    fov_pixels: list[tuple[int, int]] | None = None
+    z_ref: float | None = args.z_ref
+
+    click_pending: list[tuple[int, int]] = []
+
+    def _on_mouse(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            click_pending.append((x, y))
+
+    window_name = "BRAID-to-Camera Calibration"
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.setMouseCallback(window_name, _on_mouse)
+
+    print(
+        "\n--- Instructions ---"
+        "\n  Required points (minimum 6 total):"
+        "\n    • TOP-LEFT corner of the frame    (1 point)"
+        "\n    • TOP-RIGHT corner of the frame   (1 point)"
+        "\n    • BOTTOM-LEFT corner of the frame (1 point)"
+        "\n    • BOTTOM-RIGHT corner of the frame(1 point)"
+        "\n    • 2+ additional points anywhere inside the frame"
+        "\n"
+        "\n  The 4 corners are mandatory — they anchor the FOV boundary."
+        "\n  The extra interior points give the projection matrix enough"
+        "\n  equations to be uniquely determined (DLT needs ≥6)."
+        "\n  For best accuracy, vary z height across the set."
+        "\n"
+        "\n  Steps:"
+        "\n  1. Place a target at each corner of the frame (as seen in the video)."
+        "\n     Wait for a stable BRAID fix, then LEFT-CLICK on it."
+        "\n  2. Repeat for 2+ interior positions (any x/y, ideally different z)."
+        "\n  3. Press 'f' to fit.  Aim for < 3 px RMS reprojection error."
+        "\n  4. Press 'v' to compute and preview the FOV (orange rectangle on frame)."
+        "\n  5. Press 's' to save and optionally write the FOV to config.toml."
+        "\n  6. Press 'u' to undo the last point.  Press 'q' to quit."
+        "\n--------------------"
+    )
+    if args.z_ref is not None:
+        print(f"  FOV will be computed at z = {args.z_ref:.3f} m (--z-ref).")
+    print()
+
+    try:
+        frame_w = frame_h = None
+
+        while True:
+            if cap is not None:
+                ret, frame = cap.read()
+                if not ret:
+                    print("Camera read failed")
+                    break
+            else:
+                frame = static_frame.copy()
+
+            if frame_w is None:
+                frame_h, frame_w = frame.shape[:2]
+
+            # Process pending clicks
+            if click_pending:
+                u, v = click_pending.pop(0)
+                braid_pos = tracker.position
+                if braid_pos is None:
+                    print("  [skip] No BRAID fix — move the target into the tracking volume first")
+                else:
+                    world_pts.append(braid_pos)
+                    pixel_pts.append((float(u), float(v)))
+                    fov = fov_pixels = None  # invalidate cached FOV
+                    print(
+                        f"  Point {len(world_pts)}: "
+                        f"BRAID ({braid_pos[0]:.4f}, {braid_pos[1]:.4f}, {braid_pos[2]:.4f})"
+                        f"  →  pixel ({u}, {v})"
+                    )
+                    n = len(world_pts)
+                    if n < 4:
+                        print(f"  {4 - n} corner point(s) still needed.")
+                    elif n == 4:
+                        print("  All 4 corners collected — add ≥2 more interior points.")
+                    elif n == 6:
+                        print("  ≥6 points collected — press 'f' to fit.")
+
+            vis = _draw_overlay(
+                frame, world_pts, pixel_pts,
+                tracker.position, reprojection_error,
+                fov_pixels, fov, z_ref,
+            )
+            cv2.imshow(window_name, vis)
+
+            key = cv2.waitKey(30) & 0xFF
+
+            if key == ord("q"):
+                break
+
+            elif key == ord("u"):
+                if world_pts:
+                    rw = world_pts.pop()
+                    rp = pixel_pts.pop()
+                    reprojection_error = None
+                    fov = fov_pixels = None
+                    print(f"  Undid point {len(world_pts)+1}: BRAID {rw}  pixel {rp}")
+                else:
+                    print("  Nothing to undo")
+
+            elif key == ord("f"):
+                if len(world_pts) < 6:
+                    print(f"  Need ≥6 points for DLT fit, have {len(world_pts)}")
+                else:
+                    try:
+                        rms = calibration.fit(np.array(world_pts), np.array(pixel_pts))
+                        reprojection_error = rms
+                        fov = fov_pixels = None
+                        quality = "good" if rms < 3 else "consider adding more points"
+                        print(f"  DLT fit OK — RMS reprojection error: {rms:.2f} px ({quality})")
+                        print("  Press 'v' to compute the camera FOV, 's' to save.")
+                    except Exception as e:
+                        print(f"  Fit failed: {e}")
+
+            elif key == ord("v"):
+                if not calibration.is_fitted:
+                    print("  Fit first — press 'f'.")
+                elif frame_w is None:
+                    print("  No frame yet.")
+                else:
+                    cur_z = _ask_z_ref(z_ref, world_pts)
+                    z_ref = cur_z
+                    try:
+                        fov, fov_pixels = _compute_fov(calibration, frame_w, frame_h, cur_z)
+                        _print_fov(fov, cur_z, frame_w, frame_h)
+                        print(
+                            "  The orange rectangle on the frame shows the projected FOV boundary."
+                            "\n  If it looks correct, press 's' to save."
+                        )
+                    except Exception as e:
+                        print(f"  FOV computation failed: {e}")
+
+            elif key == ord("s"):
+                # Fit if needed
+                if not calibration.is_fitted:
+                    if len(world_pts) >= 6:
+                        try:
+                            rms = calibration.fit(np.array(world_pts), np.array(pixel_pts))
+                            reprojection_error = rms
+                            fov = fov_pixels = None
+                        except Exception as e:
+                            print(f"  Cannot fit before saving: {e}")
+                            continue
+                    else:
+                        print(f"  Need ≥6 points to save, have {len(world_pts)}")
+                        continue
+
+                # Save projection matrix
+                calibration.save(args.out)
+                print(
+                    f"\n  Saved projection calibration → {args.out}"
+                    f"  (RMS={reprojection_error:.2f} px, {len(world_pts)} points)"
+                )
+
+                # Compute FOV (prompts for z_ref if not yet known)
+                if frame_w is not None:
+                    cur_z = _ask_z_ref(z_ref, world_pts)
+                    z_ref = cur_z
+                    try:
+                        fov, fov_pixels = _compute_fov(calibration, frame_w, frame_h, cur_z)
+                        _print_fov(fov, cur_z, frame_w, frame_h)
+                    except Exception as e:
+                        print(f"  FOV computation failed: {e}")
+                        continue
+
+                    # Ask whether to write the FOV to config
+                    ans = input(
+                        f"\n  Write these FOV values to [camera.FOV] in {args.config}? [y/N] "
+                    ).strip().lower()
+                    if ans == "y":
+                        try:
+                            _write_fov_to_config(args.config, fov)
+                            print(f"  ✓ [camera.FOV] updated in {args.config}")
+                        except Exception as e:
+                            print(f"  WARNING: could not update config: {e}")
+                            print("  Add the values to [camera.FOV] in config.toml manually.")
+                    else:
+                        print("  Config not modified.  Add the values manually if needed.")
+
+    finally:
+        stop_event.set()
+        if cap is not None:
+            cap.release()
+        cv2.destroyAllWindows()
+        tracker.join(timeout=2)
+
+    if world_pts:
+        print(f"\nSession summary: {len(world_pts)} correspondences collected")
+        if reprojection_error is not None:
+            print(f"Final RMS reprojection error: {reprojection_error:.2f} px")
+        if fov is not None and z_ref is not None:
+            print(
+                f"FOV: x [{fov['x_min']:.4f}, {fov['x_max']:.4f}]  "
+                f"y [{fov['y_min']:.4f}, {fov['y_max']:.4f}]  "
+                f"@ z = {z_ref:.3f} m"
+            )
+    else:
+        print("\nNo correspondences collected.")
+
+
+if __name__ == "__main__":
+    main()

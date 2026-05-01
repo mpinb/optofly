@@ -127,6 +127,23 @@ uv run python main.py
 
 The launcher checks for an active Braid recording folder (or starts one automatically), copies configuration files to the experiment folder, starts all enabled processes, and runs until Ctrl+C or the configured `experiment_duration` is reached.
 
+## Calibration Tools
+
+```bash
+# Visual stimuli heading → pixel mapping (interactive)
+python -m src.processes.visual --calibrate
+python -m src.processes.visual --calibrate-mapping
+python -m src.processes.visual --test-calibration
+
+# BRAID-to-camera DLT calibration (interactive, requires Braid + camera)
+python -m src.tools.calibrate_braid_camera --config configs/config.toml
+
+# Offline mode (static image, no hardware)
+python -m src.tools.calibrate_braid_camera --image /path/to/frame.png --config configs/config.toml
+```
+
+See [docs/calibration.md](calibration.md) for full procedures.
+
 ## Testing
 
 ```bash
