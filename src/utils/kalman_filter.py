@@ -7,8 +7,7 @@ was dead weight (the states are fully decoupled in DWNA anyway).
 """
 
 import numpy as np
-from typing import Optional, Tuple
-import numba as nb
+from typing import Optional
 
 
 class KalmanFilter:
@@ -81,16 +80,16 @@ class KalmanFilter:
         Q = self.process_noise * (G @ G.T)
 
         z_meas = np.array([[z]])
-        self.x, self.P = kalman_update(self.x, self.P, z_meas, F, self.H_pos, Q, self.R_pos, 2)
+        self.x, self.P = _kalman_update(self.x, self.P, z_meas, F, self.H_pos, Q, self.R_pos)
 
         if vz is not None:
             vz_meas = np.array([[vz]])
-            self.x, self.P = kalman_measurement_update(self.x, self.P, vz_meas, self.H_vel, self.R_vel, 2)
+            self.x, self.P = _kalman_measurement_update(self.x, self.P, vz_meas, self.H_vel, self.R_vel)
 
     def predict(self, dt: float) -> float:
         """Return predicted z position `dt` seconds ahead."""
         F_pred = np.array([[1.0, dt], [0.0, 1.0]])
-        x_future = kalman_predict(self.x, F_pred)
+        x_future = F_pred @ self.x
         return float(x_future[0, 0])
 
     def get_state(self):
@@ -101,17 +100,7 @@ class KalmanFilter:
         }
 
 
-# ---------------------------------------------------------------------------
-# Numba-accelerated kernels — generic over matrix shape
-# ---------------------------------------------------------------------------
-
-@nb.njit
-def kalman_predict(x: np.ndarray, F: np.ndarray) -> np.ndarray:
-    return F @ x
-
-
-@nb.njit
-def kalman_update(
+def _kalman_update(
     x: np.ndarray,
     P: np.ndarray,
     z: np.ndarray,
@@ -119,37 +108,34 @@ def kalman_update(
     H: np.ndarray,
     Q: np.ndarray,
     R: np.ndarray,
-    state_dim: int,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple:
     """Predict + measurement update, Joseph-form covariance."""
     x_pred = F @ x
     P_pred = F @ P @ F.T + Q
 
-    S = H @ P_pred @ H.T + R
-    K = P_pred @ H.T @ np.linalg.inv(S)
+    S_inv = 1.0 / (H @ P_pred @ H.T + R)[0, 0]
+    K = P_pred @ H.T * S_inv
 
     x_new = x_pred + K @ (z - H @ x_pred)
 
-    IKH = np.eye(state_dim) - K @ H
+    IKH = np.eye(x.shape[0]) - K @ H
     P_new = IKH @ P_pred @ IKH.T + K @ R @ K.T
     return x_new, P_new
 
 
-@nb.njit
-def kalman_measurement_update(
+def _kalman_measurement_update(
     x: np.ndarray,
     P: np.ndarray,
     z: np.ndarray,
     H: np.ndarray,
     R: np.ndarray,
-    state_dim: int,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Measurement-only update (no prediction). Joseph-form covariance."""
-    S = H @ P @ H.T + R
-    K = P @ H.T @ np.linalg.inv(S)
+) -> tuple:
+    """Measurement-only update (no prediction), Joseph-form covariance."""
+    S_inv = 1.0 / (H @ P @ H.T + R)[0, 0]
+    K = P @ H.T * S_inv
 
     x_new = x + K @ (z - H @ x)
 
-    IKH = np.eye(state_dim) - K @ H
+    IKH = np.eye(x.shape[0]) - K @ H
     P_new = IKH @ P @ IKH.T + K @ R @ K.T
     return x_new, P_new
