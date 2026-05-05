@@ -10,9 +10,11 @@ Usage:
 Workflow:
     1. The Ximea camera feed opens in an OpenCV window.
     2. A live BRAID SSE subscriber tracks the current laser/target position (x, y, z).
-    3. Aim the laser pointer at a position in the arena. Wait for a stable BRAID fix,
-       then LEFT-CLICK on the laser dot in the camera window.
-       Each click records the current BRAID (x, y, z) and the clicked pixel (u, v).
+    3. Aim the laser pointer (white dot on black background) at a position in the arena.
+       Wait for a stable BRAID fix, then press SPACE — the tool auto-detects the centroid
+       of the bright spot and records the current BRAID (x, y, z) + pixel (u, v).
+       A cyan circle shows the live detected centroid so you can verify placement.
+       As a fallback, LEFT-CLICK the spot manually (uses the clicked pixel directly).
     4. Collect ≥6 points. For best FOV accuracy, aim the laser near all 4 corners of
        the frame first, then add ≥2 interior points at different heights.
     5. Press 'f' to fit the projection matrix and check reprojection error.
@@ -21,6 +23,7 @@ Workflow:
        on the frame so you can verify it visually.
     7. Press 's' to save.  The tool asks whether to write the FOV to config.toml.
     8. Press 'u' to undo the last point; 'q' to quit.
+    9. Use --threshold to adjust bright-spot detection sensitivity (default 200, 0-255).
 
     At least 6 non-coplanar correspondences are needed for a valid DLT fit.
 """
@@ -80,6 +83,36 @@ def parse_chunk(chunk: str) -> dict:
         return data
     except json.JSONDecodeError as e:
         raise ValueError(f"Failed to parse JSON: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Bright-spot detection
+# ---------------------------------------------------------------------------
+
+
+def _detect_bright_spot(
+    gray: np.ndarray,
+    threshold: int = 200,
+    min_area: int = 5,
+) -> tuple[float, float] | None:
+    """Find the centroid of the brightest blob in a grayscale frame.
+
+    Returns (u, v) pixel coordinates, or None if no blob passes the threshold.
+    """
+    _, mask = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
+    n_labels, _, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    # label 0 is background; find the largest foreground blob
+    best_label = -1
+    best_area = min_area - 1
+    for label in range(1, n_labels):
+        area = int(stats[label, cv2.CC_STAT_AREA])
+        if area > best_area:
+            best_area = area
+            best_label = label
+    if best_label == -1:
+        return None
+    cx, cy = centroids[best_label]
+    return float(cx), float(cy)
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +303,7 @@ def _draw_overlay(
     fov_pixels: list[tuple[int, int]] | None,  # projected FOV corner pixels
     fov: dict | None,
     z_ref: float | None,
+    detected_spot: tuple[float, float] | None = None,
 ) -> np.ndarray:
     vis = frame.copy()
     h, w = vis.shape[:2]
@@ -288,6 +322,12 @@ def _draw_overlay(
             1,
             cv2.LINE_AA,
         )
+
+    # Live detected bright-spot centroid
+    if detected_spot is not None:
+        dx, dy = int(round(detected_spot[0])), int(round(detected_spot[1]))
+        cv2.circle(vis, (dx, dy), 18, _CYAN, 2, cv2.LINE_AA)
+        cv2.drawMarker(vis, (dx, dy), _CYAN, cv2.MARKER_CROSS, 20, 1)
 
     # Collected correspondence points
     for i, (pp, wp) in enumerate(zip(pixel_pts, world_pts)):
@@ -336,7 +376,7 @@ def _draw_overlay(
     for i, (line, color) in enumerate(lines):
         cv2.putText(vis, line, (10, 24 + i * 22), _FONT, 0.52, color, 1, cv2.LINE_AA)
 
-    help_text = "CLICK: add | u: undo | f: fit | v: FOV | s: save | q: quit"
+    help_text = "SPACE: auto-detect | CLICK: manual | u: undo | f: fit | v: FOV | s: save | q: quit"
     cv2.putText(vis, help_text, (10, h - 10), _FONT, 0.45, _YELLOW, 1, cv2.LINE_AA)
 
     return vis
@@ -435,6 +475,12 @@ def main():
         help="Z height (metres) for FOV computation. "
         "If omitted, the tool prompts you when you press 'v' or 's'.",
     )
+    parser.add_argument(
+        "--threshold",
+        type=int,
+        default=200,
+        help="Pixel brightness threshold for auto-detecting the laser dot (0-255, default: 200).",
+    )
     args = parser.parse_args()
 
     # Load configuration
@@ -469,6 +515,7 @@ def main():
     gray_buf = np.empty((frame_h, frame_w), dtype=np.uint8)
 
     click_pending: list[tuple[int, int]] = []
+    detected_spot: tuple[float, float] | None = None
 
     def _on_mouse(event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:
@@ -481,10 +528,10 @@ def main():
     print(
         "\n--- Instructions ---"
         "\n  Required points (minimum 6 total):"
-        "\n    • TOP-LEFT corner of the frame    (1 point)"
-        "\n    • TOP-RIGHT corner of the frame   (1 point)"
-        "\n    • BOTTOM-LEFT corner of the frame (1 point)"
-        "\n    • BOTTOM-RIGHT corner of the frame(1 point)"
+        "\n    • TOP-LEFT corner of the frame     (1 point)"
+        "\n    • TOP-RIGHT corner of the frame    (1 point)"
+        "\n    • BOTTOM-LEFT corner of the frame  (1 point)"
+        "\n    • BOTTOM-RIGHT corner of the frame (1 point)"
         "\n    • 2+ additional points anywhere inside the frame"
         "\n"
         "\n  The 4 corners are mandatory — they anchor the FOV boundary."
@@ -492,9 +539,15 @@ def main():
         "\n  equations to be uniquely determined (DLT needs ≥6)."
         "\n  For best accuracy, vary z height across the set."
         "\n"
+        "\n  Capturing a point:"
+        "\n    SPACE      — auto-detect the laser dot centroid (cyan circle = preview)"
+        "\n    LEFT-CLICK — manual fallback: records the exact clicked pixel"
+        "\n    Both methods snapshot the current BRAID (x, y, z) at capture time."
+        "\n    If the cyan circle is not on the dot, lower --threshold (default 200)."
+        "\n"
         "\n  Steps:"
-        "\n  1. Aim the laser pointer at each corner of the camera frame."
-        "\n     Wait for a stable BRAID fix, then LEFT-CLICK on it."
+        "\n  1. Aim the laser pointer at each corner.  Wait for a stable BRAID fix."
+        "\n     The cyan circle should sit on the dot — press SPACE to record."
         "\n  2. Repeat for 2+ interior positions (any x/y, ideally different z)."
         "\n  3. Press 'f' to fit.  Aim for < 3 px RMS reprojection error."
         "\n  4. Press 'v' to compute and preview the FOV (orange rectangle on frame)."
@@ -516,28 +569,35 @@ def main():
             ctypes.memmove(gray_buf.ctypes.data, img_obj.bp, frame_w * frame_h)
             frame = cv2.cvtColor(gray_buf, cv2.COLOR_GRAY2BGR)
 
-            # Process pending clicks
-            if click_pending:
-                u, v = click_pending.pop(0)
+            # Update live bright-spot detection every frame
+            detected_spot = _detect_bright_spot(gray_buf, threshold=args.threshold)
+
+            def _record_point(u: float, v: float, source: str) -> None:
                 braid_pos = tracker.position
                 if braid_pos is None:
                     print("  [skip] No BRAID fix — move the target into the tracking volume first")
-                else:
-                    world_pts.append(braid_pos)
-                    pixel_pts.append((float(u), float(v)))
-                    fov = fov_pixels = None  # invalidate cached FOV
-                    print(
-                        f"  Point {len(world_pts)}: "
-                        f"BRAID ({braid_pos[0]:.4f}, {braid_pos[1]:.4f}, {braid_pos[2]:.4f})"
-                        f"  →  pixel ({u}, {v})"
-                    )
-                    n = len(world_pts)
-                    if n < 4:
-                        print(f"  {4 - n} corner point(s) still needed.")
-                    elif n == 4:
-                        print("  All 4 corners collected — add ≥2 more interior points.")
-                    elif n == 6:
-                        print("  ≥6 points collected — press 'f' to fit.")
+                    return
+                world_pts.append(braid_pos)
+                pixel_pts.append((float(u), float(v)))
+                nonlocal fov, fov_pixels, reprojection_error
+                fov = fov_pixels = None  # invalidate cached FOV
+                n = len(world_pts)
+                print(
+                    f"  Point {n} [{source}]: "
+                    f"BRAID ({braid_pos[0]:.4f}, {braid_pos[1]:.4f}, {braid_pos[2]:.4f})"
+                    f"  →  pixel ({u:.1f}, {v:.1f})"
+                )
+                if n < 4:
+                    print(f"  {4 - n} corner point(s) still needed.")
+                elif n == 4:
+                    print("  All 4 corners collected — add ≥2 more interior points.")
+                elif n == 6:
+                    print("  ≥6 points collected — press 'f' to fit.")
+
+            # Process pending clicks (manual fallback)
+            if click_pending:
+                u, v = click_pending.pop(0)
+                _record_point(u, v, "click")
 
             vis = _draw_overlay(
                 frame,
@@ -548,6 +608,7 @@ def main():
                 fov_pixels,
                 fov,
                 z_ref,
+                detected_spot,
             )
             cv2.imshow(window_name, vis)
 
@@ -555,6 +616,15 @@ def main():
 
             if key == ord("q"):
                 break
+
+            elif key == ord(" "):  # SPACE — auto-detect centroid
+                if detected_spot is None:
+                    print(
+                        f"  [skip] No bright spot detected (threshold={args.threshold}). "
+                        "Adjust --threshold or click manually."
+                    )
+                else:
+                    _record_point(detected_spot[0], detected_spot[1], "auto")
 
             elif key == ord("u"):
                 if world_pts:
