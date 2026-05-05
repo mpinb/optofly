@@ -46,31 +46,45 @@ ARGUMENTS
   --exposure US         XIMEA exposure in microseconds (default: 5000)
   --sweeps K            Full autofocus sweeps per position; results are averaged
                         with IQR outlier rejection (default: 5)
+  --motor-port PATH     USB serial port for Arduino/GRBL motor stage
+                        (e.g., /dev/ttyACM0). When set → automated mode.
+  --measurements N      Number of positions across the full 200 mm range
+                        (default: 20). Step size = 200.0 / N.
+                        Only used with --motor-port.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-WORKFLOW (one calibration position at a time)
+WORKFLOW
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  1. A live XIMEA preview opens.
-       SPACE — confirm tag is in place and start measurement
-       Q / ESC — quit
+  Manual mode (default, --motor-port absent):
+    1. A live XIMEA preview opens.
+         SPACE — confirm tag is in place and start measurement
+         Q / ESC — quit
 
-  2. Autofocus runs (--sweeps times):
-       • Coarse sweep across full diopter range (0.4 dpt steps)
-       • Fine sweep around the peak (0.04 dpt steps, slower settle time)
-       • Lorentzian fit → best-focus diopter
-       • Repeats K times; median / IQR-filtered average returned
-       • A blocking plot of the last sweep is shown; close it to continue
+    2. Autofocus runs (--sweeps times):
+         • Coarse sweep across full diopter range (0.4 dpt steps)
+         • Fine sweep around the peak (0.04 dpt steps, slower settle time)
+         • Lorentzian fit → best-focus diopter
+         • Repeats K times; median / IQR-filtered average returned
+         • A blocking plot of the last sweep is shown; close it to continue
 
-  3. Basler cameras capture --num-frames frames, detect all visible AprilTags,
-     triangulate each tag's 3-D position, and print Z + reprojection error.
-     If multiple tags are visible the mean Z is used.
+    3. Basler cameras capture --num-frames frames, detect all visible AprilTags,
+       triangulate each tag's 3-D position, and print Z + reprojection error.
+       If multiple tags are visible the mean Z is used.
 
-  4. Result is shown:  z=X.XXXX m  dpt=Y.YYYY
-       Enter — accept and save to CSV
-       R     — retry autofocus + detection at the same position
-       Q     — quit without saving this point
+    4. Result is shown:  z=X.XXXX m  dpt=Y.YYYY
+         Enter — accept and save to CSV
+         R     — retry autofocus + detection at the same position
+         Q     — quit without saving this point
 
-  5. Prompt to move to the next position (Enter / Q to finish).
+    5. Prompt to move to the next position (Enter / Q to finish).
+
+  Automated mode (--motor-port set):
+    • Position the tag at the bottom, press Enter.
+    • Script runs autofocus → tag detection → save → motor move up → repeat
+      automatically for --measurements positions.
+    • No interactive prompts per position. Failed detections are skipped
+      with a warning.
+    • Ctrl+C at any time saves and plots whatever was collected so far.
 
   After collection, linear and inverse regression models are fitted and plotted:
     linear:   z = m·dpt + q
@@ -169,17 +183,22 @@ class MotorStage:
         self._command("$X")  # unlock
         self._command("G91")  # relative positioning
 
-    def _command(self, gcode: str) -> str:
+    def _command(self, gcode: str, timeout_s: float = 10.0) -> str:
         """Send a G-code line, return the last response line (blocks until ok/error)."""
         self._ser.write(f"{gcode}\n".encode())
+        deadline = time.monotonic() + timeout_s
         response = ""
-        while True:
+        while time.monotonic() < deadline:
             line = self._ser.readline().decode().strip()
             if not line:
                 continue
             response = line
             if line.startswith("ok") or line.startswith("error"):
                 break
+        else:
+            raise RuntimeError(
+                f"GRBL did not respond within {timeout_s:.0f} s to: {gcode}"
+            )
         return response
 
     def move_up_mm(self, distance_mm: float, feed_rate: float = 400.0) -> None:
@@ -818,6 +837,16 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _sort_csv(path: Path) -> None:
+    """Re-read CSV, sort rows by z ascending, overwrite."""
+    with open(path, newline="") as f:
+        rows = sorted(csv.DictReader(f), key=lambda r: float(r["z"]))
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["z", "dpt"])
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def _init_csv(path: Path) -> None:
     """Write CSV header if the file does not already exist."""
     if not path.exists():
@@ -850,44 +879,39 @@ def _run_automated(
     collected: list[tuple[float, float]] = []
     failed: list[int] = []
 
-    for i in range(args.measurements):
-        print(f"\n--- [{i + 1}/{args.measurements}] ---")
+    try:
+        for i in range(args.measurements):
+            print(f"\n--- [{i + 1}/{args.measurements}] ---")
 
-        best_dpt = run_autofocus(
-            ximea_cam, ximea_img, lens, roi_slice,
-            k=args.sweeps, show_plot=False,
-        )
+            best_dpt = run_autofocus(
+                ximea_cam, ximea_img, lens, roi_slice,
+                k=args.sweeps, show_plot=False,
+            )
 
-        z = run_tag_detection(
-            basler_cams, open_ids, cameras_cal, args.num_frames, args.tag_family
-        )
+            z = run_tag_detection(
+                basler_cams, open_ids, cameras_cal, args.num_frames, args.tag_family
+            )
 
-        if z is None:
-            print("  WARNING: no valid Z — skipping this position.")
-            failed.append(i + 1)
-        else:
-            print(f"  Result: z={z:.4f} m  dpt={best_dpt:.4f}")
-            _append_csv(output_path, z, best_dpt)
-            collected.append((z, best_dpt))
+            if z is None:
+                print("  WARNING: no valid Z — skipping this position.")
+                failed.append(i + 1)
+            else:
+                print(f"  Result: z={z:.4f} m  dpt={best_dpt:.4f}")
+                _append_csv(output_path, z, best_dpt)
+                collected.append((z, best_dpt))
 
-        if i < args.measurements - 1:
-            print(f"  Moving motor up by {step_size_mm:.2f} mm...")
-            motor.move_up_mm(step_size_mm)
-            time.sleep(0.5)
+            if i < args.measurements - 1:
+                print(f"  Moving motor up by {step_size_mm:.2f} mm...")
+                motor.move_up_mm(step_size_mm)
+                time.sleep(0.5)
+    except KeyboardInterrupt:
+        print("\nInterrupted — proceeding with collected data.")
 
     if failed:
         print(f"\nWARNING: {len(failed)} position(s) skipped due to failed detection: {failed}")
 
     if collected:
-        # Re-read, sort by z, overwrite
-        rows = []
-        with open(output_path, newline="") as f:
-            reader = csv.DictReader(f)
-            rows = sorted(reader, key=lambda r: float(r["z"]))
-        with open(output_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["z", "dpt"])
-            writer.writeheader()
-            writer.writerows(rows)
+        _sort_csv(output_path)
         print(f"CSV sorted by z: {output_path}")
 
         zs = np.array([p[0] for p in collected])
@@ -1041,15 +1065,7 @@ def main() -> None:
         print("Hardware closed.")
 
     if motor is None and len(collected) >= 1:
-        # Re-read, sort by z, overwrite
-        rows = []
-        with open(output_path, newline="") as f:
-            reader = csv.DictReader(f)
-            rows = sorted(reader, key=lambda r: float(r["z"]))
-        with open(output_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["z", "dpt"])
-            writer.writeheader()
-            writer.writerows(rows)
+        _sort_csv(output_path)
         print(f"CSV sorted by z: {output_path}")
 
     if motor is None:
