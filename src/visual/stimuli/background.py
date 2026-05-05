@@ -58,8 +58,7 @@ def _build_cylinder_geom(
 ) -> GeomNode:
     """Build a cylinder centred at origin, axis along Z.
 
-    The faces are wound so normals point inward — the viewer is meant to
-    be inside the cylinder looking out.
+    The faces are wound so normals point inward (CCW from inside).
     """
     vformat = GeomVertexFormat.getV3n3c4t2()
     vdata = GeomVertexData("cylinder", vformat, Geom.UHStatic)
@@ -78,13 +77,14 @@ def _build_cylinder_geom(
         v = s / stacks
         for i in range(slices + 1):
             angle = 2.0 * math.pi * i / slices
-            x = radius * math.cos(angle)
-            y = radius * math.sin(angle)
+            # North = +Y (angle=0), East = +X (angle=90)
+            x = radius * math.sin(angle)
+            y = radius * math.cos(angle)
             u = i / slices
 
             vertex.addData3(x, y, z)
             # Inward-pointing normal
-            normal.addData3(-math.cos(angle), -math.sin(angle), 0.0)
+            normal.addData3(-math.sin(angle), -math.cos(angle), 0.0)
             color.addData4(1.0, 1.0, 1.0, 1.0)
             texcoord.addData2(u, v)
 
@@ -93,13 +93,20 @@ def _build_cylinder_geom(
     for s in range(stacks):
         base = s * verts_per_row
         for i in range(slices):
-            # Wind so the inward face is front (clockwise from inside)
+            # CCW from inside:
+            # (base+i) is bottom-left
+            # (base+i+1) is bottom-right
+            # (base+i+verts_per_row+1) is top-right
+            # (base+i+verts_per_row) is top-left
             a = base + i
             b = base + i + 1
             c = base + i + verts_per_row + 1
             d = base + i + verts_per_row
-            tris.addVertices(a, c, b)
-            tris.addVertices(a, d, c)
+            
+            # Triangle 1: a -> b -> c
+            tris.addVertices(a, b, c)
+            # Triangle 2: a -> c -> d
+            tris.addVertices(a, c, d)
     tris.closePrimitive()
 
     geom = Geom(vdata)
@@ -133,22 +140,25 @@ class BackgroundStimulus(BaseStimulus):
         height = cfg.get("cylinder_height_cm", 80)
         num_screens = cfg.get("num_screens", 4)
 
+        # Create Cylinder
         cylinder_node = _build_cylinder_geom(radius, height)
         cylinder_np = self.scene.render.attachNewNode(cylinder_node)
-        cylinder_np.setTwoSided(True)
-
+        cylinder_np.setTwoSided(True) # Safety backup for culling
+        
         cyl_tex = Texture("cylinder_tex")
         cyl_tex.load(tex_img)
         cyl_tex.setWrapU(Texture.WM_repeat)
         cyl_tex.setWrapV(Texture.WM_repeat)
         cylinder_np.setTexture(cyl_tex)
 
-        # Tile the texture: one copy per screen quadrant horizontally,
-        # vertical tiling derived from physical dimensions.
+        # Physical tiling: tile_u = number of screens (4 panels wrap 360)
         circumference = 2.0 * math.pi * radius
-        panel_width = circumference / num_screens
+        panel_width_cm = circumference / num_screens
         tile_u = float(num_screens)
-        tile_v = height / (panel_width * 1080.0 / 1920.0)
+        
+        # Tile vertically to maintain square aspect ratio on the screen.
+        # tile_v = Physical Height / (Physical width per texture repetition * texture aspect)
+        tile_v = height / (panel_width_cm * 1080.0 / 1920.0)
         cylinder_np.setTexScale(TextureStage.getDefault(), tile_u, tile_v)
 
     def on_trigger(self, heading_deg: float, trigger_data: dict) -> None:

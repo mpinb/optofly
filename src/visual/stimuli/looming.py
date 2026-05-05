@@ -148,6 +148,14 @@ class LoomingStimulus(BaseStimulus):
         self._disk = None
         self._elapsed_ms: float = 0.0
 
+        # A flat billboard plane at depth D is occluded by the cylinder wall
+        # (radius R) for pixels beyond arccos(D/R) from the disk center.
+        # We need D < R * cos(final_edge_angle) so the full disk stays in front.
+        max_edge_rad = math.radians(self._final_deg / 2.0)
+        self._disk_distance_cm = (
+            self.scene.viewing_distance_cm * math.cos(max_edge_rad) * 0.95
+        )
+
     def on_trigger(self, heading_deg: float, trigger_data: dict) -> None:
         if self._state != _State.IDLE:
             return
@@ -163,6 +171,7 @@ class LoomingStimulus(BaseStimulus):
             self._stimulus_heading,
             self._initial_deg,
             color=self._color,
+            distance_cm=self._disk_distance_cm,
         )
 
     def update(self, dt: float) -> None:

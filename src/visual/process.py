@@ -240,6 +240,11 @@ class VisualProcess(WorkerProcess):
         world_heading = braid_to_world_heading(
             braid_rad, self._offset_rad, self._flip
         )
+        self.logger.info(
+            "ZONE_ENTER obj=%s world_heading=%.1f deg",
+            data.get("obj_id"),
+            world_heading,
+        )
 
         for stim in self._stimuli:
             try:

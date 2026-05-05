@@ -132,6 +132,7 @@ class BaseStimulus(ABC):
         size_deg: float,
         elevation_deg: float = 0.0,
         color: tuple = (0, 0, 0),
+        distance_cm: float | None = None,
     ) -> "NodePath":
         """Place a billboard disk at the given heading and elevation.
 
@@ -147,10 +148,14 @@ class BaseStimulus(ABC):
         Returns:
             NodePath -- pass to set_angular_size() or remove_node()
         """
-        x, y, z = angular_to_world_pos(
-            heading_deg, elevation_deg, self.scene.viewing_distance_cm
+        # Default: 1 cm inside the cylinder. Callers with large disks should
+        # pass distance_cm explicitly (see LoomingStimulus for the formula).
+        disk_dist = (
+            distance_cm if distance_cm is not None
+            else self.scene.viewing_distance_cm - 1.0
         )
-        radius = angular_size_to_radius(size_deg, self.scene.viewing_distance_cm)
+        x, y, z = angular_to_world_pos(heading_deg, elevation_deg, disk_dist)
+        radius = angular_size_to_radius(size_deg, disk_dist)
 
         disk_geom = _make_unit_disk(color)
         disk_np = self.scene.render.attachNewNode(disk_geom)
