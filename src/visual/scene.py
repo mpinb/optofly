@@ -44,20 +44,86 @@ class ArenaScene(ShowBase):
             width, height = 7680, 1080
 
         # Set window size and position via Panda3D config before ShowBase
-        load_prc_file_data(
-            "",
-            f"win-size {width} {height}\n"
-            f"win-origin {window_x_offset} 0\n",
-        )
+        if standalone:
+            load_prc_file_data(
+                "",
+                f"win-size {width} {height}\n"
+                f"win-origin {window_x_offset} 0\n",
+            )
+        else:
+            load_prc_file_data(
+                "",
+                f"win-size {width} {height}\n"
+                f"win-origin {window_x_offset} 0\n"
+                "undecorated #t\n"
+                "cursor-hidden #t\n",
+            )
 
         ShowBase.__init__(self)
         self.disableMouse()
+
+        # On X11, override-redirect bypasses the window manager so the
+        # window can span all four experimental screens without being
+        # clamped or decorated.
+        if not standalone:
+            self._set_override_redirect()
 
         self._panel_width = width // 4
         self._panel_height = height
 
         self.cameras: list[NodePath] = []
         self._setup_cameras()
+
+    def _set_override_redirect(self) -> None:
+        """Set X11 override-redirect so the window manager leaves us alone."""
+        import ctypes
+        import ctypes.util
+
+        try:
+            xlib_path = ctypes.util.find_library("X11")
+            if xlib_path is None:
+                return
+            xlib = ctypes.CDLL(xlib_path)
+
+            window_id = self.win.getWindowHandle()
+            if window_id is None:
+                return
+
+            # XSetWindowAttributes with only override_redirect
+            CWOverrideRedirect = 1 << 9
+            xlib.XChangeWindowAttributes.argtypes = [
+                ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_void_p,
+            ]
+
+            class XSetWindowAttributes(ctypes.Structure):
+                _fields_ = [
+                    ("background_pixmap", ctypes.c_ulong),
+                    ("background_pixel", ctypes.c_ulong),
+                    ("border_pixmap", ctypes.c_ulong),
+                    ("border_pixel", ctypes.c_ulong),
+                    ("bit_gravity", ctypes.c_int),
+                    ("win_gravity", ctypes.c_int),
+                    ("backing_store", ctypes.c_int),
+                    ("backing_planes", ctypes.c_ulong),
+                    ("backing_pixel", ctypes.c_ulong),
+                    ("save_under", ctypes.c_int),
+                    ("event_mask", ctypes.c_long),
+                    ("do_not_propagate_mask", ctypes.c_long),
+                    ("override_redirect", ctypes.c_int),
+                    ("colormap", ctypes.c_ulong),
+                    ("cursor", ctypes.c_ulong),
+                ]
+
+            attrs = XSetWindowAttributes()
+            attrs.override_redirect = 1
+
+            display = xlib.XOpenDisplay(None)
+            xlib.XChangeWindowAttributes(
+                display, window_id, CWOverrideRedirect, ctypes.byref(attrs),
+            )
+            xlib.XFlush(display)
+        except Exception:
+            pass  # not X11, or display unavailable
 
     def _setup_cameras(self) -> None:
         """Create 4 perspective cameras, each assigned to a display region."""
