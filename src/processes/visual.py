@@ -4,7 +4,6 @@ Subscribes to TRIGGER messages and renders visual stimuli on 4-screen display.
 Supports static patterns and looming stimuli with 240Hz refresh rate.
 """
 
-import argparse
 import json
 import multiprocessing as mp
 import time
@@ -486,122 +485,40 @@ class VisualStimuliProcess(WorkerProcess):
         self.logger.info("Cleanup complete")
 
 
-# Entry point
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Visual Stimuli Display Process")
-    parser.add_argument(
-        "--config", "-c", default="configs/config.toml", help="Path to config file"
-    )
-    parser.add_argument(
-        "--log-level",
-        "-l",
-        default="INFO",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-        help="Logging level",
-    )
-    parser.add_argument(
-        "--calibrate",
-        action="store_true",
-        help="Run screen identification calibration mode",
-    )
-    parser.add_argument(
-        "--calibrate-mapping",
-        action="store_true",
-        help="Run heading-to-pixel calibration mode",
-    )
-    parser.add_argument(
-        "--standalone",
-        action="store_true",
-        help="Standalone testing mode with manual triggers (no ZMQ, small window)",
-    )
-    parser.add_argument(
-        "--test", action="store_true", help="Test mode (simulate triggers)"
-    )
-    parser.add_argument(
-        "--test-calibration",
-        action="store_true",
-        help="Test screen arrangement and wrapping with a sweeping circle",
-    )
-    parser.add_argument(
-        "--test-mapping",
-        action="store_true",
-        help="Test calibration mapping by entering Braid coordinates",
-    )
-    parser.add_argument(
-        "--braid-folder",
-        type=str,
-        default=None,
-        help="Path to .braid folder for CSV output",
-    )
+# ---------------------------------------------------------------------------
+# Panda3D entry point -- VisualProcess replaces VisualStimuliProcess
+# ---------------------------------------------------------------------------
+from src.visual.process import VisualProcess  # noqa: E402
 
+
+def _main():
+    import argparse
+    import multiprocessing as mp
+
+    parser = argparse.ArgumentParser(description="Visual stimuli (Panda3D)")
+    parser.add_argument("--config", default="configs/config.toml")
+    parser.add_argument("--standalone", action="store_true",
+                        help="Run without ZMQ in a small test window")
+    # Legacy modes still routed to old process:
+    parser.add_argument("--calibrate", action="store_true")
+    parser.add_argument("--calibrate-mapping", action="store_true")
+    parser.add_argument("--test-calibration", action="store_true")
     args = parser.parse_args()
 
-    # Load visual stimuli config for calibration helpers
-    def _load_visual_config(config_path: str) -> dict:
-        try:
-            with open(config_path, "rb") as f:
-                main = tomllib.load(f)
-            vs_file = main.get("visual_stimuli", {}).get(
-                "config_file", "configs/visual_stimuli.toml"
-            )
-            vs_path = Path(vs_file)
-            if vs_path.exists():
-                with open(vs_path, "rb") as f:
-                    return tomllib.load(f).get("visual_stimuli", {})
-            return main.get("visual_stimuli", {})
-        except Exception:
-            return {}
+    if args.calibrate or args.calibrate_mapping or args.test_calibration:
+        # Legacy calibration -- keep old VisualStimuliProcess path
+        proc = VisualStimuliProcess(config_path=args.config, standalone=True)
+        proc._run()
+        return
 
-    vis_cfg = _load_visual_config(args.config)
-    cal_kwargs = dict(
-        window_width=vis_cfg.get("window_width", 7680),
-        window_height=vis_cfg.get("window_height", 1080),
-        window_x_offset=vis_cfg.get("window_x_offset", 3840),
-        screen_mapping=vis_cfg.get(
-            "screen_mapping", ["West", "North", "East", "South"]
-        ),
-    )
-
-    # Handle calibration modes
-    if args.calibrate:
-        from src.stimuli.calibration import run_screen_identification
-
-        run_screen_identification(**cal_kwargs)
-        exit(0)
-
-    if args.calibrate_mapping:
-        from src.stimuli.calibration import run_heading_calibration
-
-        run_heading_calibration(**cal_kwargs)
-        exit(0)
-
-    if args.test_calibration:
-        from src.stimuli.calibration import run_calibration_test
-
-        run_calibration_test(**cal_kwargs)
-        exit(0)
-
-    if args.test_mapping:
-        from src.stimuli.calibration import run_mapping_test
-
-        run_mapping_test(**cal_kwargs)
-        exit(0)
-
-    # TODO: Implement test mode
-
-    # Normal operation or standalone mode
-    stop_event = mp.Event()
-    process = VisualStimuliProcess(
+    event = mp.Event()
+    proc = VisualProcess(
         config_path=args.config,
-        event=stop_event,
-        log_level=args.log_level,
+        event=event,
         standalone=args.standalone,
-        braid_folder=args.braid_folder,
     )
+    proc._run()
 
-    try:
-        process.run()
-    except KeyboardInterrupt:
-        print("\nInterrupted, stopping...")
-        stop_event.set()
-        pyglet.app.exit()
+
+if __name__ == "__main__":
+    _main()
