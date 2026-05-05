@@ -161,4 +161,5 @@ configs/visual_stimuli.toml
 braid-cookies.json
 
 # Local branch notes
-BRANCHES.md*.npz
+BRANCHES.md
+*.npz
