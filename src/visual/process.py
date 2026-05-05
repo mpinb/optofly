@@ -112,6 +112,13 @@ class VisualProcess(WorkerProcess):
             standalone=self.standalone,
         )
 
+        if not self.standalone:
+            self.logger.info(
+                "Actual window size: %d×%d",
+                self._scene.win.getXSize(),
+                self._scene.win.getYSize(),
+            )
+
         self._stimuli = []
         self._initialize_stimuli(cfg)
 
