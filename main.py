@@ -15,7 +15,7 @@ from pathlib import Path
 
 from src.processes.braid import BraidPublisher
 from src.processes.tracking import TriggerHandler
-from src.processes.visual import VisualStimuliProcess
+from src.visual.process import VisualProcess
 from src.processes.led import OptoTriggerWorker
 from src.processes.camera import RustCameraProcess as CameraProcess
 from src.processes.lens import LiquidLens
@@ -74,18 +74,15 @@ def print_experiment_config(config: dict, active_processes: list):
     if "VisualStimuliProcess" in active_processes:
         visual_config = config.get("visual_stimuli", {})
         enabled_stimuli = []
-        if visual_config.get("static", {}).get("enabled", False):
-            enabled_stimuli.append("Static pattern")
+        if visual_config.get("background", {}).get("enabled", True):
+            enabled_stimuli.append("Background (textured walls + ground)")
         if visual_config.get("looming", {}).get("enabled", False):
-            enabled_stimuli.append("Looming circles")
-        if visual_config.get("vertical_bar", {}).get("enabled", False):
-            enabled_stimuli.append("Vertical bar")
-        if visual_config.get("sweeping_bar", {}).get("enabled", False):
-            enabled_stimuli.append("Sweeping bar")
+            expansion = visual_config["looming"].get("expansion_type", "exponential")
+            enabled_stimuli.append(f"Looming disk ({expansion})")
 
         # Only show section if stimuli are configured
         if enabled_stimuli:
-            print("\nVisual Stimuli:")
+            print("\nVisual Stimuli (Panda3D):")
             for stimulus in enabled_stimuli:
                 print(f"  ✓ {stimulus}")
 
@@ -268,17 +265,17 @@ def main():
             active_process_names.append("Monitoring Server")
             print(f"    Dashboard: http://{monitoring_host}:{monitoring_port}")
 
-        # 4. VisualStimuliProcess - displays visual patterns
+        # 4. VisualProcess - Panda3D visual stimuli
         if config.get("visual_stimuli", {}).get("active", False):
-            print("  ✓ VisualStimuliProcess")
-            visual_stimuli = VisualStimuliProcess(
+            print("  ✓ VisualProcess (Panda3D)")
+            visual_process = VisualProcess(
                 config_path=config_path,
                 event=stop_event,
                 braid_folder=braid_folder,
                 log_path=log_path,
             )
-            visual_stimuli.start()
-            processes.append(("VisualStimuliProcess", visual_stimuli))
+            visual_process.start()
+            processes.append(("VisualStimuliProcess", visual_process))
             active_process_names.append("VisualStimuliProcess")
 
         # 5. CameraProcess + LiquidLens (lens always accompanies camera)

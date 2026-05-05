@@ -1,7 +1,13 @@
 # ==============================================================================
-# VISUAL STIMULI CONFIGURATION
+# VISUAL STIMULI CONFIGURATION — Legacy pyglet Pipeline
 # ==============================================================================
-# Separate configuration for visual stimuli system
+# This is the OLD pyglet-based pipeline, preserved for backwards compatibility.
+# The default pipeline is now Panda3D (see visual_stimuli.example.toml).
+#
+# To use this file with main.py, set in config.toml:
+#   [visual_stimuli]
+#   config_file = "configs/visual_stimuli.pyglet.toml"
+#
 # Documentation: https://github.com/elhananby/OptoFly
 
 [visual_stimuli]
@@ -33,32 +39,6 @@ use_empirical_calibration = true  # Enable after running --calibrate-mapping
 calibration_mapping_file = "calibrations/heading_mapping_model.npz"
 heading_offset_deg = 0.0           # Fallback offset if empirical unavailable
 arena_center_to_screen_cm = 25.0   # Distance from arena center to screens
-
-# ------------------------------------------------------------------------------
-# Arena geometry and Braid calibration (Panda3D system)
-# ------------------------------------------------------------------------------
-
-[visual_stimuli.arena]
-viewing_distance_cm = 25.0        # Distance from fly to screen face (cm)
-screen_width_cm = 52.7            # Physical width of one screen panel (cm)
-num_screens = 4
-braid_heading_offset_rad = 0.0    # Braid heading that corresponds to North screen
-braid_heading_flip = false        # True if Braid heading increases opposite to arena
-
-# ------------------------------------------------------------------------------
-# Stimulus: Background -- Panda3D textured walls + ground plane
-# (replaces [visual_stimuli.static] in the Panda3D pipeline)
-# ------------------------------------------------------------------------------
-
-[visual_stimuli.background]
-enabled = true
-square_size_px = 40               # Square tile size in pixels (at 1920x1080 per panel)
-density = 0.5                     # Fraction of tiles filled (0.0-1.0)
-background_color = [255, 255, 255]
-foreground_color = [0, 0, 0]
-seed = 42
-ground_enabled = true
-ground_z_cm = -5.0                # Height of ground plane below fly (cm, negative = below)
 
 # ------------------------------------------------------------------------------
 # Stimulus: Static Pattern
