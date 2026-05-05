@@ -17,7 +17,7 @@ from direct.task import Task
 
 from src.utils.worker import WorkerProcess
 from src.utils.csv_writer import CSVWriter
-from src.visual.scene import ArenaScene
+from src.visual.scene import ArenaScene, DIRECTION_TO_HEADING
 from src.visual.stimuli.background import BackgroundStimulus
 from src.visual.stimuli.looming import LoomingStimulus
 
@@ -78,11 +78,37 @@ class VisualProcess(WorkerProcess):
         self._offset_rad: float = arena_cfg.get("braid_heading_offset_rad", 0.0)
         self._flip: bool = arena_cfg.get("braid_heading_flip", False)
 
+        # Convert screen_mapping strings to heading degrees
+        screen_mapping = arena_cfg.get(
+            "screen_mapping", ["North", "East", "South", "West"]
+        )
+        camera_headings = [
+            DIRECTION_TO_HEADING[direction] for direction in screen_mapping
+        ]
+
+        window_x_offset: int = arena_cfg.get("window_x_offset", 0)
+
         self._setup_zmq()
         self._csv_writer = self._setup_csv(cfg)
 
+        if not self.standalone:
+            self.logger.info(
+                "Creating Panda3D window: %d×1080 at x=%d, %d screens",
+                1920 * len(camera_headings),
+                window_x_offset,
+                len(camera_headings),
+            )
+            self.logger.info("Screen mapping: %s", " → ".join(screen_mapping))
+            self.logger.info(
+                "Braid calibration: offset=%.3f rad, flip=%s",
+                self._offset_rad,
+                self._flip,
+            )
+
         self._scene = ArenaScene(
             viewing_distance_cm=arena_cfg.get("viewing_distance_cm", 25.0),
+            camera_headings=camera_headings,
+            window_x_offset=window_x_offset,
             standalone=self.standalone,
         )
 
@@ -119,13 +145,20 @@ class VisualProcess(WorkerProcess):
         self._zmq_context = None
         self._zmq_socket = None
         if self.standalone:
+            self.logger.info("Standalone mode — skipping ZMQ setup")
             return
         from src.utils.config import ZMQConfig
 
         zmq_cfg = ZMQConfig(self._config_path)
+        address = zmq_cfg.get_subscriber_address(zmq_cfg.trigger_port)
+        self.logger.info(
+            "Connecting to %s messages at %s",
+            zmq_cfg.zone_enter_topic,
+            address,
+        )
         self._zmq_context = zmq.Context()
         self._zmq_socket = self._zmq_context.socket(zmq.SUB)
-        self._zmq_socket.connect(zmq_cfg.get_subscriber_address(zmq_cfg.trigger_port))
+        self._zmq_socket.connect(address)
         self._zmq_socket.setsockopt_string(zmq.SUBSCRIBE, zmq_cfg.zone_enter_topic)
 
     def _setup_csv(self, cfg: dict) -> Optional[CSVWriter]:
@@ -146,11 +179,16 @@ class VisualProcess(WorkerProcess):
             stim = BackgroundStimulus(cfg.get("background", {}), self._scene)
             stim.setup()
             self._stimuli.append(stim)
+            self.logger.info("Registered: BackgroundStimulus")
 
         if cfg.get("looming", {}).get("enabled", False):
             stim = LoomingStimulus(cfg.get("looming", {}), self._scene)
             stim.setup()
             self._stimuli.append(stim)
+            self.logger.info(
+                "Registered: LoomingStimulus (type=%s)",
+                stim._expansion_type,
+            )
 
     def _zmq_poll_task(self, task):
         """Non-blocking ZMQ poll -- runs every frame inside Panda3D task loop."""

@@ -20,6 +20,10 @@ log_color = "YELLOW"
 viewing_distance_cm = 25.0            # Distance from fly to screen face (cm)
 screen_width_cm = 52.7                # Physical width of one screen panel (cm)
 num_screens = 4
+window_x_offset = 3840                # X position of leftmost screen on the desktop
+# Screen mapping: physical screens left-to-right → compass direction
+# Valid directions: North, East, South, West
+screen_mapping = ["South", "West", "North", "East"]
 braid_heading_offset_rad = 0.0        # Braid heading that corresponds to North screen
 braid_heading_flip = false            # True if Braid heading increases opposite to arena
 

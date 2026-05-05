@@ -1,11 +1,18 @@
 from direct.showbase.ShowBase import ShowBase
 from panda3d.core import (
-    WindowProperties,
     Camera,
     PerspectiveLens,
     NodePath,
     load_prc_file_data,
 )
+
+
+DIRECTION_TO_HEADING: dict[str, float] = {
+    "North": 0.0,
+    "East": 90.0,
+    "South": 180.0,
+    "West": 270.0,
+}
 
 
 class ArenaScene(ShowBase):
@@ -16,24 +23,32 @@ class ArenaScene(ShowBase):
     Units are centimeters throughout. Fly is at origin; North=+Y, East=+X, Z=up.
     """
 
-    # Display region order left-to-right: North, East, South, West
-    CAMERA_HEADINGS = [0.0, 90.0, 180.0, 270.0]
-
     def __init__(
         self,
         viewing_distance_cm: float = 25.0,
+        camera_headings: list[float] | None = None,
+        window_x_offset: int = 0,
         standalone: bool = False,
     ):
         self.viewing_distance_cm = viewing_distance_cm
         self.standalone = standalone
 
+        if camera_headings is None:
+            camera_headings = [0.0, 90.0, 180.0, 270.0]
+        self._camera_headings = camera_headings
+
         if standalone:
             width, height = 1280, 360
+            window_x_offset = 0
         else:
             width, height = 7680, 1080
 
-        # Set window size via Panda3D config before ShowBase creates the window
-        load_prc_file_data("", f"win-size {width} {height}\n")
+        # Set window size and position via Panda3D config before ShowBase
+        load_prc_file_data(
+            "",
+            f"win-size {width} {height}\n"
+            f"win-origin {window_x_offset} 0\n",
+        )
 
         ShowBase.__init__(self)
         self.disableMouse()
@@ -46,9 +61,9 @@ class ArenaScene(ShowBase):
 
     def _setup_cameras(self) -> None:
         """Create 4 perspective cameras, each assigned to a display region."""
-        panel_fraction = 1.0 / len(self.CAMERA_HEADINGS)
+        panel_fraction = 1.0 / len(self._camera_headings)
 
-        for i, heading_deg in enumerate(self.CAMERA_HEADINGS):
+        for i, heading_deg in enumerate(self._camera_headings):
             left = i * panel_fraction
             right = (i + 1) * panel_fraction
 
