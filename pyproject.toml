@@ -12,6 +12,7 @@ dependencies = [
     "numba>=0.61.2",
     "numpy>=2.2.5",
     "opencv-python-headless>=4.13.0.92",
+    "panda3d>=1.10.0",
     "pandas>=2.2.3",
     "pyglet>=2.1.9",
     "pyserial>=3.5",
