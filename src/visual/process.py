@@ -9,7 +9,6 @@ import json
 import math
 import multiprocessing as mp
 import time
-import tomllib
 from pathlib import Path
 from typing import Optional
 
@@ -102,18 +101,18 @@ class VisualProcess(WorkerProcess):
             self._zmq_context.term()
 
     def _load_config(self) -> dict:
-        with open(self._config_path, "rb") as f:
-            main = tomllib.load(f)
+        from src.utils.config import ConfigBase
+
+        main_cfg = ConfigBase(self._config_path)._load_config()
         vs_path = Path(
-            main.get("visual_stimuli", {}).get(
+            main_cfg.get("visual_stimuli", {}).get(
                 "config_file", "configs/visual_stimuli.toml"
             )
         )
         if vs_path.exists():
-            with open(vs_path, "rb") as f:
-                raw = tomllib.load(f)
+            raw = ConfigBase(str(vs_path))._load_config()
         else:
-            raw = main
+            raw = main_cfg
         return raw.get("visual_stimuli", {})
 
     def _setup_zmq(self) -> None:
@@ -121,10 +120,13 @@ class VisualProcess(WorkerProcess):
         self._zmq_socket = None
         if self.standalone:
             return
+        from src.utils.config import ZMQConfig
+
+        zmq_cfg = ZMQConfig(self._config_path)
         self._zmq_context = zmq.Context()
         self._zmq_socket = self._zmq_context.socket(zmq.SUB)
-        self._zmq_socket.connect("tcp://localhost:5556")
-        self._zmq_socket.setsockopt_string(zmq.SUBSCRIBE, "ZONE_ENTER")
+        self._zmq_socket.connect(zmq_cfg.get_subscriber_address(zmq_cfg.trigger_port))
+        self._zmq_socket.setsockopt_string(zmq.SUBSCRIBE, zmq_cfg.zone_enter_topic)
 
     def _setup_csv(self, cfg: dict) -> Optional[CSVWriter]:
         log_file = cfg.get("log_file", "stim.csv")
@@ -161,13 +163,16 @@ class VisualProcess(WorkerProcess):
 
         try:
             while True:
-                parts = self._zmq_socket.recv_multipart(flags=zmq.NOBLOCK)
+                try:
+                    parts = self._zmq_socket.recv_multipart(flags=zmq.NOBLOCK)
+                except zmq.Again:
+                    break
                 topic = parts[0].decode()
                 data = json.loads(parts[1])
                 if topic == "ZONE_ENTER":
                     self._handle_zone_enter(data)
-        except zmq.Again:
-            pass
+        except Exception:
+            self.logger.exception("Error in ZMQ poll task")
 
         return Task.cont
 
@@ -177,7 +182,12 @@ class VisualProcess(WorkerProcess):
 
         dt = ClockObject.getGlobalClock().getDt()
         for stim in self._stimuli:
-            stim.update(dt)
+            try:
+                stim.update(dt)
+            except Exception:
+                self.logger.exception(
+                    "Error in stimulus %s update", type(stim).__name__
+                )
         return Task.cont
 
     def _handle_zone_enter(self, data: dict) -> None:
@@ -187,7 +197,12 @@ class VisualProcess(WorkerProcess):
         )
 
         for stim in self._stimuli:
-            stim.on_trigger(world_heading, data)
+            try:
+                stim.on_trigger(world_heading, data)
+            except Exception:
+                self.logger.exception(
+                    "Error in stimulus %s on_trigger", type(stim).__name__
+                )
 
         if self._csv_writer:
             self._csv_writer.append(
