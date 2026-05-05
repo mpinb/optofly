@@ -70,3 +70,27 @@ positions_deg = [-90, -45, 0, 45, 90]
 sham_probability = 0.0
 
 seed = 42                             # RNG seed for reproducible sequences
+
+# ------------------------------------------------------------------------------
+# Stimulus: Oscillating Square — billboard square that jitters left/right
+# ------------------------------------------------------------------------------
+
+[visual_stimuli.oscillating_square]
+enabled = false
+
+# Square appearance
+size_deg = 10.0                         # Angular side length (degrees)
+color = [0, 0, 0]                       # RGB (0–255)
+
+# Oscillation parameters
+amplitude_deg = 30.0                    # Peak left/right displacement (degrees)
+frequency_hz = 2.0                      # Oscillation cycles per second
+
+# Timing
+duration_ms = 2000                      # Total presentation time (ms)
+
+# Position offsets from fly heading (degrees)
+# 0 = ahead, 90 = right, -90 = left, 180 = behind
+positions_deg = [-45, 0, 45]
+
+seed = 42                               # RNG seed for reproducible sequences

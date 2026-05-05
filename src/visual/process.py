@@ -20,6 +20,7 @@ from src.utils.csv_writer import CSVWriter
 from src.visual.scene import ArenaScene, DIRECTION_TO_HEADING
 from src.visual.stimuli.background import BackgroundStimulus
 from src.visual.stimuli.looming import LoomingStimulus
+from src.visual.stimuli.oscillating_square import OscillatingSquare
 
 
 def braid_to_world_heading(
@@ -196,6 +197,14 @@ class VisualProcess(WorkerProcess):
                 "Registered: LoomingStimulus (type=%s)",
                 stim._expansion_type,
             )
+
+        if cfg.get("oscillating_square", {}).get("enabled", False):
+            stim = OscillatingSquare(
+                cfg.get("oscillating_square", {}), self._scene
+            )
+            stim.setup()
+            self._stimuli.append(stim)
+            self.logger.info("Registered: OscillatingSquare")
 
     def _zmq_poll_task(self, task):
         """Non-blocking ZMQ poll -- runs every frame inside Panda3D task loop."""

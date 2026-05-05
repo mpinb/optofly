@@ -10,6 +10,7 @@ Real-time tracking and closed-loop optogenetic stimulation system for flying ins
 | [Architecture](architecture.md) | System architecture, data flow, and ZMQ topology |
 | [Calibration](calibration.md) | Visual stimuli and liquid lens calibration procedures |
 | [Visual Stimuli](visual-stimuli.md) | Developer guide for the stimulus rendering system |
+| [Visual Stimuli — Panda3D](visual-stimuli-panda3d.md) | Developer guide for the Panda3D stimulus pipeline (tutorial) |
 | [Camera](camera.md) | Ximea high-speed camera system |
 | [Opto Trigger](opto-trigger.md) | Arduino LED firmware and serial protocol |
 | [Troubleshooting](troubleshooting.md) | Common issues and fixes |
