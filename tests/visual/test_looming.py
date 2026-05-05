@@ -1,9 +1,49 @@
+import math
 import pytest
 from src.visual.stimuli.looming import (
     compute_lv_ratio_size,
+    compute_exponential_size,
     compute_linear_size,
     PositionBalancer,
 )
+
+
+def test_exponential_start():
+    size = compute_exponential_size(
+        t_ms=0, duration_ms=500, initial_deg=5.0, final_deg=72.0
+    )
+    assert abs(size - 5.0) < 1e-6
+
+
+def test_exponential_end():
+    size = compute_exponential_size(
+        t_ms=500, duration_ms=500, initial_deg=5.0, final_deg=72.0
+    )
+    assert abs(size - 72.0) < 1e-6
+
+
+def test_exponential_monotonically_increasing():
+    sizes = [
+        compute_exponential_size(t, 500, 5.0, 72.0)
+        for t in range(0, 500, 10)
+    ]
+    assert all(sizes[i] <= sizes[i + 1] for i in range(len(sizes) - 1))
+
+
+def test_exponential_midpoint():
+    # At t = duration/2, size = initial * sqrt(final/initial) = sqrt(initial*final)
+    size = compute_exponential_size(
+        t_ms=250, duration_ms=500, initial_deg=5.0, final_deg=72.0
+    )
+    expected = math.sqrt(5.0 * 72.0)
+    assert abs(size - expected) < 1e-6
+
+
+def test_exponential_zero_duration_returns_final():
+    size = compute_exponential_size(
+        t_ms=0, duration_ms=0, initial_deg=5.0, final_deg=72.0
+    )
+    assert abs(size - 72.0) < 1e-6
 
 
 def test_lv_ratio_starts_small():

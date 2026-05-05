@@ -37,6 +37,39 @@ def compute_lv_ratio_size(
     return final_size_deg - 2.0 * math.degrees(math.atan(term))
 
 
+def compute_exponential_size(
+    t_ms: float, duration_ms: float, initial_deg: float, final_deg: float
+) -> float:
+    """Angular size at time t for an exponential expansion.
+
+    Follows θ(t) = θ₀ · exp(k·t) where k is chosen so that θ(duration) = final.
+
+    Args:
+        t_ms: Elapsed time since expansion start (ms)
+        duration_ms: Total expansion duration (ms)
+        initial_deg: Starting angular diameter (degrees)
+        final_deg: Ending angular diameter (degrees)
+
+    Returns:
+        Angular diameter in degrees
+
+    Raises:
+        ValueError: If initial_deg <= 0 or final_deg <= 0.
+    """
+    if initial_deg <= 0 or final_deg <= 0:
+        raise ValueError(
+            f"initial_deg and final_deg must be > 0, "
+            f"got {initial_deg}, {final_deg}"
+        )
+    if duration_ms <= 0:
+        return final_deg
+    if t_ms <= 0:
+        return initial_deg
+    k = math.log(final_deg / initial_deg) / duration_ms
+    t_clamped = min(t_ms, duration_ms)
+    return initial_deg * math.exp(k * t_clamped)
+
+
 def compute_linear_size(
     t_ms: float, duration_ms: float, initial_deg: float, final_deg: float
 ) -> float:
@@ -98,10 +131,10 @@ class LoomingStimulus(BaseStimulus):
         self._color: tuple = tuple(cfg.get("color", [0, 0, 0]))
         self._sham_prob: float = cfg.get("sham_probability", 0.0)
         self._expansion_type: str = cfg.get("expansion_type", "lv_ratio")
-        if self._expansion_type not in ("lv_ratio", "linear"):
+        if self._expansion_type not in ("lv_ratio", "linear", "exponential"):
             raise ValueError(
                 f"Unknown expansion_type '{self._expansion_type}'. "
-                "Valid values: 'lv_ratio', 'linear'"
+                "Valid values: 'lv_ratio', 'exponential', 'linear'"
             )
 
         self._rng_seed: int = cfg.get("seed", 42)
@@ -156,4 +189,8 @@ class LoomingStimulus(BaseStimulus):
     def _size_at(self, t_ms: float) -> float:
         if self._expansion_type == "lv_ratio":
             return compute_lv_ratio_size(t_ms, self._lv_ratio_ms, self._final_deg)
+        if self._expansion_type == "exponential":
+            return compute_exponential_size(
+                t_ms, self._duration_ms, self._initial_deg, self._final_deg
+            )
         return compute_linear_size(t_ms, self._duration_ms, self._initial_deg, self._final_deg)
