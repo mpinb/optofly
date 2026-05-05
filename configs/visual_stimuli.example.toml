@@ -33,13 +33,12 @@ braid_heading_flip = false            # True if Braid heading increases opposite
 
 [visual_stimuli.background]
 enabled = true
-square_size_px = 40                   # Square tile size in pixels (at 1920×1080 per panel)
+square_size_px = 40                   # Square tile size in pixels
 density = 0.5                         # Fraction of tiles filled (0.0–1.0)
 background_color = [255, 255, 255]
 foreground_color = [0, 0, 0]
 seed = 42
-ground_enabled = true
-ground_z_cm = -5.0                    # Height of ground plane below fly (cm, negative = below)
+cylinder_height_cm = 80               # Total height of the cylinder (z = ±height/2)
 
 # ------------------------------------------------------------------------------
 # Stimulus: Looming — expanding billboard disk

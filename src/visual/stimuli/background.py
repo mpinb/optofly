@@ -1,9 +1,14 @@
+import math
 import random
 
 from panda3d.core import (
-    CardMaker,
+    Geom,
+    GeomNode,
+    GeomTriangles,
+    GeomVertexData,
+    GeomVertexFormat,
+    GeomVertexWriter,
     PNMImage,
-    Point3,
     Texture,
     TextureStage,
 )
@@ -20,19 +25,7 @@ def _generate_random_texture(
     bg_color: tuple,
     seed: int,
 ) -> PNMImage:
-    """Generate a random high-contrast square-pattern PNMImage.
-
-    Args:
-        width, height: Image size in pixels
-        square_size_px: Size of each square tile in pixels
-        density: Fraction of tiles filled with fg_color (0.0-1.0)
-        fg_color: Foreground RGB (0-255 per channel)
-        bg_color: Background RGB (0-255 per channel)
-        seed: RNG seed for reproducibility
-
-    Returns:
-        PNMImage ready for Texture.load()
-    """
+    """Generate a random high-contrast square-pattern PNMImage."""
     if square_size_px <= 0:
         raise ValueError(f"square_size_px must be > 0, got {square_size_px}")
     if not 0.0 <= density <= 1.0:
@@ -57,17 +50,72 @@ def _generate_random_texture(
     return img
 
 
-class BackgroundStimulus(BaseStimulus):
-    """Always-active background: 4 textured wall planes + optional ground plane.
+def _build_cylinder_geom(
+    radius: float,
+    height: float,
+    slices: int = 64,
+    stacks: int = 8,
+) -> GeomNode:
+    """Build a cylinder centred at origin, axis along Z.
 
-    Walls are flat CardMaker quads at +-viewing_distance_cm on X and Y axes,
-    each textured inward with a seeded random high-contrast pattern. The
-    ground plane is a 500x500 cm horizontal quad at configurable Z height
-    using the same texture tiled to match the wall square density.
+    The faces are wound so normals point inward — the viewer is meant to
+    be inside the cylinder looking out.
     """
+    vformat = GeomVertexFormat.getV3n3c4t2()
+    vdata = GeomVertexData("cylinder", vformat, Geom.UHStatic)
+    vdata.setNumRows((slices + 1) * (stacks + 1))
 
-    # Physical width of one 1920 px screen panel (cm) -- used for UV tiling
-    PANEL_WIDTH_CM = 52.7
+    vertex = GeomVertexWriter(vdata, "vertex")
+    normal = GeomVertexWriter(vdata, "normal")
+    color = GeomVertexWriter(vdata, "color")
+    texcoord = GeomVertexWriter(vdata, "texcoord")
+
+    z_min = -height / 2.0
+    z_step = height / stacks
+
+    for s in range(stacks + 1):
+        z = z_min + s * z_step
+        v = s / stacks
+        for i in range(slices + 1):
+            angle = 2.0 * math.pi * i / slices
+            x = radius * math.cos(angle)
+            y = radius * math.sin(angle)
+            u = i / slices
+
+            vertex.addData3(x, y, z)
+            # Inward-pointing normal
+            normal.addData3(-math.cos(angle), -math.sin(angle), 0.0)
+            color.addData4(1.0, 1.0, 1.0, 1.0)
+            texcoord.addData2(u, v)
+
+    tris = GeomTriangles(Geom.UHStatic)
+    verts_per_row = slices + 1
+    for s in range(stacks):
+        base = s * verts_per_row
+        for i in range(slices):
+            # Wind so the inward face is front (clockwise from inside)
+            a = base + i
+            b = base + i + 1
+            c = base + i + verts_per_row + 1
+            d = base + i + verts_per_row
+            tris.addVertices(a, c, b)
+            tris.addVertices(a, d, c)
+    tris.closePrimitive()
+
+    geom = Geom(vdata)
+    geom.addPrimitive(tris)
+    node = GeomNode("cylinder")
+    node.addGeom(geom)
+    return node
+
+
+class BackgroundStimulus(BaseStimulus):
+    """Always-active background: textured cylinder surrounding the fly.
+
+    The cylinder sits at origin, radius = viewing_distance_cm, and extends
+    cylinder_height_cm vertically.  A seeded procedural square texture is
+    wrapped and tiled around the inside.
+    """
 
     def setup(self) -> None:
         cfg = self.config
@@ -81,58 +129,30 @@ class BackgroundStimulus(BaseStimulus):
             seed=cfg.get("seed", 42),
         )
 
-        wall_tex = Texture("wall_tex")
-        wall_tex.load(tex_img)
+        radius = self.scene.viewing_distance_cm
+        height = cfg.get("cylinder_height_cm", 80)
+        num_screens = cfg.get("num_screens", 4)
 
-        d = self.scene.viewing_distance_cm
-        hw = self.PANEL_WIDTH_CM / 2.0
-        # Panel height in cm from aspect ratio
-        hh = hw * (1080.0 / 1920.0)
+        cylinder_node = _build_cylinder_geom(radius, height)
+        cylinder_np = self.scene.render.attachNewNode(cylinder_node)
+        cylinder_np.setTwoSided(True)
 
-        wall_positions = [
-            ("wall_north", Point3(0, d, 0)),
-            ("wall_east",  Point3(d, 0, 0)),
-            ("wall_south", Point3(0, -d, 0)),
-            ("wall_west",  Point3(-d, 0, 0)),
-        ]
+        cyl_tex = Texture("cylinder_tex")
+        cyl_tex.load(tex_img)
+        cyl_tex.setWrapU(Texture.WM_repeat)
+        cyl_tex.setWrapV(Texture.WM_repeat)
+        cylinder_np.setTexture(cyl_tex)
 
-        for name, pos in wall_positions:
-            cm = CardMaker(name)
-            cm.setFrame(-hw, hw, -hh, hh)
-            wall_np = self.scene.render.attachNewNode(cm.generate())
-            wall_np.setPos(pos)
-            wall_np.lookAt(Point3(0, 0, 0))
-            # CardMaker creates quads in the XY plane; setP(90) rotates the
-            # already-facing-inward quad around X by +90 degrees to stand it up
-            # into a vertical (XZ/YZ) wall.
-            wall_np.setP(90)
-            wall_np.setTwoSided(True)
-            wall_np.setTexture(wall_tex)
-
-        if cfg.get("ground_enabled", True):
-            self._setup_ground(tex_img, cfg.get("ground_z_cm", -5.0))
-
-    def _setup_ground(self, tex_img: PNMImage, ground_z_cm: float) -> None:
-        ground_extent = 500.0  # cm
-        tile_count = ground_extent / self.PANEL_WIDTH_CM
-
-        cm = CardMaker("ground")
-        half = ground_extent / 2.0
-        cm.setFrame(-half, half, -half, half)
-        ground_np = self.scene.render.attachNewNode(cm.generate())
-        ground_np.setPos(0, 0, ground_z_cm)
-        ground_np.setP(-90)  # rotate CardMaker's XZ quad to lie horizontal
-        ground_np.setTwoSided(True)
-
-        ground_tex = Texture("ground_tex")
-        ground_tex.load(tex_img)
-        ground_tex.setWrapU(Texture.WM_repeat)
-        ground_tex.setWrapV(Texture.WM_repeat)
-        ground_np.setTexture(ground_tex)
-        ground_np.setTexScale(TextureStage.getDefault(), tile_count, tile_count)
+        # Tile the texture: one copy per screen quadrant horizontally,
+        # vertical tiling derived from physical dimensions.
+        circumference = 2.0 * math.pi * radius
+        panel_width = circumference / num_screens
+        tile_u = float(num_screens)
+        tile_v = height / (panel_width * 1080.0 / 1920.0)
+        cylinder_np.setTexScale(TextureStage.getDefault(), tile_u, tile_v)
 
     def on_trigger(self, heading_deg: float, trigger_data: dict) -> None:
-        pass  # static background, no trigger response
+        pass
 
     def update(self, dt: float) -> None:
-        pass  # static
+        pass

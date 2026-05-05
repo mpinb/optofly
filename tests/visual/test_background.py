@@ -3,35 +3,6 @@ import pytest
 from src.visual.stimuli.background import _generate_random_texture
 
 
-@pytest.mark.display
-def test_background_stimulus_setup_does_not_raise():
-    from src.visual.scene import ArenaScene
-    from src.visual.stimuli.background import BackgroundStimulus
-    scene = ArenaScene(standalone=True)
-    stimulus = BackgroundStimulus({
-        "square_size_px": 40,
-        "density": 0.5,
-        "foreground_color": [0, 0, 0],
-        "background_color": [255, 255, 255],
-        "seed": 42,
-    }, scene)
-    stimulus.setup()
-    assert not scene.render.getChildren().isEmpty()
-    scene.cleanup()
-
-
-@pytest.mark.display
-def test_ground_can_be_disabled():
-    from src.visual.scene import ArenaScene
-    from src.visual.stimuli.background import BackgroundStimulus
-    scene = ArenaScene(standalone=True)
-    stimulus = BackgroundStimulus({
-        "ground_enabled": False,
-    }, scene)
-    stimulus.setup()
-    scene.cleanup()
-
-
 def test_texture_dimensions():
     img = _generate_random_texture(
         width=192, height=108, square_size_px=20, density=0.5,
@@ -75,3 +46,20 @@ def test_texture_density_one_gives_all_foreground():
     for x in range(64):
         for y in range(64):
             assert img.getXelVal(x, y) == (0, 0, 0)
+
+
+@pytest.mark.display
+def test_background_cylinder_setup_does_not_raise():
+    from src.visual.scene import ArenaScene
+    from src.visual.stimuli.background import BackgroundStimulus
+    scene = ArenaScene(standalone=True)
+    stimulus = BackgroundStimulus({
+        "square_size_px": 40,
+        "density": 0.5,
+        "foreground_color": [0, 0, 0],
+        "background_color": [255, 255, 255],
+        "seed": 42,
+    }, scene)
+    stimulus.setup()
+    assert not scene.render.getChildren().isEmpty()
+    scene.cleanup()
