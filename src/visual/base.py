@@ -62,11 +62,14 @@ def _make_unit_disk(color: tuple, num_segments: int = 32):
         GeomNode,
     )
 
+    if num_segments < 3:
+        raise ValueError(f"num_segments must be >= 3, got {num_segments}")
+
     r, g, b = color[0] / 255.0, color[1] / 255.0, color[2] / 255.0
     a = color[3] / 255.0 if len(color) == 4 else 1.0
 
     vformat = GeomVertexFormat.getV3c4()
-    vdata = GeomVertexData("disk", vformat, Geom.UHDynamic)
+    vdata = GeomVertexData("disk", vformat, Geom.UHStatic)
     vdata.setNumRows(num_segments + 1)
 
     vertex = GeomVertexWriter(vdata, "vertex")
