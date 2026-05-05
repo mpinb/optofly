@@ -8,7 +8,7 @@ def cleanup_showbase():
     # Before test
     if hasattr(builtins, 'base'):
         try:
-            builtins.base.destroy()
+            builtins.base.cleanup()
         except Exception:
             pass
         if hasattr(builtins, 'base'):
@@ -19,7 +19,7 @@ def cleanup_showbase():
     # After test
     if hasattr(builtins, 'base'):
         try:
-            builtins.base.destroy()
+            builtins.base.cleanup()
         except Exception:
             pass
         if hasattr(builtins, 'base'):

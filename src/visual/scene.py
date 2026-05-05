@@ -55,6 +55,7 @@ class ArenaScene(ShowBase):
             # Reuse the first default region (already at 0-1), create new ones for the rest
             if i == 0:
                 region = self.win.getDisplayRegion(0)
+                region.setDimensions(left, right, 0.0, 1.0)
             else:
                 region = self.win.makeDisplayRegion(left, right, 0.0, 1.0)
 
@@ -75,7 +76,7 @@ class ArenaScene(ShowBase):
             region.setCamera(cam_np)
             self.cameras.append(cam_np)
 
-    def destroy(self) -> None:
+    def cleanup(self) -> None:
         """Shut down Panda3D cleanly (use in tests and process cleanup)."""
         import builtins
 
