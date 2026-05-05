@@ -5,6 +5,7 @@
 const uint8_t PWM_RED_PIN = 3;
 const uint8_t PWM_GREEN_PIN = 5;
 const uint8_t PWM_BLUE_PIN = 6;
+const uint8_t PWM_BACKLIGHT_PIN = 9;
 
 struct ColorConfig {
   const char *name;
@@ -114,6 +115,13 @@ void ensureAllPinsLow() {
   analogWrite(PWM_BLUE_PIN, 0);
 }
 
+void setBacklight(int intensity) {
+  intensity = constrain(intensity, 0, 255);
+  analogWrite(PWM_BACKLIGHT_PIN, intensity);
+  Serial.print("Backlight set to: ");
+  Serial.println(intensity);
+}
+
 void processCommand(int duration, int intensity, int frequency,
                     const ColorConfig &color) {
   unsigned long functionStartTime = micros();
@@ -195,11 +203,17 @@ void setup() {
   pinMode(PWM_RED_PIN, OUTPUT);
   pinMode(PWM_GREEN_PIN, OUTPUT);
   pinMode(PWM_BLUE_PIN, OUTPUT);
+  pinMode(PWM_BACKLIGHT_PIN, OUTPUT);
   ensureAllPinsLow();
+  analogWrite(PWM_BACKLIGHT_PIN, 0);
 
   Serial.begin(115200);
   Serial.println(
-      "Arduino ready. Send commands in format: <duration,intensity,frequency,color>");
+      "Arduino ready. Send commands:");
+  Serial.println(
+      "  Stimulus: <duration,intensity,frequency,color>");
+  Serial.println(
+      "  Backlight: [intensity] (0-255)");
 }
 
 void loop() {
@@ -207,7 +221,46 @@ void loop() {
     unsigned long commandStartTime = micros();
 
     char c = Serial.read();
-    if (c == '<') {
+
+    if (c == '[') {
+      // Handle backlight command: [intensity]
+      unsigned long parseStartTime = micros();
+      char buffer[8];
+      size_t length = Serial.readBytesUntil(']', buffer, sizeof(buffer) - 1);
+      buffer[length] = '\0';
+
+      int intensity = 0;
+      bool parseError = false;
+
+      if (!tryParseInt(trimWhitespace(buffer), &intensity)) {
+        parseError = true;
+        Serial.println("Error: invalid backlight intensity.");
+      }
+
+      while (Serial.available() > 0 &&
+             (Serial.peek() == '\n' || Serial.peek() == '\r')) {
+        Serial.read();
+      }
+
+      if (!parseError) {
+        unsigned long parseEndTime = micros();
+        setBacklight(intensity);
+        unsigned long executeEndTime = micros();
+
+        Serial.print("Parse time (us): ");
+        Serial.println(parseEndTime - parseStartTime);
+        Serial.print("Execution time (us): ");
+        Serial.println(executeEndTime - parseEndTime);
+        Serial.print("Command processed: [");
+        Serial.print(intensity);
+        Serial.println("]");
+      } else {
+        while (Serial.available() > 0) {
+          Serial.read();
+        }
+      }
+    } else if (c == '<') {
+      // Handle stimulus command: <duration,intensity,frequency,color>
       unsigned long parseStartTime = micros();
       char buffer[48];
       size_t length = Serial.readBytesUntil('>', buffer, sizeof(buffer) - 1);

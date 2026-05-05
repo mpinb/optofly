@@ -24,8 +24,6 @@ from src.utils.logger import configure_process_logging
 from src.utils.metadata import collect_metadata, write_metadata, append_metadata_to_csv, extract_config_columns
 from src.monitoring.server import run_server
 
-import serial
-
 
 def load_config(config_path: str) -> dict:
     """Load configuration from TOML file.
@@ -228,11 +226,6 @@ def main():
         # Core processes (always started)
         print("\nStarting core processes...")
 
-        # 0. BacklightController - turn on the backlight
-        backlight_ser = serial.Serial("/dev/ttyUSB0", baudrate=9600, timeout=1)
-        time.sleep(2.0)  # wait for the arduino to reset
-        backlight_ser.write(b"1.0\n")
-
         # 1. BraidPublisher - connects to Braid tracking and publishes to ZMQ
         print("  ✓ BraidPublisher")
         braid_publisher = BraidPublisher(
@@ -321,18 +314,17 @@ def main():
             processes.append(("LiquidLens", liquid_lens))
             active_process_names.append("LiquidLens")
 
-        # 6. OptoTriggerWorker - optogenetic LED activation
-        if config.get("opto_trigger", {}).get("active", False):
-            print("  ✓ OptoTriggerWorker")
-            opto_trigger = OptoTriggerWorker(
-                event=stop_event,
-                braid_folder=braid_folder,
-                config_path=config_path,
-                log_path=log_path,
-            )
-            opto_trigger.start()
-            processes.append(("OptoTriggerWorker", opto_trigger))
-            active_process_names.append("OptoTriggerWorker")
+        # 6. OptoTriggerWorker - always started for backlight; stimulation gated by active flag
+        print("  ✓ OptoTriggerWorker")
+        opto_trigger = OptoTriggerWorker(
+            event=stop_event,
+            braid_folder=braid_folder,
+            config_path=config_path,
+            log_path=log_path,
+        )
+        opto_trigger.start()
+        processes.append(("OptoTriggerWorker", opto_trigger))
+        active_process_names.append("OptoTriggerWorker")
 
         # Allow child processes to finish their initialization
         time.sleep(1)
@@ -363,11 +355,6 @@ def main():
         # Graceful shutdown
         print("\nShutting down processes...")
         stop_event.set()
-
-        # Turn off backlight, disconnect
-        backlight_ser.write(b"0.0\n")
-        backlight_ser.flush()
-        backlight_ser.close()
 
         # Give processes time to cleanup
         time.sleep(1)

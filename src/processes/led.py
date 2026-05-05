@@ -86,14 +86,19 @@ class OptoTriggerWorker(WorkerProcess):
         """
         self.logger.debug(f"OptoTrigger config: {self.opto_config}")
 
-        # Initialize ZMQ socket
-        self._initialize_zmq()
-
-        # Initialize CSV writer
-        self._initialize_csv_writer()
-
-        # Initialize OptoTrigger hardware
+        # Initialize OptoTrigger hardware first (needed for backlight regardless of active flag)
         self._initialize_hardware()
+
+        # Turn on backlight
+        if self.opto_trigger:
+            self.opto_trigger.set_backlight(255)
+
+        if self.is_enabled:
+            # Initialize ZMQ socket only if trigger stimulation is enabled
+            self._initialize_zmq()
+
+            # Initialize CSV writer
+            self._initialize_csv_writer()
 
         self.logger.info("OptoTriggerWorker process initialized.")
 
@@ -232,37 +237,31 @@ class OptoTriggerWorker(WorkerProcess):
 
     def _run(self):
         """Main process loop."""
-        # Check if enabled
-        if not self.is_enabled:
-            self.logger.warning("OptoTriggerWorker is disabled. Exiting.")
-            return
-
         try:
             self.initialize()
         except Exception as e:
-            # Logger should be initialized by now
             if self.logger:
                 self.logger.error(f"OptoTriggerWorker failed to initialize: {e}")
             return
 
         self.is_running = True
-        self.logger.info("OptoTriggerWorker process started.")
+        if self.is_enabled:
+            self.logger.info("OptoTriggerWorker process started (stimulation active).")
+        else:
+            self.logger.info("OptoTriggerWorker process started (backlight only, stimulation disabled).")
 
         try:
             while self.is_running and not self.stop_event.is_set():
                 try:
-                    # Check for TRIGGER messages
-                    trigger_data = self._receive_message()
+                    if self.is_enabled:
+                        trigger_data = self._receive_message()
+                        if trigger_data is not None:
+                            self._handle_trigger(trigger_data)
 
-                    if trigger_data is not None:
-                        self._handle_trigger(trigger_data)
-
-                    # Small sleep to avoid busy waiting
                     time.sleep(0.001)
 
                 except Exception as e:
                     self.logger.error(f"Error in OptoTriggerWorker main loop: {e}")
-                    # Continue running despite errors
         except KeyboardInterrupt:
             pass  # Graceful shutdown via stop_event
 
@@ -275,6 +274,10 @@ class OptoTriggerWorker(WorkerProcess):
     def close(self):
         """Close all resources and connections."""
         self.is_running = False
+
+        # Turn off backlight before closing
+        if self.opto_trigger:
+            self.opto_trigger.set_backlight(0)
 
         # Close OptoTrigger hardware
         if self.opto_trigger:

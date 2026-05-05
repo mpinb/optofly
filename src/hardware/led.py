@@ -307,6 +307,30 @@ class OptoTrigger:
             "frequency": int(frequency),
         }
 
+    def set_backlight(self, intensity: int) -> bool:
+        """
+        Set the backlight intensity via the [intensity] command.
+
+        Args:
+            intensity: 0 (off) to 255 (full brightness)
+
+        Returns:
+            True if command was sent successfully
+        """
+        if not self.is_initialized or not self.serial_conn:
+            self.logger.error("OptoTrigger not initialized. Call initialize() first.")
+            return False
+        try:
+            intensity = max(0, min(255, int(intensity)))
+            command = f"[{intensity}]\r\n"
+            self.serial_conn.write(command.encode("utf-8"))
+            self.serial_conn.flush()
+            self.logger.debug(f"Backlight set to {intensity}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error setting backlight: {e}")
+            return False
+
     def close(self) -> bool:
         """
         Close the serial connection to the Arduino.
