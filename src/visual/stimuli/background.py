@@ -33,6 +33,12 @@ def _generate_random_texture(
     Returns:
         PNMImage ready for Texture.load()
     """
+    if square_size_px <= 0:
+        raise ValueError(f"square_size_px must be > 0, got {square_size_px}")
+    if not 0.0 <= density <= 1.0:
+        raise ValueError(f"density must be in [0.0, 1.0], got {density}")
+    if len(fg_color) < 3 or len(bg_color) < 3:
+        raise ValueError("Color tuples must have at least 3 elements (R, G, B)")
     rng = random.Random(seed)
     img = PNMImage(width, height)
     img.fill(bg_color[0] / 255.0, bg_color[1] / 255.0, bg_color[2] / 255.0)
@@ -96,6 +102,10 @@ class BackgroundStimulus(BaseStimulus):
             wall_np = self.scene.render.attachNewNode(cm.generate())
             wall_np.setPos(pos)
             wall_np.lookAt(Point3(0, 0, 0))
+            # CardMaker creates quads in the XY plane; setP(90) rotates the
+            # already-facing-inward quad around X by +90 degrees to stand it up
+            # into a vertical (XZ/YZ) wall.
+            wall_np.setP(90)
             wall_np.setTwoSided(True)
             wall_np.setTexture(wall_tex)
 
