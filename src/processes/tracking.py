@@ -133,10 +133,13 @@ class TrackedObject:
         return stats.circmean(list(self.headings), high=np.pi, low=-np.pi)
 
     def is_heading_toward_center(
-        self, threshold: float = DEFAULT_HEADING_THRESHOLD
+        self,
+        threshold: float = DEFAULT_HEADING_THRESHOLD,
+        center_x: float = 0.0,
+        center_y: float = 0.0,
     ) -> bool:
         """
-        Determine if the object is moving toward the center (0,0).
+        Determine if the object is moving toward the configured center point.
 
         Returns:
             True if heading is within threshold of direction to center
@@ -145,8 +148,10 @@ class TrackedObject:
         if mean_heading is None:
             return False
 
-        # Calculate angle from current position to center (0,0)
-        angle_to_center = np.arctan2(-self.current_y, -self.current_x)
+        # Calculate angle from current position to target center.
+        angle_to_center = np.arctan2(
+            center_y - self.current_y, center_x - self.current_x
+        )
 
         # Calculate angular difference (normalized to [-π, π])
         diff = np.abs(mean_heading - angle_to_center)
@@ -209,6 +214,8 @@ class TriggerHandler(WorkerProcess):
         self.fov_y_max = self.config.fov_y_max
         self.z_min = self.config.z_min
         self.z_max = self.config.z_max
+        self.fov_center_x = (self.fov_x_min + self.fov_x_max) / 2.0
+        self.fov_center_y = (self.fov_y_min + self.fov_y_max) / 2.0
 
         # Global refractory period — suppress ZONE_ENTER for this many seconds
         # after the last one was sent, regardless of object identity.
@@ -421,7 +428,9 @@ class TriggerHandler(WorkerProcess):
                     return
 
             # Gate 5: heading toward center
-            if not tracked_obj.is_heading_toward_center(self.config.heading_threshold):
+            if not tracked_obj.is_heading_toward_center(
+                self.config.heading_threshold, self.fov_center_x, self.fov_center_y
+            ):
                 return
 
             # All gates passed — emit ZONE_ENTER

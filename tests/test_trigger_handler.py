@@ -49,6 +49,8 @@ def configure_test_trigger(handler):
     handler.fov_x_max = 0.05
     handler.fov_y_min = -0.05
     handler.fov_y_max = 0.05
+    handler.fov_center_x = 0.0
+    handler.fov_center_y = 0.0
     handler.z_min = 0.1
     handler.z_max = 0.3
 
@@ -124,6 +126,21 @@ def test_first_seen_update_for_unknown_object_is_evaluated(handler):
     messages = zone_messages(handler.publisher)
     assert [topic for topic, _ in messages] == ["ZONE_ENTER"]
     assert messages[0][1]["obj_id"] == 42
+
+
+def test_heading_gate_targets_camera_fov_center(handler):
+    handler.fov_x_min = 0.10
+    handler.fov_x_max = 0.20
+    handler.fov_y_min = -0.05
+    handler.fov_y_max = 0.05
+    handler.fov_center_x = 0.15
+    handler.fov_center_y = 0.0
+
+    handler.process_message(make_birth(x=0.08, frame=99, xvel=0.2))
+    handler.process_message(make_update(x=0.10, frame=100, xvel=0.2))
+
+    messages = zone_messages(handler.publisher)
+    assert [topic for topic, _ in messages] == ["ZONE_ENTER"]
 
 
 def test_exit_emitted_when_object_leaves_zone(handler):
