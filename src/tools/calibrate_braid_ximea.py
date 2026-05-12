@@ -9,7 +9,8 @@ Usage:
 
 Workflow:
     1. The Ximea camera feed opens in an OpenCV window.
-    2. A live BRAID ZMQ subscriber tracks the current laser/target position (x, y, z).
+    2. A live BRAID SSE subscriber tracks the current laser/target position (x, y, z).
+       No ZMQ stack or main.py needed — the tool connects directly to Braid.
     3. Aim the laser pointer at a position in the arena. Wait for a stable BRAID fix,
        then LEFT-CLICK on the laser dot in the camera window.
        Each click records the current BRAID (x, y, z) and the clicked pixel (u, v).
@@ -31,30 +32,59 @@ import json
 import re
 import sys
 import threading
+import time
 from pathlib import Path
 
 import cv2
 import numpy as np
-import zmq
+import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.utils.calibration import BraidToXimeaCalibration
-from src.utils.config import ZMQConfig
+from src.utils.config import BraidPublisherConfig
+
+_DATA_PREFIX = "data: "
+_MAX_RETRIES = 5
+_RETRY_DELAY = 2
+
+
+def _parse_chunk(chunk: str) -> dict:
+    lines = chunk.strip().split("\n")
+    if len(lines) != 2:
+        raise ValueError(f"Expected 2 lines, got {len(lines)}")
+    if lines[0] != "event: braid":
+        raise ValueError(f"Unexpected event line: {lines[0]!r}")
+    if not lines[1].startswith(_DATA_PREFIX):
+        raise ValueError(f"Unexpected data line: {lines[1]!r}")
+    return json.loads(lines[1][len(_DATA_PREFIX):])
 
 
 # ---------------------------------------------------------------------------
-# BRAID tracker thread
+# BRAID tracker thread (SSE — connects directly to Braid, no ZMQ required)
 # ---------------------------------------------------------------------------
 
 
 class _BraidTracker(threading.Thread):
-    def __init__(self, braid_port: int, stop_event: threading.Event) -> None:
+    def __init__(self, braid_url: str, stop_event: threading.Event) -> None:
         super().__init__(daemon=True, name="braid-tracker")
-        self._port = braid_port
+        self._url = braid_url.rstrip("/")
         self._stop_event = stop_event
+        self._session = requests.Session()
         self._lock = threading.Lock()
         self._pos: tuple[float, float, float] | None = None
+
+        for attempt in range(_MAX_RETRIES):
+            try:
+                self._session.get(self._url, timeout=2).raise_for_status()
+                break
+            except requests.RequestException as e:
+                if attempt < _MAX_RETRIES - 1:
+                    time.sleep(_RETRY_DELAY)
+                else:
+                    raise RuntimeError(
+                        f"Cannot reach Braid at {self._url} after {_MAX_RETRIES} attempts: {e}"
+                    )
 
     @property
     def position(self) -> tuple[float, float, float] | None:
@@ -62,29 +92,36 @@ class _BraidTracker(threading.Thread):
             return self._pos
 
     def run(self) -> None:
-        ctx = zmq.Context()
-        sub = ctx.socket(zmq.SUB)
-        sub.connect(f"tcp://localhost:{self._port}")
-        sub.setsockopt_string(zmq.SUBSCRIBE, "BRAID")
-        sub.setsockopt(zmq.RCVTIMEO, 200)
+        events_url = f"{self._url}/events"
         while not self._stop_event.is_set():
             try:
-                _, raw = sub.recv_multipart()
-                msg = json.loads(raw)
-                update = msg.get("Update") or msg.get("Birth")
-                if update:
-                    with self._lock:
-                        self._pos = (
-                            float(update["x"]),
-                            float(update["y"]),
-                            float(update["z"]),
-                        )
-            except zmq.Again:
-                continue
-            except Exception:
-                pass
-        sub.close()
-        ctx.term()
+                resp = self._session.get(
+                    events_url,
+                    stream=True,
+                    headers={"Accept": "text/event-stream"},
+                    timeout=10,
+                )
+                resp.raise_for_status()
+                for chunk in resp.iter_content(chunk_size=None, decode_unicode=True):
+                    if self._stop_event.is_set():
+                        break
+                    try:
+                        data = _parse_chunk(chunk)
+                        msg = data.get("msg", {})
+                        update = msg.get("Update") or msg.get("Birth")
+                        if update:
+                            with self._lock:
+                                self._pos = (
+                                    float(update["x"]),
+                                    float(update["y"]),
+                                    float(update["z"]),
+                                )
+                    except Exception:
+                        pass
+            except requests.RequestException as e:
+                if not self._stop_event.is_set():
+                    print(f"  BRAID connection lost: {e} — retrying in 1 s")
+                    time.sleep(1)
 
 
 # ---------------------------------------------------------------------------
@@ -340,13 +377,17 @@ def main():
     )
     args = parser.parse_args()
 
-    zmq_cfg = ZMQConfig(args.config)
-    braid_port = zmq_cfg.braid_port
+    braid_cfg = BraidPublisherConfig(args.config)
+    braid_url = braid_cfg.url
 
     stop_event = threading.Event()
-    tracker = _BraidTracker(braid_port, stop_event)
+    try:
+        tracker = _BraidTracker(braid_url, stop_event)
+    except RuntimeError as e:
+        print(f"ERROR: {e}")
+        sys.exit(1)
     tracker.start()
-    print(f"Subscribed to BRAID on port {braid_port}")
+    print(f"Connected to Braid SSE at {braid_url}")
 
     try:
         cam, img_obj, frame_w, frame_h = _open_ximea_camera(
