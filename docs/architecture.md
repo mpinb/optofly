@@ -21,7 +21,7 @@ TriggerHandler (src/processes/tracking.py)
     +---> RustCameraProcess    (starts recording on ZONE_ENTER; stops on ZONE_EXIT)
     +---> LiquidLens           (starts tracking on ZONE_ENTER; follows BRAID until ZONE_EXIT)
     +---> OptoTriggerWorker    (one-shot LED on ZONE_ENTER only)
-    +---> VisualStimuliProcess (one-shot stimulus on ZONE_ENTER only)
+    +---> VisualProcess        (Panda3D; renders stimuli on ZONE_ENTER, one-shot)
     +---> Monitoring Server    (web dashboard, optional)
 ```
 
@@ -37,7 +37,7 @@ All processes inherit from `WorkerProcess` (`src/utils/worker.py`) and run as `m
 | TriggerHandler | SUB on 5555, PUB on 5556 (topics: ZONE_ENTER, ZONE_EXIT) | `src/processes/tracking.py` |
 | RustCameraProcess | SUB on 5556 (ZONE_ENTER, ZONE_EXIT, kill) | `src/processes/camera.py` |
 | OptoTriggerWorker | SUB on 5556 (ZONE_ENTER only) | `src/processes/led.py` |
-| VisualStimuliProcess | SUB on 5556 (ZONE_ENTER only) | `src/processes/visual.py` |
+| VisualProcess | SUB on 5556 (ZONE_ENTER only) | `src/visual/process.py` |
 | LiquidLens | SUB on 5555 (BRAID) + 5556 (ZONE_ENTER, ZONE_EXIT) | `src/processes/lens.py` |
 | Monitoring Server | SUB on 5556 (ZONE_ENTER, ZONE_EXIT) | `src/monitoring/server.py` |
 

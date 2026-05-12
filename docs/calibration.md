@@ -1,8 +1,14 @@
 # Calibration
 
-## Visual Stimuli Calibration
+## Visual Stimuli Calibration (Legacy Pyglet Pipeline)
 
-The visual stimuli system needs to know how fly heading (from Braid tracking) maps to pixel positions on the display. Two steps are required.
+> The Panda3D pipeline (`src/visual/`) does not use this interactive calibration.
+> Screen assignment is configured via `screen_mapping` in `[visual_stimuli.arena]` of
+> `configs/visual_stimuli.toml`. Set `braid_heading_offset_rad` and `braid_heading_flip`
+> to align Braid heading with the arena compass.
+>
+> The steps below apply only to the legacy pyglet pipeline (`src/stimuli/`), invoked via
+> `python -m src.processes.visual --calibrate*`.
 
 ### Step 1: Screen Identification
 

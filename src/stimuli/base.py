@@ -17,7 +17,7 @@ class BaseStimulus(ABC):
     2. Implement render(), update(), is_active()
     3. Optionally override on_trigger() for closed-loop stimuli
     4. Add config section to configs/config.toml
-    5. Register in VisualStimuliProcess
+    5. Register in VisualProcess (src/visual/process.py) for the Panda3D pipeline
     """
 
     def __init__(self, config: Dict[str, Any]):

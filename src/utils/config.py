@@ -238,50 +238,6 @@ class BraidPublisherConfig(ConfigBase):
         )
 
 
-class TriggerConfig(ConfigBase):
-    """Configuration for the trigger handler."""
-
-    def __init__(self, config_path: str = "configs/config.toml"):
-        """Initialize trigger configuration."""
-        super().__init__(config_path, "trigger")
-        config = self._load_config()
-
-        # Speed thresholds
-        self.min_speed: float = config["min_speed"]
-        self.max_speed: float = config["max_speed"]
-        self.pre_trigger_frames: int = config["pre_trigger_frames"]
-        self.post_trigger_frames: int = config["post_trigger_frames"]
-
-        # Frame rate used to convert between time and frames
-        self.frame_rate: float = config["frame_rate"]
-
-        # Calculate time equivalents for convenience
-        self.pre_trigger_time: float = self.pre_trigger_frames / self.frame_rate
-        self.post_trigger_time: float = self.post_trigger_frames / self.frame_rate
-
-        # Get camera config for FOV boundaries
-        camera_config = CameraConfig(config_path)
-        self.fov_x_min = camera_config.fov_x_min
-        self.fov_x_max = camera_config.fov_x_max
-        self.fov_y_min = camera_config.fov_y_min
-        self.fov_y_max = camera_config.fov_y_max
-
-    def __str__(self):
-        """Return a string representation of the configuration."""
-        # Calculate FOV dimensions in mm for display
-        fov_width_mm = (self.fov_x_max - self.fov_x_min) * 1000
-        fov_height_mm = (self.fov_y_max - self.fov_y_min) * 1000
-
-        return (
-            f"Trigger Configuration:\n"
-            f"  Speed Threshold: {self.min_speed} to {self.max_speed} m/s\n"
-            f"  Pre-trigger Time: {self.pre_trigger_time}s ({self.pre_trigger_frames} frames)\n"
-            f"  Post-trigger Time: {self.post_trigger_time}s ({self.post_trigger_frames} frames)\n"
-            f"  FOV Dimensions: {fov_width_mm:.1f} x {fov_height_mm:.1f} mm\n"
-            f"  FOV Boundaries: [{self.fov_x_min}, {self.fov_x_max}] x [{self.fov_y_min}, {self.fov_y_max}] m"
-        )
-
-
 class OptoTriggerConfig(ConfigBase):
     """Configuration for the Arduino-based optical trigger controller."""
 

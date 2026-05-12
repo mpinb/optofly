@@ -71,7 +71,7 @@ def print_experiment_config(config: dict, active_processes: list):
         print(f"  URL: http://{display_host}:{port}")
 
     # Visual stimuli details
-    if "VisualStimuliProcess" in active_processes:
+    if "VisualProcess" in active_processes:
         visual_config = config.get("visual_stimuli", {})
         enabled_stimuli = []
         if visual_config.get("background", {}).get("enabled", True):
@@ -275,8 +275,8 @@ def main():
                 log_path=log_path,
             )
             visual_process.start()
-            processes.append(("VisualStimuliProcess", visual_process))
-            active_process_names.append("VisualStimuliProcess")
+            processes.append(("VisualProcess", visual_process))
+            active_process_names.append("VisualProcess")
 
         # 5. CameraProcess + LiquidLens (lens always accompanies camera)
         if config.get("camera", {}).get("active", False):
