@@ -10,6 +10,7 @@ Usage:
 Workflow:
     1. The Ximea camera feed opens in an OpenCV window.
     2. A live BRAID SSE subscriber tracks the current laser/target position (x, y, z).
+       No ZMQ stack or main.py needed — the tool connects directly to Braid.
     3. Aim the laser pointer (white dot on black background) at a position in the arena.
        Wait for a stable BRAID fix, then press SPACE — the tool auto-detects the centroid
        of the bright spot and records the current BRAID (x, y, z) + pixel (u, v).
@@ -46,43 +47,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from src.utils.calibration import BraidToXimeaCalibration
 from src.utils.config import BraidPublisherConfig
 
-
-# Constants
-DATA_PREFIX = "data: "
-MAX_RETRIES = 5
-RETRY_DELAY = 2
+_DATA_PREFIX = "data: "
+_MAX_RETRIES = 5
+_RETRY_DELAY = 2
 
 
-def parse_chunk(chunk: str) -> dict:
-    """Parse a Server-Sent Events (SSE) chunk from Braid server.
-
-    Args:
-        chunk: Raw chunk data from the event stream
-
-    Returns:
-        Parsed JSON data from the chunk
-
-    Raises:
-        ValueError: If the chunk format is invalid
-    """
+def _parse_chunk(chunk: str) -> dict:
     lines = chunk.strip().split("\n")
-
     if len(lines) != 2:
-        raise ValueError(f"Expected 2 lines in chunk, got {len(lines)}")
-
+        raise ValueError(f"Expected 2 lines, got {len(lines)}")
     if lines[0] != "event: braid":
-        raise ValueError(f"Expected 'event: braid', got '{lines[0]}'")
-
-    if not lines[1].startswith(DATA_PREFIX):
-        raise ValueError(f"Expected line starting with '{DATA_PREFIX}', got '{lines[1]}'")
-
-    data_str = lines[1][len(DATA_PREFIX) :]
-
-    try:
-        data = json.loads(data_str)
-        return data
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Failed to parse JSON: {e}")
+        raise ValueError(f"Unexpected event line: {lines[0]!r}")
+    if not lines[1].startswith(_DATA_PREFIX):
+        raise ValueError(f"Unexpected data line: {lines[1]!r}")
+    return json.loads(lines[1][len(_DATA_PREFIX):])
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +79,6 @@ def _detect_bright_spot(
     """
     _, mask = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
     n_labels, _, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
-    # label 0 is background; find the largest foreground blob
     best_label = -1
     best_area = min_area - 1
     for label in range(1, n_labels):
@@ -116,94 +93,67 @@ def _detect_bright_spot(
 
 
 # ---------------------------------------------------------------------------
-# BRAID tracker thread
+# BRAID tracker thread (SSE — connects directly to Braid, no ZMQ required)
 # ---------------------------------------------------------------------------
 
 
 class _BraidTracker(threading.Thread):
     def __init__(self, braid_url: str, stop_event: threading.Event) -> None:
         super().__init__(daemon=True, name="braid-tracker")
-        self._url = braid_url
-        self._stop = stop_event
-        self._session = None
+        self._url = braid_url.rstrip("/")
+        self._stop_event = stop_event
+        self._session = requests.Session()
         self._lock = threading.Lock()
         self._pos: tuple[float, float, float] | None = None
-        self._connect_to_braid()
+
+        for attempt in range(_MAX_RETRIES):
+            try:
+                self._session.get(self._url, timeout=2).raise_for_status()
+                break
+            except requests.RequestException as e:
+                if attempt < _MAX_RETRIES - 1:
+                    time.sleep(_RETRY_DELAY)
+                else:
+                    raise RuntimeError(
+                        f"Cannot reach Braid at {self._url} after {_MAX_RETRIES} attempts: {e}"
+                    )
 
     @property
     def position(self) -> tuple[float, float, float] | None:
         with self._lock:
             return self._pos
 
-    def _connect_to_braid(self) -> None:
-        """
-        Connect to the Braid server's event stream.
-
-        Raises:
-            Exception: If connection fails
-        """
-        self._session = requests.Session()
-
-        # Test the connection
-        for attempt in range(MAX_RETRIES):
-            try:
-                r = self._session.get(self._url, timeout=2)
-                r.raise_for_status()
-                break
-            except requests.RequestException as e:
-                if attempt < MAX_RETRIES - 1:
-                    time.sleep(RETRY_DELAY)
-                else:
-                    raise Exception(
-                        f"Failed to connect to {self._url} after {MAX_RETRIES} attempts: {e}"
-                    )
-
-        # Prepare events URL
-        self.events_url = f"{self._url.rstrip('/')}/events"
-
     def run(self) -> None:
-        """Process the event stream in a separate thread."""
-        while not self._stop.is_set():
+        events_url = f"{self._url}/events"
+        while not self._stop_event.is_set():
             try:
-                if self._session is None or self.events_url is None:
-                    time.sleep(1)
-                    continue
-
-                response = self._session.get(
-                    self.events_url,
+                resp = self._session.get(
+                    events_url,
                     stream=True,
                     headers={"Accept": "text/event-stream"},
                     timeout=10,
                 )
-                response.raise_for_status()
-
-                # Process events
-                for chunk in response.iter_content(chunk_size=None, decode_unicode=True):
-                    if self._stop.is_set():
+                resp.raise_for_status()
+                for chunk in resp.iter_content(chunk_size=None, decode_unicode=True):
+                    if self._stop_event.is_set():
                         break
-
                     try:
-                        data = parse_chunk(chunk)
-                        if "msg" in data:
-                            msg = data["msg"]
-                            if "Update" in msg:
-                                update = msg["Update"]
-                                with self._lock:
-                                    self._pos = (
-                                        float(update["x"]),
-                                        float(update["y"]),
-                                        float(update["z"]),
-                                    )
-                    except Exception as e:
-                        print(f"Error processing chunk: {e}")
-
-            except (requests.RequestException, ConnectionError) as e:
-                if self._stop.is_set():
-                    break
-                print(f"Connection error: {e}. Retrying in 1 second...")
-                time.sleep(1)
-
-        print("Braid tracker stopped.")
+                        data = _parse_chunk(chunk)
+                        msg = data.get("msg", {})
+                        update = msg.get("Update") or msg.get("Birth")
+                        if update:
+                            with self._lock:
+                                self._pos = (
+                                    float(update["x"]),
+                                    float(update["y"]),
+                                    float(update["z"]),
+                                )
+                    except Exception:
+                        pass
+            except requests.RequestException as e:
+                if not self._stop_event.is_set():
+                    print(f"  BRAID connection lost: {e} — retrying in 1 s")
+                    time.sleep(1)
 
 
 # ---------------------------------------------------------------------------
@@ -483,17 +433,20 @@ def main():
     )
     args = parser.parse_args()
 
-    # Load configuration
     try:
         braid_cfg = BraidPublisherConfig(args.config)
     except Exception as e:
-        print(f"ERROR: Could not load BraidPublisherConfig from {args.config}: {e}")
+        print(f"ERROR: Could not load config from {args.config}: {e}")
         sys.exit(1)
 
     stop_event = threading.Event()
-    tracker = _BraidTracker(braid_url=braid_cfg.url, stop_event=stop_event)
+    try:
+        tracker = _BraidTracker(braid_cfg.url, stop_event)
+    except RuntimeError as e:
+        print(f"ERROR: {e}")
+        sys.exit(1)
     tracker.start()
-    print(f"Connecting to BRAID SSE stream at {braid_cfg.url}...")
+    print(f"Connected to Braid SSE at {braid_cfg.url}")
 
     try:
         cam, img_obj, frame_w, frame_h = _open_ximea_camera(fps=args.fps, exposure_us=args.exposure)

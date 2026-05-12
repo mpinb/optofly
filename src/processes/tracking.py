@@ -216,6 +216,18 @@ class TriggerHandler(WorkerProcess):
         self.z_max = self.config.z_max
         self.fov_center_x = (self.fov_x_min + self.fov_x_max) / 2.0
         self.fov_center_y = (self.fov_y_min + self.fov_y_max) / 2.0
+        self.fov_frustum: bool = self.config.fov_frustum
+        if self.fov_frustum:
+            self._near_z = self.config.fov_near_z
+            self._near_x_min = self.config.fov_near_x_min
+            self._near_x_max = self.config.fov_near_x_max
+            self._near_y_min = self.config.fov_near_y_min
+            self._near_y_max = self.config.fov_near_y_max
+            self._far_z = self.config.fov_far_z
+            self._far_x_min = self.config.fov_far_x_min
+            self._far_x_max = self.config.fov_far_x_max
+            self._far_y_min = self.config.fov_far_y_min
+            self._far_y_max = self.config.fov_far_y_max
 
         # Global refractory period — suppress ZONE_ENTER for this many seconds
         # after the last one was sent, regardless of object identity.
@@ -279,13 +291,24 @@ class TriggerHandler(WorkerProcess):
             self.logger.error(f"Unexpected error during ZMQ initialization: {e}")
             raise
 
+    def _get_fov_at_z(self, z: float) -> tuple:
+        """Return (x_min, x_max, y_min, y_max) for the given z, interpolating in frustum mode."""
+        if not self.fov_frustum:
+            return self.fov_x_min, self.fov_x_max, self.fov_y_min, self.fov_y_max
+        alpha = (z - self._near_z) / (self._far_z - self._near_z)
+        return (
+            self._near_x_min + alpha * (self._far_x_min - self._near_x_min),
+            self._near_x_max + alpha * (self._far_x_max - self._near_x_max),
+            self._near_y_min + alpha * (self._far_y_min - self._near_y_min),
+            self._near_y_max + alpha * (self._far_y_max - self._near_y_max),
+        )
+
     def is_in_trigger_zone(self, x: float, y: float, z: float) -> bool:
         """Check if a point is within the trigger zone (camera FOV x/y + z bounds)."""
-        return (
-            self.fov_x_min <= x <= self.fov_x_max
-            and self.fov_y_min <= y <= self.fov_y_max
-            and self.z_min <= z <= self.z_max
-        )
+        if not (self.z_min <= z <= self.z_max):
+            return False
+        x_min, x_max, y_min, y_max = self._get_fov_at_z(z)
+        return x_min <= x <= x_max and y_min <= y <= y_max
 
     def process_message(self, message_data: Dict[str, Any]) -> None:
         """Process a message from the Braid server."""

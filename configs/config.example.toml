@@ -61,6 +61,8 @@ max_recording_time = 3.0         # Max seconds per recording (sizes buffer)
 # Camera field of view in tracking coordinates (meters).
 # These values can be computed automatically with the BRAID-to-camera calibration tool
 # (src/tools/calibrate_braid_ximea.py) — press 'v' then 's' during the calibration session.
+#
+# Flat mode (default): single set of x/y bounds applied at all z heights.
 x_min = -0.0218
 x_max = 0.039
 y_min = -0.025
@@ -71,6 +73,26 @@ y_max = 0.041
 # When set, the DFF ROI is centred on the projected fly position rather than the frame centre.
 # braid_ximea_calibration_file = "calibrations/braid_to_ximea.npz"
 
+# Frustum mode (perspective-correct): define FOV at two z reference planes.
+# The zone check interpolates x/y bounds at the fly's actual z, matching the
+# real camera perspective. Generated automatically by:
+#   uv run python -m src.tools.calibrate_frustum_fov --near-z 0.10 --far-z 0.25
+# To enable manually, replace the flat keys above with these two sub-tables
+# (remove x_min/x_max/y_min/y_max from [camera.FOV] first):
+#
+# [camera.FOV.near]
+# z     = 0.10      # z where these bounds were measured
+# x_min = -0.015
+# x_max = 0.025
+# y_min = -0.018
+# y_max = 0.030
+#
+# [camera.FOV.far]
+# z     = 0.25      # z where these bounds were measured
+# x_min = -0.0218
+# x_max = 0.039
+# y_min = -0.025
+# y_max = 0.041
 # ==============================================================================
 # HARDWARE CONTROL
 # ==============================================================================
