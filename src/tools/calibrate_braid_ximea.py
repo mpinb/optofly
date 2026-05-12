@@ -52,7 +52,7 @@ class _BraidTracker(threading.Thread):
     def __init__(self, braid_port: int, stop_event: threading.Event) -> None:
         super().__init__(daemon=True, name="braid-tracker")
         self._port = braid_port
-        self._stop = stop_event
+        self._stop_event = stop_event
         self._lock = threading.Lock()
         self._pos: tuple[float, float, float] | None = None
 
@@ -67,7 +67,7 @@ class _BraidTracker(threading.Thread):
         sub.connect(f"tcp://localhost:{self._port}")
         sub.setsockopt_string(zmq.SUBSCRIBE, "BRAID")
         sub.setsockopt(zmq.RCVTIMEO, 200)
-        while not self._stop.is_set():
+        while not self._stop_event.is_set():
             try:
                 _, raw = sub.recv_multipart()
                 msg = json.loads(raw)
