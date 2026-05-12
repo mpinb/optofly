@@ -279,9 +279,20 @@ class HeadingCalibrationApp:
         self._collect_done = threading.Event()
         self._collect_result: tuple[float, tuple[float, float]] | None = None
 
-        # Input: set event each time user presses Enter (in Panda3D window)
+        # Input: set event each time user presses Enter in the terminal
+        # (avoids needing Panda3D window focus)
         self._input_event = threading.Event()
         self._scene.accept("enter", self._input_event.set)
+        threading.Thread(target=self._terminal_input_loop, daemon=True).start()
+
+    def _terminal_input_loop(self) -> None:
+        """Set _input_event on each Enter press in the terminal."""
+        while self._state != self._DONE:
+            try:
+                input()
+            except EOFError:
+                break
+            self._input_event.set()
 
     # ------------------------------------------------------------------
     def run(self) -> list[tuple[float, tuple[float, float]]]:
@@ -293,7 +304,7 @@ class HeadingCalibrationApp:
         print(
             f"Screens: {', '.join(self._screens)}\n"
             "For each screen: place a Braid-trackable target in front of\n"
-            "the bright dot, then press Enter (in the Panda3D window).\n"
+            "the bright dot, then press Enter (in this terminal).\n"
         )
         self._show_step(0)
 

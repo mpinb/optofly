@@ -787,8 +787,16 @@ class RustCameraProcess(WorkerProcess):
 
         try:
             binary = self._find_binary()
-        except FileNotFoundError as e:
-            self.logger.error(str(e))
+        except FileNotFoundError:
+            self.logger.error(
+                "\n"
+                "  ╔══════════════════════════════════════════════════════╗\n"
+                "  ║  CAMERA BINARY NOT FOUND — camera will not record   ║\n"
+                "  ║                                                      ║\n"
+                "  ║  Build it first:                                     ║\n"
+                "  ║    cd optofly-camera && cargo build --release        ║\n"
+                "  ╚══════════════════════════════════════════════════════╝"
+            )
             return
 
         os.makedirs(self.save_folder, exist_ok=True)
