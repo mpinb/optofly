@@ -75,8 +75,10 @@ y_max = 0.041
 
 # Frustum mode (perspective-correct): define FOV at two z reference planes.
 # The zone check interpolates x/y bounds at the fly's actual z, matching the
-# real camera perspective. To enable, replace the flat keys above with these
-# two sub-tables (remove x_min/x_max/y_min/y_max from [camera.FOV] first):
+# real camera perspective. Generated automatically by:
+#   uv run python -m src.tools.calibrate_frustum_fov --near-z 0.10 --far-z 0.25
+# To enable manually, replace the flat keys above with these two sub-tables
+# (remove x_min/x_max/y_min/y_max from [camera.FOV] first):
 #
 # [camera.FOV.near]
 # z     = 0.10      # z where these bounds were measured
