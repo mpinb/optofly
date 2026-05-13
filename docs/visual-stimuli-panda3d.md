@@ -413,6 +413,8 @@ Standalone test mode (small 1280×320 window, no hardware):
 
 ```bash
 uv run python -c "
+from direct.task import Task
+from panda3d.core import ClockObject
 from src.visual.scene import ArenaScene
 from src.visual.stimuli.oscillating_square import OscillatingSquare
 
@@ -428,8 +430,14 @@ stim = OscillatingSquare({
 stim.setup()
 stim.on_trigger(0.0, {'obj_id': 1})
 
-# The square is now visible and oscillating.
-# Panda3D renders automatically — no loop needed in standalone.
+# Panda3D's render loop does NOT call stim.update() automatically.
+# Register a per-frame task so the oscillation advances each frame.
+# (VisualProcess does this via _stimulus_update_task in the full rig.)
+def update_task(task):
+    stim.update(ClockObject.getGlobalClock().getDt())
+    return Task.cont
+
+scene.taskMgr.add(update_task, 'update_stim')
 scene.run()  # blocks; close the window to exit
 ```
 
