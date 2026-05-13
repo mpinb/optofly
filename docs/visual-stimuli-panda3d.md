@@ -222,31 +222,47 @@ def _make_unit_square(color: tuple):
     r, g, b = color[0] / 255.0, color[1] / 255.0, color[2] / 255.0
     a = color[3] / 255.0 if len(color) == 4 else 1.0
 
+    # Declare the per-vertex attribute layout: 3D position (V3) + RGBA color (C4).
+    # getV3c4() is a built-in Panda3D format; custom layouts are possible but rarely needed.
     vformat = GeomVertexFormat.getV3c4()
-    vdata = GeomVertexData("square", vformat, Geom.UHStatic)
-    vdata.setNumRows(4)
 
+    # Allocate the vertex buffer. "square" is just a debug name; UHStatic tells the
+    # GPU this data won't change after upload (enables optimization).
+    vdata = GeomVertexData("square", vformat, Geom.UHStatic)
+    vdata.setNumRows(4)  # pre-allocate exactly 4 rows (one per corner)
+
+    # GeomVertexWriter is a cursor into the vertex buffer for a specific column.
+    # Each addData* call writes one value and advances the cursor by one row.
     vertex = GeomVertexWriter(vdata, "vertex")
     color_w = GeomVertexWriter(vdata, "color")
 
-    # Four corners in XZ plane, half-side = 1
-    vertex.addData3(1, 0, 1)    # front-right
+    # Write the four corners in XZ plane (Y=0), half-side = 1.
+    # Each vertex.addData3 + color_w.addData4 pair writes one complete vertex.
+    # The two writers advance in lockstep: row 0, row 1, row 2, row 3.
+    vertex.addData3(1, 0, 1)    # corner 0: +X, +Z (top-right)
     color_w.addData4(r, g, b, a)
-    vertex.addData3(1, 0, -1)   # back-right
+    vertex.addData3(1, 0, -1)   # corner 1: +X, -Z (bottom-right)
     color_w.addData4(r, g, b, a)
-    vertex.addData3(-1, 0, -1)  # back-left
+    vertex.addData3(-1, 0, -1)  # corner 2: -X, -Z (bottom-left)
     color_w.addData4(r, g, b, a)
-    vertex.addData3(-1, 0, 1)   # front-left
+    vertex.addData3(-1, 0, 1)   # corner 3: -X, +Z (top-left)
     color_w.addData4(r, g, b, a)
 
+    # A rectangle needs two triangles. addVertices(i, j, k) references corners by
+    # their row index in the vertex buffer (counter-clockwise winding = front face).
+    # Triangle 0-1-2 covers the bottom-right half; 0-2-3 covers the top-left half.
     tris = GeomTriangles(Geom.UHStatic)
     tris.addVertices(0, 1, 2)
     tris.addVertices(0, 2, 3)
-    tris.closePrimitive()
+    tris.closePrimitive()  # signals that the index list is complete
 
+    # Geom bundles a vertex buffer with one or more index primitives (our triangles).
     geom = Geom(vdata)
     geom.addPrimitive(tris)
 
+    # GeomNode is a scene-graph node that holds renderable Geom objects.
+    # addGeom attaches our geometry; the node can then be attached to the scene with
+    # render.attachNewNode(node) or NodePath(node).
     node = GeomNode("square")
     node.addGeom(geom)
     return node
