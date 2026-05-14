@@ -310,6 +310,11 @@ class TriggerHandler(WorkerProcess):
         x_min, x_max, y_min, y_max = self._get_fov_at_z(z)
         return x_min <= x <= x_max and y_min <= y <= y_max
 
+    def is_in_xy_zone(self, x: float, y: float, z: float) -> bool:
+        """Check if a point is within the trigger zone x/y bounds only (ignores z)."""
+        x_min, x_max, y_min, y_max = self._get_fov_at_z(z)
+        return x_min <= x <= x_max and y_min <= y <= y_max
+
     def process_message(self, message_data: Dict[str, Any]) -> None:
         """Process a message from the Braid server."""
         try:
@@ -420,6 +425,7 @@ class TriggerHandler(WorkerProcess):
         """
         x, y, z = tracked_obj.current_x, tracked_obj.current_y, tracked_obj.current_z
         in_zone_now = self.is_in_trigger_zone(x, y, z)
+        in_xy_zone_now = self.is_in_xy_zone(x, y, z)
 
         if not tracked_obj.in_zone and in_zone_now:
             # Object just entered the zone — check all entry gates
@@ -461,8 +467,8 @@ class TriggerHandler(WorkerProcess):
             tracked_obj.zone_enter_time = time.time()
             self._send_zone_enter(tracked_obj)
 
-        elif tracked_obj.in_zone and not in_zone_now:
-            # Left the zone — emit ZONE_EXIT immediately
+        elif tracked_obj.in_zone and not in_xy_zone_now:
+            # Left the zone (x/y only — z drift does not trigger exit)
             self._send_zone_exit(tracked_obj, reason="left_fov")
             tracked_obj.in_zone = False
             tracked_obj.zone_enter_time = None
