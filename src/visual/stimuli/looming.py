@@ -58,8 +58,7 @@ def compute_exponential_size(
     """
     if initial_deg <= 0 or final_deg <= 0:
         raise ValueError(
-            f"initial_deg and final_deg must be > 0, "
-            f"got {initial_deg}, {final_deg}"
+            f"initial_deg and final_deg must be > 0, got {initial_deg}, {final_deg}"
         )
     if duration_ms <= 0:
         return final_deg
@@ -202,4 +201,6 @@ class LoomingStimulus(BaseStimulus):
             return compute_exponential_size(
                 t_ms, self._duration_ms, self._initial_deg, self._final_deg
             )
-        return compute_linear_size(t_ms, self._duration_ms, self._initial_deg, self._final_deg)
+        return compute_linear_size(
+            t_ms, self._duration_ms, self._initial_deg, self._final_deg
+        )

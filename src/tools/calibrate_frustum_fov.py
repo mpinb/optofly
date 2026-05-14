@@ -61,7 +61,7 @@ def _parse_chunk(chunk: str) -> dict:
         raise ValueError(f"Unexpected event line: {lines[0]!r}")
     if not lines[1].startswith(_DATA_PREFIX):
         raise ValueError(f"Unexpected data line: {lines[1]!r}")
-    return json.loads(lines[1][len(_DATA_PREFIX):])
+    return json.loads(lines[1][len(_DATA_PREFIX) :])
 
 
 # ---------------------------------------------------------------------------

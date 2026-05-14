@@ -328,14 +328,24 @@ def _run_single_sweep(
 ) -> tuple[float, np.ndarray, np.ndarray, dict[str, float], bool]:
     """One full coarse+fine sweep. Returns (best_dpt, all_dpts, all_vals, params, fit_ok)."""
     coarse_dpts = np.arange(MIN_DPT, MAX_DPT + COARSE_STEP * 0.5, COARSE_STEP)
-    coarse_vals = sweep(cam, img, lens, coarse_dpts, roi_slice, display_window=display_window)
+    coarse_vals = sweep(
+        cam, img, lens, coarse_dpts, roi_slice, display_window=display_window
+    )
     coarse_peak_idx = int(np.argmax(coarse_vals))
     coarse_peak_dpt = float(coarse_dpts[coarse_peak_idx])
 
     fine_lo = max(MIN_DPT, coarse_peak_dpt - FINE_HALF_RANGE)
     fine_hi = min(MAX_DPT, coarse_peak_dpt + FINE_HALF_RANGE)
     fine_dpts = np.arange(fine_lo, fine_hi + FINE_STEP * 0.5, FINE_STEP)
-    fine_vals = sweep(cam, img, lens, fine_dpts, roi_slice, settle_s=FINE_SETTLE_S, display_window=display_window)
+    fine_vals = sweep(
+        cam,
+        img,
+        lens,
+        fine_dpts,
+        roi_slice,
+        settle_s=FINE_SETTLE_S,
+        display_window=display_window,
+    )
 
     all_dpts = np.concatenate([coarse_dpts, fine_dpts])
     all_vals = np.concatenate([coarse_vals, fine_vals])
@@ -875,7 +885,9 @@ def _run_automated(
     """Automated calibration: motor moves the tag upward, autofocus at each position."""
     step_size_mm = 200.0 / args.measurements
 
-    input("Position the AprilTag at the bottom of the range, then press Enter to start. ")
+    input(
+        "Position the AprilTag at the bottom of the range, then press Enter to start. "
+    )
     collected: list[tuple[float, float]] = []
     failed: list[int] = []
 
@@ -884,8 +896,12 @@ def _run_automated(
             print(f"\n--- [{i + 1}/{args.measurements}] ---")
 
             best_dpt = run_autofocus(
-                ximea_cam, ximea_img, lens, roi_slice,
-                k=args.sweeps, show_plot=False,
+                ximea_cam,
+                ximea_img,
+                lens,
+                roi_slice,
+                k=args.sweeps,
+                show_plot=False,
             )
 
             z = run_tag_detection(
@@ -908,7 +924,9 @@ def _run_automated(
         print("\nInterrupted — proceeding with collected data.")
 
     if failed:
-        print(f"\nWARNING: {len(failed)} position(s) skipped due to failed detection: {failed}")
+        print(
+            f"\nWARNING: {len(failed)} position(s) skipped due to failed detection: {failed}"
+        )
 
     if collected:
         _sort_csv(output_path)
@@ -997,8 +1015,16 @@ def main() -> None:
     try:
         if motor is not None:
             _run_automated(
-                args, output_path, cameras_cal, open_ids, basler_cams,
-                ximea_cam, ximea_img, lens, roi_slice, motor,
+                args,
+                output_path,
+                cameras_cal,
+                open_ids,
+                basler_cams,
+                ximea_cam,
+                ximea_img,
+                lens,
+                roi_slice,
+                motor,
             )
         else:
             while True:
@@ -1011,17 +1037,27 @@ def main() -> None:
                 # 2+3. Autofocus + tag detection — retry loop
                 while True:
                     best_dpt = run_autofocus(
-                        ximea_cam, ximea_img, lens, roi_slice, k=args.sweeps,
+                        ximea_cam,
+                        ximea_img,
+                        lens,
+                        roi_slice,
+                        k=args.sweeps,
                         display_window=PREVIEW_WINDOW,
                     )
 
                     z = run_tag_detection(
-                        basler_cams, open_ids, cameras_cal, args.num_frames, args.tag_family
+                        basler_cams,
+                        open_ids,
+                        cameras_cal,
+                        args.num_frames,
+                        args.tag_family,
                     )
                     if z is None:
                         print("No valid Z measured.")
                         ans = (
-                            input("R=retry  Q=quit  Enter=skip position: ").strip().lower()
+                            input("R=retry  Q=quit  Enter=skip position: ")
+                            .strip()
+                            .lower()
                         )
                         if ans == "q":
                             break

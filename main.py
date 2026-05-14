@@ -21,7 +21,12 @@ from src.processes.camera import RustCameraProcess as CameraProcess
 from src.processes.lens import LiquidLens
 from src.utils.braid import check_braid_folder_exists, copy_csv_files_to_braid
 from src.utils.logger import configure_process_logging
-from src.utils.metadata import collect_metadata, write_metadata, append_metadata_to_csv, extract_config_columns
+from src.utils.metadata import (
+    collect_metadata,
+    write_metadata,
+    append_metadata_to_csv,
+    extract_config_columns,
+)
 from src.monitoring.server import run_server
 
 

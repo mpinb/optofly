@@ -1,5 +1,4 @@
 import math
-import pytest
 from src.visual.process import braid_to_world_heading
 
 

@@ -248,7 +248,9 @@ class OptoTriggerWorker(WorkerProcess):
         if self.is_enabled:
             self.logger.info("OptoTriggerWorker process started (stimulation active).")
         else:
-            self.logger.info("OptoTriggerWorker process started (backlight only, stimulation disabled).")
+            self.logger.info(
+                "OptoTriggerWorker process started (backlight only, stimulation disabled)."
+            )
 
         try:
             while self.is_running and not self.stop_event.is_set():

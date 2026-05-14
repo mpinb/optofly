@@ -220,6 +220,7 @@ def test_timeout_emits_zone_exit(handler):
 # Frustum zone tests
 # ---------------------------------------------------------------------------
 
+
 def configure_frustum_trigger(h):
     """Wire up a frustum zone for testing without touching config files."""
     h.fov_frustum = True

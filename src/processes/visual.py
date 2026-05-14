@@ -497,8 +497,11 @@ def _main():
 
     parser = argparse.ArgumentParser(description="Visual stimuli (Panda3D)")
     parser.add_argument("--config", default="configs/config.toml")
-    parser.add_argument("--standalone", action="store_true",
-                        help="Run without ZMQ in a small test window")
+    parser.add_argument(
+        "--standalone",
+        action="store_true",
+        help="Run without ZMQ in a small test window",
+    )
     # Legacy modes still routed to old process:
     parser.add_argument("--calibrate", action="store_true")
     parser.add_argument("--calibrate-mapping", action="store_true")

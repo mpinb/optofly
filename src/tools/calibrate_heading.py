@@ -59,8 +59,8 @@ _DOT_COLORS = [
     (1.0, 0.5, 0.0),
 ]
 
-DOT_VISUAL_ANGLE_DEG = 15.0   # diameter of the calibration dot
-N_SAMPLES = 50                 # Braid position samples to collect per screen
+DOT_VISUAL_ANGLE_DEG = 15.0  # diameter of the calibration dot
+N_SAMPLES = 50  # Braid position samples to collect per screen
 COLLECT_TIMEOUT_S = 10.0
 
 
@@ -84,8 +84,10 @@ class _BraidPositionReader(threading.Thread):
         while not self._stop.is_set():
             try:
                 resp = session.get(
-                    self._url, stream=True,
-                    headers={"Accept": "text/event-stream"}, timeout=10,
+                    self._url,
+                    stream=True,
+                    headers={"Accept": "text/event-stream"},
+                    timeout=10,
                 )
                 resp.raise_for_status()
                 for chunk in resp.iter_content(chunk_size=None, decode_unicode=True):
@@ -97,9 +99,7 @@ class _BraidPositionReader(threading.Thread):
                         obj = msg.get("Update") or msg.get("Birth")
                         if isinstance(obj, dict):
                             with self._lock:
-                                self._samples.append(
-                                    (float(obj["x"]), float(obj["y"]))
-                                )
+                                self._samples.append((float(obj["x"]), float(obj["y"])))
                     except Exception:
                         pass
             except Exception:
@@ -180,7 +180,7 @@ def fit_calibration(
                 for (world, _), ba in zip(measurements, braid_angles)
             ]
             rms_deg = math.degrees(
-                math.sqrt(sum(r ** 2 for r in residuals) / len(residuals))
+                math.sqrt(sum(r**2 for r in residuals) / len(residuals))
             )
             if best is None or rms_deg < best[2]:
                 best = (offset, flip, rms_deg)
@@ -197,9 +197,14 @@ def fit_calibration(
 def _build_dot(heading_deg: float, dist_cm: float, color_rgb: tuple) -> object:
     """Return a GeomNode for a unit disk; caller sets scale and position."""
     from panda3d.core import (
-        Geom, GeomNode, GeomTriangles,
-        GeomVertexData, GeomVertexFormat, GeomVertexWriter,
+        Geom,
+        GeomNode,
+        GeomTriangles,
+        GeomVertexData,
+        GeomVertexFormat,
+        GeomVertexWriter,
     )
+
     r, g, b = color_rgb
     n = 48
     vformat = GeomVertexFormat.getV3c4()
@@ -244,9 +249,9 @@ class HeadingCalibrationApp:
     """Panda3D app that drives the per-screen calibration sequence."""
 
     # Internal states
-    _WAITING    = "waiting"     # showing dot, waiting for Enter
+    _WAITING = "waiting"  # showing dot, waiting for Enter
     _COLLECTING = "collecting"  # background thread gathering Braid data
-    _DONE       = "done"        # all screens collected
+    _DONE = "done"  # all screens collected
 
     def __init__(
         self,
@@ -263,6 +268,7 @@ class HeadingCalibrationApp:
 
         # Build scene
         from src.visual.scene import ArenaScene
+
         self._scene = ArenaScene(
             viewing_distance_cm=viewing_distance_cm,
             camera_headings=[_HEADING_DEG[d] for d in screen_mapping],
@@ -331,9 +337,7 @@ class HeadingCalibrationApp:
             else:
                 self._state = self._COLLECTING
                 self._collect_done.clear()
-                threading.Thread(
-                    target=self._collect_thread, daemon=True
-                ).start()
+                threading.Thread(target=self._collect_thread, daemon=True).start()
 
         elif self._state == self._COLLECTING and self._collect_done.is_set():
             # Back in the main thread — safe to modify scene graph
@@ -363,7 +367,7 @@ class HeadingCalibrationApp:
         self._dot = _attach_dot(
             self._scene.render,
             _HEADING_DEG[screen],
-            self._dist * 0.8,   # 20 % inside cylinder so depth test passes
+            self._dist * 0.8,  # 20 % inside cylinder so depth test passes
             color,
         )
         self._state = self._WAITING
@@ -372,7 +376,8 @@ class HeadingCalibrationApp:
             f"(heading {_HEADING_DEG[screen]:.0f}°)  "
             f"color={color}\n"
             "Place target in front of dot, then press Enter... ",
-            end="", flush=True,
+            end="",
+            flush=True,
         )
 
     # ------------------------------------------------------------------
@@ -437,7 +442,9 @@ def _save_to_config(vs_path: Path, offset_rad: float, flip: bool) -> None:
             new = re.sub(
                 r"(\[visual_stimuli\.arena\][^\[]*)",
                 rf"\1{key} = {value}\n",
-                new, count=1, flags=re.DOTALL,
+                new,
+                count=1,
+                flags=re.DOTALL,
             )
         return new
 
@@ -457,11 +464,13 @@ def main() -> None:
     )
     parser.add_argument("--config", default="configs/config.toml")
     parser.add_argument(
-        "--standalone", action="store_true",
+        "--standalone",
+        action="store_true",
         help="Run without Braid (injects synthetic data for UI testing)",
     )
     parser.add_argument(
-        "--screens", nargs="+",
+        "--screens",
+        nargs="+",
         choices=["North", "East", "South", "West"],
         metavar="DIR",
         help="Calibrate only these screens (default: full screen_mapping order)",
@@ -503,9 +512,12 @@ def main() -> None:
         print(f"Connecting to Braid at {braid_url} ... ", end="", flush=True)
         try:
             import requests as _req
+
             _req.get(braid_url, timeout=3).raise_for_status()
         except Exception as e:
-            print(f"FAILED\nCannot reach Braid: {e}\nRun with --standalone for UI testing.")
+            print(
+                f"FAILED\nCannot reach Braid: {e}\nRun with --standalone for UI testing."
+            )
             sys.exit(1)
         braid_reader = _BraidPositionReader(braid_url)
         braid_reader.start()
@@ -528,8 +540,7 @@ def main() -> None:
     # --- Fit ---------------------------------------------------------------
     if len(measurements) < 2:
         print(
-            f"\nOnly {len(measurements)} point(s) collected — need ≥ 2. "
-            "Nothing saved."
+            f"\nOnly {len(measurements)} point(s) collected — need ≥ 2. Nothing saved."
         )
         sys.exit(1)
 
@@ -538,7 +549,9 @@ def main() -> None:
     print("\n" + "=" * 60)
     print("RESULT")
     print("=" * 60)
-    print(f"  braid_heading_offset_rad = {offset_rad:.6f}  ({math.degrees(offset_rad):.2f}°)")
+    print(
+        f"  braid_heading_offset_rad = {offset_rad:.6f}  ({math.degrees(offset_rad):.2f}°)"
+    )
     print(f"  braid_heading_flip       = {flip}")
     print(f"  RMS residual             = {rms_deg:.2f}°")
     if rms_deg > 10.0:

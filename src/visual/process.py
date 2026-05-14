@@ -23,9 +23,7 @@ from src.visual.stimuli.looming import LoomingStimulus
 from src.visual.stimuli.oscillating_square import OscillatingSquare
 
 
-def braid_to_world_heading(
-    braid_rad: float, offset_rad: float, flip: bool
-) -> float:
+def braid_to_world_heading(braid_rad: float, offset_rad: float, flip: bool) -> float:
     """Convert raw Braid heading to arena world heading in degrees.
 
     Args:
@@ -124,9 +122,7 @@ class VisualProcess(WorkerProcess):
         self._initialize_stimuli(cfg)
 
         self._scene.taskMgr.add(self._zmq_poll_task, "zmq_poll", sort=0)
-        self._scene.taskMgr.add(
-            self._stimulus_update_task, "stimulus_update", sort=1
-        )
+        self._scene.taskMgr.add(self._stimulus_update_task, "stimulus_update", sort=1)
 
         self._scene.run()  # blocks until finalizeExit() is called
 
@@ -172,9 +168,7 @@ class VisualProcess(WorkerProcess):
     def _setup_csv(self, cfg: dict) -> Optional[CSVWriter]:
         log_file = cfg.get("log_file", "stim.csv")
         path = (
-            str(Path(self.braid_folder) / log_file)
-            if self.braid_folder
-            else log_file
+            str(Path(self.braid_folder) / log_file) if self.braid_folder else log_file
         )
         return CSVWriter(filepath=path)
 
@@ -199,9 +193,7 @@ class VisualProcess(WorkerProcess):
             )
 
         if cfg.get("oscillating_square", {}).get("enabled", False):
-            stim = OscillatingSquare(
-                cfg.get("oscillating_square", {}), self._scene
-            )
+            stim = OscillatingSquare(cfg.get("oscillating_square", {}), self._scene)
             stim.setup()
             self._stimuli.append(stim)
             self.logger.info("Registered: OscillatingSquare")
@@ -246,9 +238,7 @@ class VisualProcess(WorkerProcess):
 
     def _handle_zone_enter(self, data: dict) -> None:
         braid_rad = data.get("mean_heading", 0.0)
-        world_heading = braid_to_world_heading(
-            braid_rad, self._offset_rad, self._flip
-        )
+        world_heading = braid_to_world_heading(braid_rad, self._offset_rad, self._flip)
         self.logger.info(
             "ZONE_ENTER obj=%s world_heading=%.1f deg",
             data.get("obj_id"),

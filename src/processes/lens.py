@@ -52,24 +52,32 @@ class LensCalibration:
         elif model == "quadratic":
             # polyfit returns [a, b, c] for degree 2: dpt = a*z² + b*z + c
             _a, _b, _c = np.polyfit(z, dpt, 2)
-            self._predict = lambda z_val, a=float(_a), b=float(_b), c=float(_c): (a * z_val + b) * z_val + c
+            self._predict = lambda z_val, a=float(_a), b=float(_b), c=float(_c): (
+                (a * z_val + b) * z_val + c
+            )
         elif model == "power":
             from scipy.optimize import curve_fit
+
             # dpt = a * z^b + c; initial guess derived from data range
             popt, _ = curve_fit(
-                lambda z, a, b, c: a * z ** b + c,
-                z, dpt, p0=[20.0, 1.5, -1.0],
+                lambda z, a, b, c: a * z**b + c,
+                z,
+                dpt,
+                p0=[20.0, 1.5, -1.0],
                 bounds=([0, 0.1, -np.inf], [np.inf, 5.0, np.inf]),
                 maxfev=10000,
             )
             _a, _b, _c = (float(v) for v in popt)
-            self._predict = lambda z_val, a=_a, b=_b, c=_c: a * z_val ** b + c
+            self._predict = lambda z_val, a=_a, b=_b, c=_c: a * z_val**b + c
         else:  # inverse
             from scipy.optimize import curve_fit
+
             # dpt = a / (z - b) + c; b must be negative (pole below measurement range)
             popt, _ = curve_fit(
                 lambda z, a, b, c: a / (z - b) + c,
-                z, dpt, p0=[0.05, -0.3, 5.0],
+                z,
+                dpt,
+                p0=[0.05, -0.3, 5.0],
                 bounds=([0, -np.inf, -np.inf], [np.inf, 0, np.inf]),
                 maxfev=10000,
             )
@@ -81,7 +89,9 @@ class LensCalibration:
         return self._predict(z)
 
 
-def setup_lens_calibration(calibration_file: str, model: str = "quadratic") -> LensCalibration:
+def setup_lens_calibration(
+    calibration_file: str, model: str = "quadratic"
+) -> LensCalibration:
     try:
         data = np.genfromtxt(calibration_file, delimiter=",", names=True)
         return LensCalibration(data["z"], data["dpt"], model=model)

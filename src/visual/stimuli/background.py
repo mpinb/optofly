@@ -42,7 +42,8 @@ def _generate_random_texture(
                 for y in range(row, min(row + square_size_px, height)):
                     for x in range(col, min(col + square_size_px, width)):
                         img.setXel(
-                            x, y,
+                            x,
+                            y,
                             fg_color[0] / 255.0,
                             fg_color[1] / 255.0,
                             fg_color[2] / 255.0,
@@ -102,7 +103,7 @@ def _build_cylinder_geom(
             b = base + i + 1
             c = base + i + verts_per_row + 1
             d = base + i + verts_per_row
-            
+
             # Triangle 1: a -> b -> c
             tris.addVertices(a, b, c)
             # Triangle 2: a -> c -> d
@@ -143,8 +144,8 @@ class BackgroundStimulus(BaseStimulus):
         # Create Cylinder
         cylinder_node = _build_cylinder_geom(radius, height)
         cylinder_np = self.scene.render.attachNewNode(cylinder_node)
-        cylinder_np.setTwoSided(True) # Safety backup for culling
-        
+        cylinder_np.setTwoSided(True)  # Safety backup for culling
+
         cyl_tex = Texture("cylinder_tex")
         cyl_tex.load(tex_img)
         cyl_tex.setWrapU(Texture.WM_repeat)
@@ -155,7 +156,7 @@ class BackgroundStimulus(BaseStimulus):
         circumference = 2.0 * math.pi * radius
         panel_width_cm = circumference / num_screens
         tile_u = float(num_screens)
-        
+
         # Tile vertically to maintain square aspect ratio on the screen.
         # tile_v = Physical Height / (Physical width per texture repetition * texture aspect)
         tile_v = height / (panel_width_cm * 1080.0 / 1920.0)

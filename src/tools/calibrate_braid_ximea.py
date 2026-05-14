@@ -60,7 +60,7 @@ def _parse_chunk(chunk: str) -> dict:
         raise ValueError(f"Unexpected event line: {lines[0]!r}")
     if not lines[1].startswith(_DATA_PREFIX):
         raise ValueError(f"Unexpected data line: {lines[1]!r}")
-    return json.loads(lines[1][len(_DATA_PREFIX):])
+    return json.loads(lines[1][len(_DATA_PREFIX) :])
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +78,9 @@ def _detect_bright_spot(
     Returns (u, v) pixel coordinates, or None if no blob passes the threshold.
     """
     _, mask = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
-    n_labels, _, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    n_labels, _, stats, centroids = cv2.connectedComponentsWithStats(
+        mask, connectivity=8
+    )
     best_label = -1
     best_area = min_area - 1
     for label in range(1, n_labels):
@@ -227,7 +229,9 @@ def _write_fov_to_config(config_path: str, fov: dict[str, float]) -> None:
         replacement = rf"\g<1>{val:.5f}"
         new_text, n = re.subn(pattern, replacement, text, flags=re.MULTILINE)
         if n == 0:
-            raise RuntimeError(f"Key '{key}' not found under [camera.FOV] in {config_path}")
+            raise RuntimeError(
+                f"Key '{key}' not found under [camera.FOV] in {config_path}"
+            )
         text = new_text
     Path(config_path).write_text(text)
 
@@ -285,7 +289,7 @@ def _draw_overlay(
         cv2.drawMarker(vis, (u, v), _GREEN, cv2.MARKER_CROSS, 14, 2)
         cv2.putText(
             vis,
-            f"{i+1}: ({wp[0]:.3f},{wp[1]:.3f},{wp[2]:.3f})",
+            f"{i + 1}: ({wp[0]:.3f},{wp[1]:.3f},{wp[2]:.3f})",
             (u + 8, v - 6),
             _FONT,
             0.38,
@@ -311,14 +315,14 @@ def _draw_overlay(
         lines.append(
             (
                 f"  x [{fov['x_min']:.4f}, {fov['x_max']:.4f}]  "
-                f"({(fov['x_max']-fov['x_min'])*1000:.1f} mm wide)",
+                f"({(fov['x_max'] - fov['x_min']) * 1000:.1f} mm wide)",
                 _CYAN,
             )
         )
         lines.append(
             (
                 f"  y [{fov['y_min']:.4f}, {fov['y_max']:.4f}]  "
-                f"({(fov['y_max']-fov['y_min'])*1000:.1f} mm tall)",
+                f"({(fov['y_max'] - fov['y_min']) * 1000:.1f} mm tall)",
                 _CYAN,
             )
         )
@@ -392,8 +396,8 @@ def _print_fov(fov: dict, z_ref: float, frame_w: int, frame_h: int) -> None:
     print(f"    y_min = {fov['y_min']:.5f}")
     print(f"    y_max = {fov['y_max']:.5f}")
     print(
-        f"    width  = {(fov['x_max'] - fov['x_min'])*1000:.1f} mm  "
-        f"height = {(fov['y_max'] - fov['y_min'])*1000:.1f} mm"
+        f"    width  = {(fov['x_max'] - fov['x_min']) * 1000:.1f} mm  "
+        f"height = {(fov['y_max'] - fov['y_min']) * 1000:.1f} mm"
     )
 
 
@@ -416,7 +420,10 @@ def main():
         "--fps", type=float, default=10.0, help="Preview frame rate in Hz (default: 10)"
     )
     parser.add_argument(
-        "--exposure", type=int, default=2000, help="Exposure time in microseconds (default: 2000)"
+        "--exposure",
+        type=int,
+        default=2000,
+        help="Exposure time in microseconds (default: 2000)",
     )
     parser.add_argument(
         "--z-ref",
@@ -449,7 +456,9 @@ def main():
     print(f"Connected to Braid SSE at {braid_cfg.url}")
 
     try:
-        cam, img_obj, frame_w, frame_h = _open_ximea_camera(fps=args.fps, exposure_us=args.exposure)
+        cam, img_obj, frame_w, frame_h = _open_ximea_camera(
+            fps=args.fps, exposure_us=args.exposure
+        )
         print(f"Ximea camera opened: {frame_w}×{frame_h} @ {args.fps} fps")
     except Exception as e:
         print(f"ERROR: Cannot open Ximea camera: {e}")
@@ -528,7 +537,9 @@ def main():
             def _record_point(u: float, v: float, source: str) -> None:
                 braid_pos = tracker.position
                 if braid_pos is None:
-                    print("  [skip] No BRAID fix — move the target into the tracking volume first")
+                    print(
+                        "  [skip] No BRAID fix — move the target into the tracking volume first"
+                    )
                     return
                 world_pts.append(braid_pos)
                 pixel_pts.append((float(u), float(v)))
@@ -585,7 +596,7 @@ def main():
                     rp = pixel_pts.pop()
                     reprojection_error = None
                     fov = fov_pixels = None
-                    print(f"  Undid point {len(world_pts)+1}: BRAID {rw}  pixel {rp}")
+                    print(f"  Undid point {len(world_pts) + 1}: BRAID {rw}  pixel {rp}")
                 else:
                     print("  Nothing to undo")
 
@@ -598,7 +609,9 @@ def main():
                         reprojection_error = rms
                         fov = fov_pixels = None
                         quality = "good" if rms < 3 else "consider adding more points"
-                        print(f"  DLT fit OK — RMS reprojection error: {rms:.2f} px ({quality})")
+                        print(
+                            f"  DLT fit OK — RMS reprojection error: {rms:.2f} px ({quality})"
+                        )
                         print("  Press 'v' to compute the camera FOV, 's' to save.")
                     except Exception as e:
                         print(f"  Fit failed: {e}")
@@ -612,7 +625,9 @@ def main():
                     cur_z = _ask_z_ref(z_ref, world_pts)
                     z_ref = cur_z
                     try:
-                        fov, fov_pixels = _compute_fov(calibration, frame_w, frame_h, cur_z)
+                        fov, fov_pixels = _compute_fov(
+                            calibration, frame_w, frame_h, cur_z
+                        )
                         _print_fov(fov, cur_z, frame_w, frame_h)
                         print(
                             "  The orange rectangle on the frame shows the projected FOV boundary."
@@ -626,7 +641,9 @@ def main():
                 if not calibration.is_fitted:
                     if len(world_pts) >= 6:
                         try:
-                            rms = calibration.fit(np.array(world_pts), np.array(pixel_pts))
+                            rms = calibration.fit(
+                                np.array(world_pts), np.array(pixel_pts)
+                            )
                             reprojection_error = rms
                             fov = fov_pixels = None
                         except Exception as e:
@@ -648,7 +665,9 @@ def main():
                     cur_z = _ask_z_ref(z_ref, world_pts)
                     z_ref = cur_z
                     try:
-                        fov, fov_pixels = _compute_fov(calibration, frame_w, frame_h, cur_z)
+                        fov, fov_pixels = _compute_fov(
+                            calibration, frame_w, frame_h, cur_z
+                        )
                         _print_fov(fov, cur_z, frame_w, frame_h)
                     except Exception as e:
                         print(f"  FOV computation failed: {e}")
@@ -656,7 +675,9 @@ def main():
 
                     # Ask whether to write the FOV to config
                     ans = (
-                        input(f"\n  Write these FOV values to [camera.FOV] in {args.config}? [y/N] ")
+                        input(
+                            f"\n  Write these FOV values to [camera.FOV] in {args.config}? [y/N] "
+                        )
                         .strip()
                         .lower()
                     )
@@ -666,9 +687,13 @@ def main():
                             print(f"  ✓ [camera.FOV] updated in {args.config}")
                         except Exception as e:
                             print(f"  WARNING: could not update config: {e}")
-                            print("  Add the values to [camera.FOV] in config.toml manually.")
+                            print(
+                                "  Add the values to [camera.FOV] in config.toml manually."
+                            )
                     else:
-                        print("  Config not modified.  Add the values manually if needed.")
+                        print(
+                            "  Config not modified.  Add the values manually if needed."
+                        )
 
     finally:
         stop_event.set()

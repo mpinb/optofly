@@ -36,8 +36,8 @@ class KalmanFilter:
         self.P = np.eye(2) * initial_covariance
 
         # Measurement matrices (1×2)
-        self.H_pos = np.array([[1.0, 0.0]])   # observes z
-        self.H_vel = np.array([[0.0, 1.0]])   # observes vz
+        self.H_pos = np.array([[1.0, 0.0]])  # observes z
+        self.H_vel = np.array([[0.0, 1.0]])  # observes vz
 
         # Measurement noise (1×1)
         self.R_pos = np.array([[measurement_noise]])
@@ -80,11 +80,15 @@ class KalmanFilter:
         Q = self.process_noise * (G @ G.T)
 
         z_meas = np.array([[z]])
-        self.x, self.P = _kalman_update(self.x, self.P, z_meas, F, self.H_pos, Q, self.R_pos)
+        self.x, self.P = _kalman_update(
+            self.x, self.P, z_meas, F, self.H_pos, Q, self.R_pos
+        )
 
         if vz is not None:
             vz_meas = np.array([[vz]])
-            self.x, self.P = _kalman_measurement_update(self.x, self.P, vz_meas, self.H_vel, self.R_vel)
+            self.x, self.P = _kalman_measurement_update(
+                self.x, self.P, vz_meas, self.H_vel, self.R_vel
+            )
 
     def predict(self, dt: float) -> float:
         """Return predicted z position `dt` seconds ahead."""

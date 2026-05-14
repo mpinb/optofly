@@ -151,7 +151,8 @@ class BaseStimulus(ABC):
         # Default: 1 cm inside the cylinder. Callers with large disks should
         # pass distance_cm explicitly (see LoomingStimulus for the formula).
         disk_dist = (
-            distance_cm if distance_cm is not None
+            distance_cm
+            if distance_cm is not None
             else self.scene.viewing_distance_cm - 1.0
         )
         x, y, z = angular_to_world_pos(heading_deg, elevation_deg, disk_dist)
