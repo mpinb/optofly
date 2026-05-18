@@ -18,11 +18,18 @@ struct CameraToml {
     #[serde(default = "default_buffers_queue_size")]
     buffers_queue_size: i32,
     save_folder: Option<String>,
+    #[serde(default)]
+    aeag: bool,
+    #[serde(default = "default_aeag_level")]
+    aeag_level: i32,
+    /// Max exposure limit for AE in µs. Defaults to 95% of the frame period.
+    ae_max_limit: Option<f32>,
 }
 
 fn default_exposure() -> f32 { 2000.0 }
 fn default_max_recording_time() -> f32 { 3.0 }
 fn default_buffers_queue_size() -> i32 { 32 }
+fn default_aeag_level() -> i32 { 50 }
 
 #[derive(Debug, Deserialize)]
 struct ZmqToml {
@@ -49,6 +56,10 @@ pub struct AppConfig {
     pub zmq_trigger_address: String,
     pub zmq_zone_enter_topic: String,
     pub zmq_zone_exit_topic: String,
+    pub aeag: bool,
+    pub aeag_level: i32,
+    /// Max AE exposure limit in µs (95% of frame period if not set in config).
+    pub ae_max_limit: f32,
 }
 
 impl AppConfig {
@@ -66,6 +77,9 @@ impl AppConfig {
             .or(cam.save_folder)
             .unwrap_or_else(|| "camera_videos".to_string());
 
+        let ae_max_limit = cam.ae_max_limit
+            .unwrap_or_else(|| 1_000_000.0 / cam.fps * 0.95);
+
         Ok(AppConfig {
             width: cam.resolution[0],
             height: cam.resolution[1],
@@ -77,6 +91,9 @@ impl AppConfig {
             zmq_trigger_address: format!("tcp://localhost:{}", zmq.trigger_port),
             zmq_zone_enter_topic: zmq.zone_enter_topic,
             zmq_zone_exit_topic: zmq.zone_exit_topic,
+            aeag: cam.aeag,
+            aeag_level: cam.aeag_level,
+            ae_max_limit,
         })
     }
 
