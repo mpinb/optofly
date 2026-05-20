@@ -117,8 +117,12 @@ class BaseStimulus(ABC):
         """Called once at startup. Create scene nodes using helper methods."""
 
     @abstractmethod
-    def on_trigger(self, heading_deg: float, trigger_data: dict) -> None:
-        """Called on ZONE_ENTER. heading_deg is Braid->world converted (degrees)."""
+    def on_trigger(self, heading_deg: float, trigger_data: dict) -> dict | None:
+        """Called on ZONE_ENTER. heading_deg is Braid->world converted (degrees).
+
+        Return a dict of stimulus parameters to log (merged into stim.csv row),
+        or None if nothing was logged / stimulus was inactive.
+        """
 
     @abstractmethod
     def update(self, dt: float) -> None:

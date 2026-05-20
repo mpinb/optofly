@@ -85,14 +85,22 @@ class OscillatingSquare(BaseStimulus):
         self._square.setTwoSided(True)
         self._square.stash()
 
-    def on_trigger(self, heading_deg: float, trigger_data: dict) -> None:
+    def on_trigger(self, heading_deg: float, trigger_data: dict) -> dict | None:
         if self._state != self.IDLE:
-            return
+            return None
         self._state = self.ACTIVE
         self._base_heading = heading_deg
         self._offset_deg = self._rng.choice(self._positions_deg)
         self._elapsed_ms = 0.0
         self._place_square(heading_deg + self._offset_deg)
+        return {
+            "square_stimulus_heading_deg": heading_deg + self._offset_deg,
+            "square_offset_deg": self._offset_deg,
+            "square_size_deg": self._size_deg,
+            "square_amplitude_deg": self._amplitude_deg,
+            "square_frequency_hz": self._frequency_hz,
+            "square_duration_ms": self._duration_ms,
+        }
 
     def update(self, dt: float) -> None:
         if self._state != self.ACTIVE:

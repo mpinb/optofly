@@ -162,8 +162,8 @@ class BackgroundStimulus(BaseStimulus):
         tile_v = height / (panel_width_cm * 1080.0 / 1920.0)
         cylinder_np.setTexScale(TextureStage.getDefault(), tile_u, tile_v)
 
-    def on_trigger(self, heading_deg: float, trigger_data: dict) -> None:
-        pass
+    def on_trigger(self, heading_deg: float, trigger_data: dict) -> dict | None:
+        return None
 
     def update(self, dt: float) -> None:
         pass

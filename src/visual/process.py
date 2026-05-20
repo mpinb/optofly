@@ -245,9 +245,12 @@ class VisualProcess(WorkerProcess):
             world_heading,
         )
 
+        stim_params: dict = {}
         for stim in self._stimuli:
             try:
-                stim.on_trigger(world_heading, data)
+                result = stim.on_trigger(world_heading, data)
+                if result:
+                    stim_params.update(result)
             except Exception:
                 self.logger.exception(
                     "Error in stimulus %s on_trigger", type(stim).__name__
@@ -260,5 +263,6 @@ class VisualProcess(WorkerProcess):
                     "obj_id": data.get("obj_id"),
                     "braid_heading_rad": braid_rad,
                     "world_heading_deg": world_heading,
+                    **stim_params,
                 }
             )

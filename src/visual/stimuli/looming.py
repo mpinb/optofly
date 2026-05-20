@@ -155,11 +155,18 @@ class LoomingStimulus(BaseStimulus):
             self.scene.viewing_distance_cm * math.cos(max_edge_rad) * 0.95
         )
 
-    def on_trigger(self, heading_deg: float, trigger_data: dict) -> None:
+    def on_trigger(self, heading_deg: float, trigger_data: dict) -> dict | None:
         if self._state != _State.IDLE:
-            return
+            return None
+        base = {
+            "looming_expansion_type": self._expansion_type,
+            "looming_initial_deg": self._initial_deg,
+            "looming_final_deg": self._final_deg,
+            "looming_duration_ms": self._duration_ms,
+            "looming_lv_ratio_ms": self._lv_ratio_ms,
+        }
         if self._rng.random() < self._sham_prob:
-            return
+            return {**base, "looming_sham": True, "looming_stimulus_heading_deg": None, "looming_offset_deg": None}
 
         offset_deg = self._balancer.next()
         self._stimulus_heading = heading_deg + offset_deg
@@ -172,6 +179,7 @@ class LoomingStimulus(BaseStimulus):
             color=self._color,
             distance_cm=self._disk_distance_cm,
         )
+        return {**base, "looming_sham": False, "looming_stimulus_heading_deg": self._stimulus_heading, "looming_offset_deg": offset_deg}
 
     def update(self, dt: float) -> None:
         if self._state == _State.IDLE or self._disk is None:
