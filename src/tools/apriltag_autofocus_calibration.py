@@ -394,8 +394,6 @@ def run_autofocus(
     Returns the (averaged) best-focus diopter.
     """
     best_dpts: list[float] = []
-    last_dpts = last_vals = last_params = None
-    last_fit_ok = False
 
     for i in range(k):
         print(f"\nSweep {i + 1}/{k}")
@@ -404,30 +402,18 @@ def run_autofocus(
         )
         print(f"  best focus: {best_dpt:+.4f} dpt")
         best_dpts.append(best_dpt)
-        last_dpts, last_vals, last_params, last_fit_ok = (
-            all_dpts,
-            all_vals,
-            params,
-            fit_ok,
-        )
+        last_dpts, last_vals, last_params, last_fit_ok = all_dpts, all_vals, params, fit_ok
 
     if k > 1:
-        averaged = _average_excluding_outliers(best_dpts)
-        print(f"\nFinal: {averaged:+.4f} dpt (avg of {k}, IQR filtered)")
-        best_dpt_final = averaged
+        best_dpt_final = _average_excluding_outliers(best_dpts)
+        print(f"\nFinal: {best_dpt_final:+.4f} dpt (avg of {k}, IQR filtered)")
     else:
         best_dpt_final = best_dpts[0]
 
     if show_plot:
         # Plot last sweep + final averaged diopter
         fit_x = np.linspace(last_dpts[0], last_dpts[-1], 500)
-        fit_y = lorentzian(
-            fit_x,
-            last_params["A"],
-            last_params["gamma"],
-            last_params["x0"],
-            last_params["c"],
-        )
+        fit_y = lorentzian(fit_x, **last_params)
 
         fig, ax = plt.subplots(figsize=(8, 5))
         ax.scatter(
@@ -1033,11 +1019,10 @@ def _run_automated(
                 while time.monotonic() < t_settle:
                     _pump_preview(ximea_cam, ximea_img, roi_slice)
                     cv2.waitKey(30)
-    except (KeyboardInterrupt, RuntimeError) as exc:
-        if isinstance(exc, RuntimeError):
-            print(f"\nMotor error: {exc} — stopping early.")
-        else:
-            print("\nInterrupted — proceeding with collected data.")
+    except RuntimeError as exc:
+        print(f"\nMotor error: {exc} — stopping early.")
+    except KeyboardInterrupt:
+        print("\nInterrupted — proceeding with collected data.")
 
     if failed:
         print(
@@ -1120,8 +1105,7 @@ def main() -> None:
         _run_motor_calibration(args.pico_port, args.step_delay_us, invert=args.invert_motor)
         return
 
-    import sys as _sys
-    _sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from src.hardware.lens import LensDriver
     from pypylon import pylon
     from ximea import xiapi
