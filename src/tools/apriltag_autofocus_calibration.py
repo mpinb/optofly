@@ -271,8 +271,8 @@ def sweep(
                 (int(roi_frame.shape[1] * PREVIEW_SCALE), int(roi_frame.shape[0] * PREVIEW_SCALE)),
             )
             display = cv2.cvtColor(display, cv2.COLOR_GRAY2BGR)
-            text = f"{label} {dpt:+.3f} dpt  focus={contrasts[i]:.0f}"
-            cv2.putText(display, text, (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1, cv2.LINE_AA)
+            cv2.putText(display, f"{label}  {dpt:+.3f} dpt", (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1, cv2.LINE_AA)
+            cv2.putText(display, f"focus={contrasts[i]:.0f}", (8, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1, cv2.LINE_AA)
             cv2.imshow(PREVIEW_WINDOW, display)
             cv2.waitKey(1)
     return contrasts
