@@ -50,13 +50,17 @@ ARGUMENTS
   --pico-port PATH      USB serial port for Raspberry Pi Pico motor stage
                         (e.g., /dev/ttyACM0). When set → automated mode.
   --measurements N      Number of measurement positions (default: 20).
-                        Only used with --pico-port.
-  --total-range-steps N Total motor steps for the full travel range.
-                        When set, step size = total_range_steps / (measurements − 1)
-                        and --step-size-steps is ignored.
+                        Spread evenly across the swept range. Only used with --pico-port.
+  --stroke-mm MM        Physical travel to cover, in mm (default: 235 = full stage).
+                        Measurements span this whole distance using --steps-per-mm,
+                        so by default the sweep covers the ENTIRE motor range.
+                        Set 0 to use --step-size-steps instead. Only used with --pico-port.
+  --steps-per-mm N      Motor steps per mm (default: 1666.67, from motor calibration).
+  --total-range-steps N Total motor steps for the full travel range. Overrides
+                        --stroke-mm. step size = total_range_steps / (measurements − 1).
                         Only used with --pico-port.
   --step-size-steps N   Steps to move between measurements (default: 100).
-                        Ignored when --total-range-steps is set.
+                        Only used when --total-range-steps unset and --stroke-mm is 0.
                         Only used with --pico-port.
   --step-delay-us N     Microseconds between steps for Pico motor
                         (default: 800, lower = faster).
@@ -205,6 +209,13 @@ def fit_lorentzian(dpts: np.ndarray, vals: np.ndarray) -> tuple[dict[str, float]
 # ---------------------------------------------------------------------------
 # Motor stage (GRBL over USB serial)
 # ---------------------------------------------------------------------------
+
+# Motor calibration (from --calibrate-motor: 10000 steps measured = 6 mm).
+# Hard-coded so a calibration run can cover the full stroke from --stroke-mm
+# without re-measuring each time.  Override with --steps-per-mm if it changes.
+STEPS_PER_MM = 1666.67
+# Physical travel of the linear stage (mm); default --stroke-mm.
+MOTOR_STROKE_MM = 235.0
 
 
 class PicoMotorStage:
@@ -990,11 +1001,28 @@ def _build_parser() -> argparse.ArgumentParser:
         "Only used with --pico-port.",
     )
     p.add_argument(
+        "--stroke-mm",
+        type=float,
+        default=MOTOR_STROKE_MM,
+        help=f"Physical travel to cover, in mm (default: {MOTOR_STROKE_MM:.0f} = full "
+        "stage). The --measurements positions are spread evenly across this whole "
+        "distance, using --steps-per-mm. Set to 0 to fall back to --step-size-steps. "
+        "Overridden by --total-range-steps. Only used with --pico-port.",
+    )
+    p.add_argument(
+        "--steps-per-mm",
+        type=float,
+        default=STEPS_PER_MM,
+        help=f"Motor steps per mm (default: {STEPS_PER_MM}, from motor calibration). "
+        "Used with --stroke-mm.",
+    )
+    p.add_argument(
         "--step-size-steps",
         type=int,
         default=100,
         help="Steps to move between measurements (default: 100). "
-        "Ignored when --total-range-steps is set. Only used with --pico-port.",
+        "Only used when --total-range-steps is unset and --stroke-mm is 0. "
+        "Only used with --pico-port.",
     )
     p.add_argument(
         "--step-delay-us",
@@ -1274,9 +1302,19 @@ def main() -> None:
         print(f"  Pico motor stage ready{' (inverted)' if args.invert_motor else ''}")
 
     # --- Resolve step size ---
+    # Precedence: explicit --total-range-steps > --stroke-mm (× steps/mm) >
+    # --step-size-steps.  --stroke-mm defaults to the full stage, so by default
+    # the measurements span the entire motor travel.
+    if args.pico_port and args.total_range_steps is None and args.stroke_mm > 0:
+        args.total_range_steps = round(args.steps_per_mm * args.stroke_mm)
+        print(
+            f"  Stroke {args.stroke_mm:.0f} mm × {args.steps_per_mm:.2f} steps/mm "
+            f"= {args.total_range_steps} steps (full-range sweep)"
+        )
+
     if args.pico_port and args.total_range_steps is not None:
         if args.measurements < 2:
-            raise SystemExit("--measurements must be >= 2 when using --total-range-steps")
+            raise SystemExit("--measurements must be >= 2 when using a full-range sweep")
         args.step_size_steps = args.total_range_steps // (args.measurements - 1)
         print(
             f"  Step size: {args.total_range_steps} total steps / "
