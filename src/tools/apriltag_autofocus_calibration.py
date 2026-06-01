@@ -246,13 +246,16 @@ class PicoMotorStage:
 # Diopter sweep
 # ---------------------------------------------------------------------------
 
-# Hardware settle time after each diopter change (seconds)
+# Hardware settle time after each diopter change (seconds).
+# Per the EL-16-40 datasheet the lens settles mechanically in ~25 ms (rings
+# for ~25 ms after a step), so these give comfortable margin.
 COARSE_SETTLE_S = 0.05
 FINE_SETTLE_S = 0.10
-# Time for the lens to physically descend to MIN_DPT after being commanded
-# there.  The lens releases fluid pressure slowly on the way down; 3 s is
-# enough for a ~3.5 dpt descent at typical operating conditions.
-LENS_SETTLE_S = 5.0
+# Settle after re-commanding the lens before a fine sweep.  Mechanical
+# settling is ~25 ms and the LensDriver 4 firmware handles temperature
+# compensation automatically (focal-power mode, ~0.05 dpt), so 0.5 s is
+# already ~20x the physical settling time.
+LENS_SETTLE_S = 0.5
 
 # Debug output directory for per-sweep Lorentzian fit plots.
 SWEEP_DEBUG_DIR = "/tmp/sweep_debug"
@@ -347,7 +350,9 @@ def run_preview_loop(cam: Any, img: Any, roi_slice: tuple[slice, slice]) -> bool
 MIN_DPT = -2.0
 MAX_DPT = 3.0
 COARSE_STEP = 0.1
-FINE_STEP = 0.01
+# Lens repeatability is ~0.02 dpt (EL-16-40 class 1), so finer steps measure
+# below the hardware noise floor — 0.02 is the meaningful resolution.
+FINE_STEP = 0.02
 FINE_HALF_RANGE = 0.8
 
 # ---------------------------------------------------------------------------
