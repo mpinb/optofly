@@ -400,15 +400,23 @@ def _run_single_sweep(
         label="fine",
     )
 
+    # Fit Lorentzian to fine data only — it has denser coverage and longer
+    # per-step settle than the coarse, so it's the more reliable estimate.
+    # Fall back to the coarse Lorentzian estimate if the fine fit fails.
+    fine_params, fine_fit_ok = fit_lorentzian(fine_dpts, fine_vals)
+    if fine_fit_ok:
+        best_dpt = fine_params["x0"]
+        params = fine_params
+        fit_ok = True
+    else:
+        best_dpt = coarse_peak_dpt
+        params = coarse_params
+        fit_ok = coarse_fit_ok
+
     all_dpts = np.concatenate([coarse_dpts, fine_dpts])
     all_vals = np.concatenate([coarse_vals, fine_vals])
-    order = np.argsort(all_dpts)
-    all_dpts, all_vals = all_dpts[order], all_vals[order]
 
-    params, fit_ok = fit_lorentzian(all_dpts, all_vals)
-    best_dpt = params["x0"] if fit_ok else coarse_peak_dpt
-
-    # Save debug plot: coarse + fine data with both Lorentzian fits.
+    # Save debug plot: coarse + fine data with their individual fits.
     global _sweep_idx
     os.makedirs(SWEEP_DEBUG_DIR, exist_ok=True)
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
@@ -418,20 +426,20 @@ def _run_single_sweep(
     if coarse_fit_ok:
         ax1.plot(x_c, lorentzian(x_c, **coarse_params), color="tab:orange", lw=1.5)
     ax1.axvline(coarse_peak_dpt, color="tab:red", ls="--", lw=1,
-                label=f"peak={coarse_peak_dpt:+.3f}")
+                label=f"coarse peak={coarse_peak_dpt:+.3f}")
     ax1.set_title("Coarse")
     ax1.set_xlabel("dpt")
     ax1.legend(fontsize=8)
     ax1.grid(True, alpha=0.3)
 
-    x_f = np.linspace(all_dpts[0], all_dpts[-1], 400)
+    x_f = np.linspace(fine_dpts[0], fine_dpts[-1], 400)
     ax2.scatter(coarse_dpts, coarse_vals, s=10, color="tab:blue", alpha=0.4, label="coarse")
     ax2.scatter(fine_dpts, fine_vals, s=15, color="tab:green", zorder=3, label="fine")
-    if fit_ok:
-        ax2.plot(x_f, lorentzian(x_f, **params), color="tab:orange", lw=1.5)
+    if fine_fit_ok:
+        ax2.plot(x_f, lorentzian(x_f, **fine_params), color="tab:orange", lw=1.5)
     ax2.axvline(best_dpt, color="tab:red", ls="--", lw=1,
                 label=f"best={best_dpt:+.4f}")
-    ax2.set_title("Combined fit")
+    ax2.set_title("Fine fit (final result)")
     ax2.set_xlabel("dpt")
     ax2.legend(fontsize=8)
     ax2.grid(True, alpha=0.3)
