@@ -154,6 +154,19 @@ def focus_metric(image: np.ndarray) -> float:
     return float(np.mean(gx * gx + gy * gy))
 
 
+def _lens_temp(lens: Any) -> float:
+    """Lens temperature in °C, or NaN if the driver can't report it.
+
+    The lens self-heats when actuated hard (long calibration sweeps).  Logging
+    it lets you check whether the calibration was done at a different
+    temperature than the experiment — a source of focal-power drift.
+    """
+    try:
+        return float(lens.get_temperature())
+    except Exception:  # noqa: BLE001
+        return float("nan")
+
+
 # ---------------------------------------------------------------------------
 # Lorentzian model
 # ---------------------------------------------------------------------------
@@ -472,6 +485,7 @@ def run_autofocus(
     Returns the (averaged) best-focus diopter.
     """
     best_dpts: list[float] = []
+    print(f"  lens temp: {_lens_temp(lens):.1f} °C")
 
     for i in range(k):
         print(f"\nSweep {i + 1}/{k}")
@@ -1246,7 +1260,7 @@ def main() -> None:
     # --- Open liquid lens ---
     lens = LensDriver(args.lens_port)
     lens.to_focal_power_mode()
-    print("  Liquid lens ready")
+    print(f"  Liquid lens ready  (temp: {_lens_temp(lens):.1f} °C)")
 
     # --- Open motor stage (automated mode only) ---
     motor: PicoMotorStage | None = None
