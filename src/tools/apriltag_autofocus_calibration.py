@@ -239,7 +239,7 @@ FINE_SETTLE_S = 0.10
 # Time for the lens to physically descend to MIN_DPT after being commanded
 # there.  The lens releases fluid pressure slowly on the way down; 3 s is
 # enough for a ~3.5 dpt descent at typical operating conditions.
-LENS_SETTLE_S = 3.0
+LENS_SETTLE_S = 5.0
 
 
 def sweep(
@@ -363,6 +363,14 @@ def _run_single_sweep(
     fine_lo = max(MIN_DPT, coarse_peak_dpt - FINE_HALF_RANGE)
     fine_hi = min(MAX_DPT, coarse_peak_dpt + FINE_HALF_RANGE)
     fine_dpts = np.arange(fine_lo, fine_hi + FINE_STEP * 0.5, FINE_STEP)
+
+    # The coarse sweep ends at MAX_DPT (~+3 dpt).  The lens must descend
+    # 2–4 dpt to reach fine_lo before the fine sweep starts ascending.
+    # Command fine_lo explicitly and wait for the lens to physically arrive
+    # before taking the first fine measurement.
+    lens.set_diopter(float(fine_lo))
+    time.sleep(LENS_SETTLE_S)
+
     fine_vals = sweep(
         cam,
         img,
