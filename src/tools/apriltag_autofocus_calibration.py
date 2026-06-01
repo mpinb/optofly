@@ -321,9 +321,9 @@ def run_preview_loop(cam: Any, img: Any, roi_slice: tuple[slice, slice]) -> bool
 
 MIN_DPT = -2.0
 MAX_DPT = 3.0
-COARSE_STEP = 0.4
-FINE_STEP = 0.04
-FINE_HALF_RANGE = 0.8
+COARSE_STEP = 0.1
+FINE_STEP = 0.01
+FINE_HALF_RANGE = 0.2
 
 # ---------------------------------------------------------------------------
 # Autofocus orchestration
@@ -358,16 +358,21 @@ def _run_single_sweep(
     coarse_vals = sweep(
         cam, img, lens, coarse_dpts, roi_slice, show_preview=display_window is not None
     )
-    coarse_peak_dpt = float(coarse_dpts[int(np.argmax(coarse_vals))])
+    # Fit a Lorentzian to the coarse data for a sub-step peak estimate.
+    # With COARSE_STEP=0.1 there are ~51 points — enough for a reliable fit.
+    # This centres the fine sweep accurately so the true peak is never near
+    # fine_lo/fine_hi (which caused sawtooth artefacts when using argmax).
+    coarse_params, coarse_fit_ok = fit_lorentzian(coarse_dpts, coarse_vals)
+    coarse_peak_dpt = (
+        coarse_params["x0"] if coarse_fit_ok
+        else float(coarse_dpts[int(np.argmax(coarse_vals))])
+    )
 
     fine_lo = max(MIN_DPT, coarse_peak_dpt - FINE_HALF_RANGE)
     fine_hi = min(MAX_DPT, coarse_peak_dpt + FINE_HALF_RANGE)
     fine_dpts = np.arange(fine_lo, fine_hi + FINE_STEP * 0.5, FINE_STEP)
 
-    # The coarse sweep ends at MAX_DPT (~+3 dpt).  The lens must descend
-    # 2–4 dpt to reach fine_lo before the fine sweep starts ascending.
-    # Command fine_lo explicitly and wait for the lens to physically arrive
-    # before taking the first fine measurement.
+    # Reset lens to fine_lo and wait for it to descend from MAX_DPT.
     lens.set_diopter(float(fine_lo))
     time.sleep(LENS_SETTLE_S)
 
