@@ -241,6 +241,10 @@ FINE_SETTLE_S = 0.10
 # enough for a ~3.5 dpt descent at typical operating conditions.
 LENS_SETTLE_S = 5.0
 
+# Debug output directory for per-sweep Lorentzian fit plots.
+SWEEP_DEBUG_DIR = "/tmp/sweep_debug"
+_sweep_idx = 0
+
 
 def sweep(
     cam: Any,
@@ -403,6 +407,40 @@ def _run_single_sweep(
 
     params, fit_ok = fit_lorentzian(all_dpts, all_vals)
     best_dpt = params["x0"] if fit_ok else coarse_peak_dpt
+
+    # Save debug plot: coarse + fine data with both Lorentzian fits.
+    global _sweep_idx
+    os.makedirs(SWEEP_DEBUG_DIR, exist_ok=True)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+
+    x_c = np.linspace(coarse_dpts[0], coarse_dpts[-1], 400)
+    ax1.scatter(coarse_dpts, coarse_vals, s=20, color="tab:blue", zorder=3)
+    if coarse_fit_ok:
+        ax1.plot(x_c, lorentzian(x_c, **coarse_params), color="tab:orange", lw=1.5)
+    ax1.axvline(coarse_peak_dpt, color="tab:red", ls="--", lw=1,
+                label=f"peak={coarse_peak_dpt:+.3f}")
+    ax1.set_title("Coarse")
+    ax1.set_xlabel("dpt")
+    ax1.legend(fontsize=8)
+    ax1.grid(True, alpha=0.3)
+
+    x_f = np.linspace(all_dpts[0], all_dpts[-1], 400)
+    ax2.scatter(coarse_dpts, coarse_vals, s=10, color="tab:blue", alpha=0.4, label="coarse")
+    ax2.scatter(fine_dpts, fine_vals, s=15, color="tab:green", zorder=3, label="fine")
+    if fit_ok:
+        ax2.plot(x_f, lorentzian(x_f, **params), color="tab:orange", lw=1.5)
+    ax2.axvline(best_dpt, color="tab:red", ls="--", lw=1,
+                label=f"best={best_dpt:+.4f}")
+    ax2.set_title("Combined fit")
+    ax2.set_xlabel("dpt")
+    ax2.legend(fontsize=8)
+    ax2.grid(True, alpha=0.3)
+
+    fig.tight_layout()
+    fig.savefig(f"{SWEEP_DEBUG_DIR}/{_sweep_idx:04d}.png", dpi=90)
+    plt.close(fig)
+    _sweep_idx += 1
+
     return best_dpt, all_dpts, all_vals, params, fit_ok
 
 
