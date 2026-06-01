@@ -215,7 +215,7 @@ class PicoMotorStage:
         self._ser.write(f"{steps} {delay_us}\n".encode())
         deadline = time.monotonic() + 30.0
         while time.monotonic() < deadline:
-            line = self._ser.readline().decode("ascii", errors="ignore").strip()
+            line = self._ser.readline().decode("ascii").strip()
             if line == "ok":
                 return
             if line.startswith("error"):
@@ -236,6 +236,10 @@ class PicoMotorStage:
 # Hardware settle time after each diopter change (seconds)
 COARSE_SETTLE_S = 0.05
 FINE_SETTLE_S = 0.10
+# Time for the lens to physically descend to MIN_DPT after being commanded
+# there.  The lens releases fluid pressure slowly on the way down; 3 s is
+# enough for a ~3.5 dpt descent at typical operating conditions.
+LENS_SETTLE_S = 3.0
 
 
 def sweep(
@@ -984,6 +988,15 @@ def _run_automated(
         for i in range(args.measurements):
             print(f"\n--- [{i + 1}/{args.measurements}] ---")
 
+            if i > 0:
+                # Lens was reset to MIN_DPT after the previous autofocus.
+                # Wait for it to physically descend before the next sweep.
+                print(f"  Waiting {LENS_SETTLE_S:.0f} s for lens to settle …", flush=True)
+                t_lens = time.monotonic() + LENS_SETTLE_S
+                while time.monotonic() < t_lens:
+                    _pump_preview(ximea_cam, ximea_img, roi_slice)
+                    cv2.waitKey(30)
+
             best_dpt = run_autofocus(
                 ximea_cam,
                 ximea_img,
@@ -994,10 +1007,7 @@ def _run_automated(
                 show_plot=False,
             )
 
-            # Drive lens back to MIN_DPT immediately — it settles during tag
-            # detection (~3 s) and motor move (~28 s), no extra wait needed.
             lens.set_diopter(MIN_DPT)
-            print(f"  Lens → {MIN_DPT:+.2f} dpt  (will settle during tag detection + motor move)", flush=True)
 
             z = run_tag_detection(
                 basler_cams, open_ids, cameras_cal, args.num_frames, args.tag_family
