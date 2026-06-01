@@ -134,6 +134,14 @@ class LiquidLensConfig(ConfigBase):
                 f"liquid_lens.calibration_model must be one of {valid}, got {calibration_model!r}"
             )
         self.calibration_model: str = calibration_model
+
+        # Max change in commanded diopter per Braid update (slew-rate limit).
+        # The lens rings at ~400 Hz when fed an abrupt step; limiting the
+        # per-update change ramps large transitions (esp. trial onset) so the
+        # resonance isn't excited. 0 disables limiting (raw steps). Tune against
+        # real fly speed: too small lags fast flies, too large still rings.
+        self.max_diopter_step: float = float(config.get("max_diopter_step", 0.0))
+
         # Zone timeout is now global — read from trigger_handler config
         trigger_config = TriggerHandlerConfig(config_path)
         self.zone_timeout: float = trigger_config.zone_timeout

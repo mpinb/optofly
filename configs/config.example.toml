@@ -129,6 +129,14 @@ calibration_file = "calibrations/liquid_lens.csv"
 #   "inverse"   — dpt = a/(z − b) + c                (thin-lens theory)
 calibration_model = "quadratic"
 
+# Slew-rate limit: max change in commanded diopter per Braid update.
+# The lens rings at ~400 Hz when given an abrupt step, so large jumps
+# (especially the trial-onset jump) are ramped over several updates to avoid
+# exciting the resonance. 0.0 disables limiting (raw steps, original behavior).
+# Tune against fly speed + Braid rate: too small lags fast flies, too large
+# still rings. Start around 0.1–0.2 and check focus on video.
+max_diopter_step = 0.0
+
 # Zone timeout is global (from [trigger_handler] section)
 
 # Predictor mode — controls how the lens target depth is computed each update:

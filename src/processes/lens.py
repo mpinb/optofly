@@ -133,6 +133,11 @@ class LiquidLens(WorkerProcess):
         self.csv_writer = None
         self.kalman: Optional[KalmanFilter] = None
 
+        # Last diopter actually commanded to the lens, for slew-rate limiting.
+        # Persists across trials so the onset jump is ramped from the lens's
+        # real resting position. None until the first command is sent.
+        self._last_dpt: Optional[float] = None
+
         self._timing_rows: list = []
         self._recording_obj_id: Optional[int] = None
         self._recording_frame: Optional[int] = None
@@ -389,7 +394,17 @@ class LiquidLens(WorkerProcess):
 
                 # Command the lens and record timing.
                 try:
-                    dpt = self.lens_calibration.get_dpt(focus_z)
+                    target_dpt = self.lens_calibration.get_dpt(focus_z)
+                    # Slew-rate limit: ramp large transitions so the lens's
+                    # ~400 Hz resonance isn't excited by abrupt steps.
+                    max_step = self.lens_config.max_diopter_step
+                    if max_step > 0 and self._last_dpt is not None:
+                        delta = target_dpt - self._last_dpt
+                        delta = max(-max_step, min(max_step, delta))
+                        dpt = self._last_dpt + delta
+                    else:
+                        dpt = target_dpt
+                    self._last_dpt = dpt
                     t_serial_start = time.time()
                     self.lens_driver.set_diopter(dpt)
                     t_diopter_sent = time.time()
@@ -418,6 +433,7 @@ class LiquidLens(WorkerProcess):
                             "z": z,
                             "focus_z": focus_z,
                             "diopter": dpt,
+                            "target_diopter": target_dpt,
                             "predictor": self.lens_config.predictor,
                         }
                     )
