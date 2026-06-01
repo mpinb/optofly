@@ -385,8 +385,13 @@ def _run_single_sweep(
     fine_hi = min(MAX_DPT, coarse_peak_dpt + FINE_HALF_RANGE)
     fine_dpts = np.arange(fine_lo, fine_hi + FINE_STEP * 0.5, FINE_STEP)
 
-    # Reset lens to fine_lo and wait for it to descend from MAX_DPT.
-    lens.set_diopter(float(fine_lo))
+    # Approach fine_lo from BELOW so the lens is ascending through the fine
+    # range — same physics as the coarse sweep which works correctly.
+    # 1) Descend to an approach point 0.5 dpt below fine_lo and wait.
+    # 2) The fine sweep then ascends from fine_lo, with the lens coming from
+    #    below each commanded value, so it tracks accurately.
+    approach_dpt = max(MIN_DPT, fine_lo - 0.5)
+    lens.set_diopter(float(approach_dpt))
     time.sleep(LENS_SETTLE_S)
 
     fine_vals = sweep(
