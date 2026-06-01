@@ -250,6 +250,7 @@ def sweep(
     roi_slice: tuple[slice, slice],
     settle_s: float = COARSE_SETTLE_S,
     show_preview: bool = False,
+    label: str = "",
 ) -> np.ndarray:
     """Set each diopter, grab two frames (discard first for freshness), compute contrast."""
     contrasts = np.empty(len(diopters))
@@ -261,7 +262,14 @@ def sweep(
         roi_frame = img.get_image_data_numpy()[roi_slice].copy()
         contrasts[i] = focus_metric(roi_frame)
         if show_preview:
-            _show_roi(roi_frame)
+            display = cv2.resize(
+                roi_frame,
+                (int(roi_frame.shape[1] * PREVIEW_SCALE), int(roi_frame.shape[0] * PREVIEW_SCALE)),
+            )
+            display = cv2.cvtColor(display, cv2.COLOR_GRAY2BGR)
+            text = f"{label} {dpt:+.3f} dpt  focus={contrasts[i]:.0f}"
+            cv2.putText(display, text, (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1, cv2.LINE_AA)
+            cv2.imshow(PREVIEW_WINDOW, display)
             cv2.waitKey(1)
     return contrasts
 
@@ -323,7 +331,7 @@ MIN_DPT = -2.0
 MAX_DPT = 3.0
 COARSE_STEP = 0.1
 FINE_STEP = 0.01
-FINE_HALF_RANGE = 0.2
+FINE_HALF_RANGE = 0.4
 
 # ---------------------------------------------------------------------------
 # Autofocus orchestration
@@ -356,7 +364,8 @@ def _run_single_sweep(
     """One full coarse+fine sweep. Returns (best_dpt, all_dpts, all_vals, params, fit_ok)."""
     coarse_dpts = np.arange(MIN_DPT, MAX_DPT + COARSE_STEP * 0.5, COARSE_STEP)
     coarse_vals = sweep(
-        cam, img, lens, coarse_dpts, roi_slice, show_preview=display_window is not None
+        cam, img, lens, coarse_dpts, roi_slice,
+        show_preview=display_window is not None, label="coarse",
     )
     # Fit a Lorentzian to the coarse data for a sub-step peak estimate.
     # With COARSE_STEP=0.1 there are ~51 points — enough for a reliable fit.
@@ -384,6 +393,7 @@ def _run_single_sweep(
         roi_slice,
         settle_s=FINE_SETTLE_S,
         show_preview=display_window is not None,
+        label="fine",
     )
 
     all_dpts = np.concatenate([coarse_dpts, fine_dpts])
