@@ -335,7 +335,7 @@ MIN_DPT = -2.0
 MAX_DPT = 3.0
 COARSE_STEP = 0.1
 FINE_STEP = 0.01
-FINE_HALF_RANGE = 0.4
+FINE_HALF_RANGE = 0.8
 
 # ---------------------------------------------------------------------------
 # Autofocus orchestration
