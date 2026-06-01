@@ -215,7 +215,7 @@ class PicoMotorStage:
         self._ser.write(f"{steps} {delay_us}\n".encode())
         deadline = time.monotonic() + 30.0
         while time.monotonic() < deadline:
-            line = self._ser.readline().decode().strip()
+            line = self._ser.readline().decode("ascii", errors="ignore").strip()
             if line == "ok":
                 return
             if line.startswith("error"):
