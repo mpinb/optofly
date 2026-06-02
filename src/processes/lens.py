@@ -3,7 +3,8 @@ import multiprocessing as mp
 import os
 import statistics
 import time
-from typing import Optional
+from bisect import bisect_left
+from typing import List, Optional
 
 import numpy as np
 import zmq
@@ -16,85 +17,87 @@ from src.utils.kalman_filter import KalmanFilter
 from src.hardware.lens import LensDriver
 
 
-VALID_CALIBRATION_MODELS = ("linear", "quadratic", "power", "inverse")
-
-
 class LensCalibration:
-    """Maps z position (m) → diopter via a user-selected model.
+    """Maps z position (m) -> diopter via exact piecewise linear interpolation.
 
-    The model is fit once at construction; ``get_dpt`` does only fast
-    floating-point arithmetic (no numpy/scipy on the hot path).
-
-    Supported models:
-        linear    — dpt = a·z + b
-        quadratic — dpt = a·z² + b·z + c  (recommended)
-        power     — dpt = a·(z + shift)^b + c
-        inverse   — dpt = a/(z − b) + c
+    Ensures zero residual error at calibration anchors. The lookup vectors
+    are sorted at construction; `get_dpt` uses a fast binary search and 
+    basic floating-point arithmetic (no numpy/scipy on the hot path).
 
     z is clamped to the calibration range to prevent extrapolation.
     """
 
-    def __init__(self, z_values, dpt_values, model: str = "quadratic"):
-        if model not in VALID_CALIBRATION_MODELS:
-            raise ValueError(
-                f"calibration_model must be one of {VALID_CALIBRATION_MODELS}, got {model!r}"
-            )
-        z = np.array(z_values, dtype=float)
-        dpt = np.array(dpt_values, dtype=float)
-        self.z_min = float(z.min())
-        self.z_max = float(z.max())
-        self.model = model
+    def __init__(self, z_values: List[float], dpt_values: List[float]) -> None:
+        if len(z_values) != len(dpt_values):
+            raise ValueError("z_values and dpt_values must have the same length.")
+        if len(z_values) < 2:
+            raise ValueError("At least two calibration points are required.")
 
-        if model == "linear":
-            # polyfit returns [a, b] for degree 1: dpt = a*z + b
-            _a, _b = np.polyfit(z, dpt, 1)
-            self._predict = lambda z_val, a=float(_a), b=float(_b): a * z_val + b
-        elif model == "quadratic":
-            # polyfit returns [a, b, c] for degree 2: dpt = a*z² + b*z + c
-            _a, _b, _c = np.polyfit(z, dpt, 2)
-            self._predict = lambda z_val, a=float(_a), b=float(_b), c=float(_c): (
-                (a * z_val + b) * z_val + c
-            )
-        elif model == "power":
-            from scipy.optimize import curve_fit
+        # Ensure pairs are sorted monotonically by z
+        pairs = sorted(zip(z_values, dpt_values), key=lambda pair: pair[0])
 
-            # dpt = a * z^b + c; initial guess derived from data range
-            popt, _ = curve_fit(
-                lambda z, a, b, c: a * z**b + c,
-                z,
-                dpt,
-                p0=[20.0, 1.5, -1.0],
-                bounds=([0, 0.1, -np.inf], [np.inf, 5.0, np.inf]),
-                maxfev=10000,
-            )
-            _a, _b, _c = (float(v) for v in popt)
-            self._predict = lambda z_val, a=_a, b=_b, c=_c: a * z_val**b + c
-        else:  # inverse
-            from scipy.optimize import curve_fit
+        self._z_arr: List[float] = [float(p[0]) for p in pairs]
+        self._dpt_arr: List[float] = [float(p[1]) for p in pairs]
 
-            # dpt = a / (z - b) + c; b must be negative (pole below measurement range)
-            popt, _ = curve_fit(
-                lambda z, a, b, c: a / (z - b) + c,
-                z,
-                dpt,
-                p0=[0.05, -0.3, 5.0],
-                bounds=([0, -np.inf, -np.inf], [np.inf, 0, np.inf]),
-                maxfev=10000,
-            )
-            _a, _b, _c = (float(v) for v in popt)
-            self._predict = lambda z_val, a=_a, b=_b, c=_c: a / (z_val - b) + c
+        # Verify strict monotonicity to avoid division by zero during interpolation
+        for i in range(1, len(self._z_arr)):
+            if self._z_arr[i] == self._z_arr[i - 1]:
+                raise ValueError(
+                    f"Duplicate z coordinate found at index {i}: {self._z_arr[i]}"
+                )
+
+        self.z_min: float = self._z_arr[0]
+        self.z_max: float = self._z_arr[-1]
+        self._num_intervals: int = len(self._z_arr) - 1
 
     def get_dpt(self, z: float) -> float:
-        z = max(self.z_min, min(self.z_max, z))
-        return self._predict(z)
+        """Calculate target diopter using exact piecewise linear interpolation.
+
+        Args:
+            z: The current tracked z position in meters.
+
+        Returns:
+            The calculated diopter value clamped to calibration bounds.
+        """
+        # Clamp z boundaries to prevent out-of-bounds extrapolation
+        if z <= self.z_min:
+            return self._dpt_arr[0]
+        if z >= self.z_max:
+            return self._dpt_arr[-1]
+
+        # Binary search for the bounding interval: O(log N)
+        idx = bisect_left(self._z_arr, z)
+
+        # Fallback security checks for floating-point edges
+        if idx == 0:
+            return self._dpt_arr[0]
+        if idx > self._num_intervals:
+            return self._dpt_arr[-1]
+
+        z0 = self._z_arr[idx - 1]
+        z1 = self._z_arr[idx]
+        dpt0 = self._dpt_arr[idx - 1]
+        dpt1 = self._dpt_arr[idx]
+
+        return dpt0 + (z - z0) * (dpt1 - dpt0) / (z1 - z0)
 
 
-def setup_lens_calibration(
-    calibration_file: str, model: str = "quadratic"
-) -> LensCalibration:
+def setup_lens_calibration(calibration_file: str) -> LensCalibration:
+    """Loads calibration data from a CSV and initializes the LensCalibration.
+
+    Args:
+        calibration_file: Path to the CSV file containing 'z' and 'dpt' columns.
+
+    Returns:
+        An initialized LensCalibration instance.
+        
+    Raises:
+        RuntimeError: If the CSV file cannot be read or parsed.
+    """
     try:
         data = np.genfromtxt(calibration_file, delimiter=",", names=True)
-        return LensCalibration(data["z"], data["dpt"], model=model)
+        # Convert numpy arrays to lists for the class constructor
+        return LensCalibration(data["z"].tolist(), data["dpt"].tolist())
     except Exception as e:
         raise RuntimeError(f"Error setting up lens calibration: {e}")
 
