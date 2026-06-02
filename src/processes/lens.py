@@ -170,7 +170,6 @@ class LiquidLens(WorkerProcess):
         # Calibration
         self.lens_calibration = setup_lens_calibration(
             self.lens_config.calibration_file,
-            model=self.lens_config.calibration_model,
         )
         self.logger.debug(
             f"Lens calibration loaded: model={self.lens_config.calibration_model}"
