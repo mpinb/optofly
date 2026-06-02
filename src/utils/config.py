@@ -60,9 +60,9 @@ class TriggerHandlerConfig(ConfigBase):
         # Zone timeout: emit ZONE_EXIT if no updates received for this long
         self.zone_timeout: float = float(config.get("zone_timeout", 2.0))
 
-        # Global refractory period: suppress ZONE_ENTER for this many seconds
+        # Global cooldown period: suppress ZONE_ENTER for this many seconds
         # after the last one, regardless of object identity.
-        self.refractory_period: float = float(config.get("refractory_period", 10.0))
+        self.cooldown_period: float = float(config.get("cooldown_period", 10.0))
 
         # Trigger zone x/y = camera FOV (single source of truth)
         camera_config = CameraConfig(config_path)

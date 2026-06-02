@@ -229,9 +229,9 @@ class TriggerHandler(WorkerProcess):
             self._far_y_min = self.config.fov_far_y_min
             self._far_y_max = self.config.fov_far_y_max
 
-        # Global refractory period — suppress ZONE_ENTER for this many seconds
+        # Global cooldown period — suppress ZONE_ENTER for this many seconds
         # after the last one was sent, regardless of object identity.
-        self.refractory_period: float = self.config.refractory_period
+        self.cooldown_period: float = self.config.cooldown_period
         self._last_zone_enter_time: float = 0.0
 
         # Dictionary to track objects: {obj_id: TrackedObject}
@@ -251,7 +251,7 @@ class TriggerHandler(WorkerProcess):
             self.is_initialized = True
             self.logger.info(
                 f"TriggerHandler initialized successfully "
-                f"(refractory_period={self.refractory_period}s)"
+                f"(cooldown_period={self.cooldown_period}s)"
             )
             return True
         except Exception as e:
@@ -435,13 +435,13 @@ class TriggerHandler(WorkerProcess):
             if age < self.config.min_tracking_age:
                 return
 
-            # Gate 2: refractory period
+            # Gate 2: cooldown period
             now = time.time()
             elapsed = now - self._last_zone_enter_time
-            if elapsed < self.refractory_period:
+            if elapsed < self.cooldown_period:
                 self.logger.debug(
                     f"ZONE_ENTER suppressed for obj={tracked_obj.obj_id} "
-                    f"(refractory: {elapsed:.1f}s / {self.refractory_period:.1f}s)"
+                    f"(cooldown: {elapsed:.1f}s / {self.cooldown_period:.1f}s)"
                 )
                 return
 

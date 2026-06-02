@@ -47,7 +47,7 @@ min_velocity = 0.01              # Minimum velocity to consider object "moving" 
 max_velocity = 1.0               # Maximum velocity to filter noise (m/s)
 min_tracking_age = 0.1           # Object must exist this long before triggering (seconds)
 zone_timeout = 3.0               # Auto ZONE_EXIT if no updates for this long (seconds)
-refractory_period = 10.0         # Global cooldown between ZONE_ENTER events (seconds)
+cooldown_period = 10.0         # Global cooldown between ZONE_ENTER events (seconds)
 
 [camera]
 # High-speed camera settings

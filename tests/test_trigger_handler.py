@@ -59,8 +59,8 @@ def configure_test_trigger(handler):
     handler.config.max_velocity = 0.5
     handler.config.heading_threshold = math.radians(30.0)
     handler.config.zone_timeout = 0.5
-    handler.config.refractory_period = 0.0
-    handler.refractory_period = 0.0
+    handler.config.cooldown_period = 0.0
+    handler.cooldown_period = 0.0
 
 
 class FakeClock:
@@ -154,9 +154,9 @@ def test_exit_emitted_when_object_leaves_zone(handler):
     ]
 
 
-def test_reentry_waits_for_refractory_period_before_second_enter(handler, fake_clock):
-    handler.config.refractory_period = 5.0
-    handler.refractory_period = 5.0
+def test_reentry_waits_for_cooldown_period_before_second_enter(handler, fake_clock):
+    handler.config.cooldown_period = 5.0
+    handler.cooldown_period = 5.0
 
     handler.process_message(make_birth(frame=1, x=0.08, xvel=-0.2))
     fake_clock.advance(1.0)

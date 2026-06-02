@@ -228,7 +228,7 @@ class PicoMotorStage:
     def __init__(self, port: str, invert: bool = False) -> None:
         import serial
 
-        self._ser = serial.Serial(port, 115200, timeout=30.0)
+        self._ser = serial.Serial(port, 115200, timeout=0.5)  # 500ms per line read
         self._invert = invert
         time.sleep(2.0)  # let Pico enumerate
 
@@ -237,14 +237,20 @@ class PicoMotorStage:
         if self._invert:
             steps = -steps
         self._ser.write(f"{steps} {delay_us}\n".encode())
-        deadline = time.monotonic() + 30.0
+        self._ser.flush()  # Force immediate transmission
+        # Timeout: movement time + 2s margin. Large moves can take 30+ seconds.
+        movement_time_s = abs(steps) * delay_us / 1_000_000.0
+        timeout_s = max(35.0, movement_time_s + 2.0)
+        deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
             line = self._ser.readline().decode("ascii").strip()
+            if not line:  # Skip empty lines (timeout)
+                continue
             if line == "ok":
                 return
             if line.startswith("error"):
                 raise RuntimeError(f"Pico motor error: {line}")
-        raise RuntimeError("Pico motor did not respond within 30 s")
+        raise RuntimeError(f"Pico motor did not respond within {timeout_s:.1f} s")
 
     def move_up(self, steps: int, delay_us: int = 800) -> None:
         self.move(steps, delay_us)
@@ -1027,8 +1033,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--step-delay-us",
         type=int,
-        default=800,
-        help="Microseconds between steps for the Pico motor (default: 800, lower = faster). "
+        default=300,
+        help="Microseconds between steps for the Pico motor (default: 300, lower = faster). "
         "Only used with --pico-port.",
     )
     return p

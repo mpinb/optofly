@@ -51,7 +51,7 @@ experiments_path = "/mnt/data/experiments/" # Where .braid folders are saved
 
 [trigger_handler]
 min_tracking_age = 0.1      # Min object age before triggering (s)
-refractory_period = 10.0    # Global cooldown between ZONE_ENTER (s)
+cooldown_period = 10.0    # Global cooldown between ZONE_ENTER (s)
 z_min = 0.15                # Minimum z for trigger (m)
 z_max = 0.25                # Maximum z for trigger (m)
 heading_cone_deg = 45.0     # Heading tolerance from center-directed (degrees)
