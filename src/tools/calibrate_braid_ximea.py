@@ -61,6 +61,9 @@ def _parse_chunk(chunk: str) -> dict:
     return json.loads(lines[1][len(_DATA_PREFIX) :])
 
 
+parse_chunk = _parse_chunk  # public alias for other modules that import this
+
+
 # ---------------------------------------------------------------------------
 # BRAID tracker thread (SSE — connects directly to Braid, no ZMQ required)
 # ---------------------------------------------------------------------------
