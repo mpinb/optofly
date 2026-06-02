@@ -189,52 +189,61 @@ Points spread across the full frame and across different z heights improve condi
 2. Launch the calibration tool:
 
    ```bash
-   python -m src.tools.calibrate_braid_ximea --config configs/config.toml
+   uv run python -m src.tools.calibrate_braid_ximea --config configs/config.toml
    ```
 
-3. The tool opens an OpenCV window with the live Ximea feed. The current BRAID position is shown as an overlay — no separate tracking window needed.
+3. The tool opens an OpenCV window with the live Ximea feed. A cyan circle shows the auto-detected laser dot centroid; the BRAID position updates live in the overlay.
 
 4. For each calibration point:
    - Aim the laser pointer at a position in the arena and hold it steady.
-   - Wait for BRAID to lock onto the laser dot — the tool streams BRAID updates live and shows the current tracked position in the terminal.
-   - **Left-click** the laser dot's pixel in the camera image.
-   - Enter the BRAID (x, y, z) coordinates when prompted in the terminal.
-   - The point is drawn on the frame (red = corner, blue = interior).
+   - Wait for BRAID to lock onto the dot (BRAID position shown in overlay).
+   - Press **SPACE** to auto-detect the centroid, or **left-click** the dot as a fallback.
+   - The point is drawn on the frame with its BRAID (x, y, z) label.
 
-5. Collect all 4 corners first (aim the laser near each corner of the camera FOV), then at least 2 more interior points at different heights. The status line updates:
+5. Collect all 4 corners first, then at least 2 more interior points at different heights. The status line updates:
    - `"3 corner point(s) still needed"`
    - `"All 4 corners collected — add ≥2 more interior points"`
    - `"≥6 points collected — press 'f' to fit"`
 
-6. Press **`f`** to fit the DLT matrix. Reprojection errors are printed; < 5 px is good.
+6. Press **`f`** to fit the DLT matrix. Reprojection errors are printed; < 3 px is good, < 5 px is acceptable.
+
+7. Press **`p`** to capture a FOV plane at the current BRAID z — the z value is read from BRAID automatically with no manual entry. The plane's bounds are shown as a coloured rectangle on the frame.
+
+8. Move the laser to a different height and press **`p`** again to add a second plane (needed for frustum mode). Repeat for more planes if desired.
+
+9. Press **`s`** to save.
 
 ### Key Bindings
 
 | Key | Action |
 |-----|--------|
-| Left-click | Add calibration point (prompts for BRAID coordinates) |
+| `SPACE` | Auto-detect laser dot centroid and record point |
+| Left-click | Manual fallback — records the exact clicked pixel |
+| `u` | Undo the last correspondence point |
 | `f` | Fit the DLT matrix (requires ≥ 6 points) |
-| `v` | Visualise the FOV: back-projects frame corners and draws an orange rectangle |
-| `s` | Save the calibration; offers to update `[camera.FOV]` in `config.toml` |
-| `d` | Delete the last point |
-| `r` | Reset all points |
-| `q` / ESC | Quit |
+| `p` | Pin a FOV plane at the current BRAID z (requires fit first) |
+| `s` | Save calibration + write FOV to `config.toml` |
+| `q` | Quit |
 
 ### Computing the Camera FOV
 
-After fitting (`f`), press **`v`** to visualise the field of view. The tool:
+After fitting (`f`), press **`p`** to capture a FOV plane. The tool:
 
-1. Back-projects each of the 4 frame corners through the DLT matrix at a reference z height (you are prompted to confirm or change this).
-2. Draws an orange rectangle on the frame showing the sensor boundary in world space.
-3. Prints the derived `x_min`, `x_max`, `y_min`, `y_max` values.
+1. Reads the current BRAID z automatically — no prompt, no manual entry.
+2. Back-projects the 4 frame corners through the DLT matrix at that z to compute world-space bounds.
+3. Draws a coloured rectangle on the frame showing the sensor boundary.
+4. Prints the derived `x_min`, `x_max`, `y_min`, `y_max` values.
 
-When you save with **`s`**, the tool asks:
+Press **`p`** again at a different height to add a second plane. When you save with **`s`**:
+
+- **1 plane** → writes flat `[camera.FOV]` to `config.toml`
+- **2 planes** → writes `[camera.FOV.near]` + `[camera.FOV.far]` (perspective-correct frustum)
 
 ```
-Update [camera.FOV] in configs/config.toml? [y/N]
+Write flat [camera.FOV] (z=0.1800 m) to configs/config.toml? [y/N]
 ```
 
-Answer `y` to write the values directly into the config file. No manual editing required.
+Answer `y` to write the values directly. No manual editing required.
 
 ### Enabling the Calibration
 
@@ -275,7 +284,7 @@ from N ≥ 6 point correspondences. The system is solved as a 2N×12 linear syst
 
 - **"Need at least 6 points"**: you must collect all 4 corners plus at least 2 interior points before fitting.
 - **High reprojection error (> 10 px)**: delete outlier points with `d`, re-collect them, and refit. Ensure the BRAID coordinates were read while the laser dot was stationary and BRAID had a stable lock on it.
-- **FOV looks wrong**: verify `z_ref` matches the typical flight height (not the floor or ceiling). Re-press `v` with a different z if needed.
+- **FOV looks wrong**: press `p` while the laser is at a representative flight height. The z is read from BRAID at capture time — ensure the laser is at the correct height before pressing `p`.
 - **"Singular matrix" error during backprojection**: the DLT matrix is degenerate — usually caused by all points being nearly coplanar in 3D. Add points at different z heights.
 
 ---
@@ -284,9 +293,9 @@ from N ≥ 6 point correspondences. The system is solved as a 2N×12 linear syst
 
 ### When to Use This
 
-The flat `[camera.FOV]` calibration (above) uses a single set of x/y bounds applied at all z heights. This is correct for a telecentric lens, but a standard (non-telecentric) liquid lens produces a field of view that grows with distance — the further the fly is from the camera, the wider the visible area. A flat FOV either misses flies at the far edge of the volume or triggers spuriously on flies outside the actual frame.
+The flat `[camera.FOV]` calibration uses a single set of x/y bounds applied at all z heights. A standard liquid lens produces a field of view that grows with distance — the further the fly is from the camera, the wider the visible area. A flat FOV either misses flies at the far edge of the volume or triggers spuriously on flies outside the actual frame.
 
-The frustum calibration measures the FOV at two z reference planes (near and far) and stores both. At runtime, `TriggerHandler` linearly interpolates the bounds at the fly's actual z, giving a perspective-correct trigger zone.
+The frustum calibration captures FOV bounds at two z heights and stores both. At runtime, `TriggerHandler` linearly interpolates the bounds at the fly's actual z, giving a perspective-correct trigger zone.
 
 **Use this calibration if:**
 - You see flies triggering outside the visible frame (FOV too wide)
@@ -295,110 +304,55 @@ The frustum calibration measures the FOV at two z reference planes (near and far
 
 ### Prerequisites
 
-- Ximea camera connected and live
-- Braid running with the full ZMQ stack (`uv run python main.py` or at minimum `BraidPublisher`)
-- Liquid lens connected with `calibrations/liquid_lens.csv` already built (see Liquid Lens Calibration above)
-- A laser pointer you can hold at known heights in the arena
-- OptoFly environment activated (`uv sync`)
-
-### Choosing z-planes
-
-Pick two z heights that bracket the fly's typical flight range:
-
-- **Near plane** (`--near-z`): the lowest z flies are expected to trigger at. A reasonable starting point is the bottom of your trigger zone (`z_min` in `config.toml`).
-- **Far plane** (`--far-z`): the highest z flies are expected to trigger at — your `z_max` value, or the top of the arena.
-
-The wider the spread between the two planes, the more accurate the interpolation will be across the full volume. A 10–15 cm separation is usually sufficient. The far-plane bounds will always be larger than the near-plane bounds; if they are not, the lens is not a normal (converging) imaging setup.
+Same as BRAID-to-Ximea Calibration above — no liquid lens or ZMQ stack needed. The frustum is computed directly from the DLT projection matrix.
 
 ### Procedure
 
-1. Ensure Braid is running and the ZMQ publisher is live:
+Frustum calibration is built into `calibrate_braid_ximea`. After fitting the DLT matrix, press **`p`** at two different heights:
 
-   ```bash
-   uv run python main.py   # or just BraidPublisher standalone
-   ```
+1. Complete the standard DLT calibration (steps 1–6 in the BRAID-to-Ximea section above).
 
-2. Launch the calibration tool, passing your two z reference heights:
+2. Position the laser at your **near plane height** (lowest typical flight height, e.g. `z_min` from `config.toml`). Wait for a stable BRAID fix.
 
-   ```bash
-   uv run python -m src.tools.calibrate_frustum_fov --near-z 0.10 --far-z 0.25
-   ```
+3. Press **`p`** — the tool reads z from BRAID automatically and computes the near-plane FOV. An orange rectangle appears on the frame.
 
-   The tool will print the diopter values it will command for each plane and confirm the lens and camera opened successfully.
+4. Move the laser to your **far plane height** (highest typical flight height, e.g. `z_max`). Wait for BRAID fix.
 
-3. **Phase 1 — Near plane.** The lens focuses to `z_near`. Hold the laser pointer at approximately that height in the arena and wait for Braid to acquire it (the BRAID position is shown live in the overlay).
+5. Press **`p`** again — the second plane is added in a different colour.
 
-   Sweep the laser to each of the four extremes of the camera frame and press **SPACE** at each position:
-
-   - Leftmost point still visible in the frame
-   - Rightmost point still visible in the frame
-   - Top-most point still visible in the frame
-   - Bottom-most point still visible in the frame
-
-   The overlay shows a live bounding-box estimate (in metres) that updates with each new point. Add more than 4 points if the live estimate seems noisy — the tool takes the min/max of all recorded x,y values, so more points only help.
-
-   Press **`n`** when satisfied (requires ≥ 4 points).
-
-4. **Phase 2 — Far plane.** The lens refocuses to `z_far`. Raise the laser pointer to approximately that height and repeat the same four-edge measurements. Press **`n`** again when done.
-
-5. Press **`s`** to review the computed bounds and write them to `config.toml`:
+6. Press **`s`** to save. Because two planes were captured, the tool writes frustum config:
 
    ```
-   Write [camera.FOV.near] and [camera.FOV.far] to configs/config.toml? [y/N]
+   Write [camera.FOV.near] (z=0.1000 m) and [camera.FOV.far] (z=0.2500 m) to configs/config.toml? [y/N]
    ```
 
-   Answer `y`. The tool replaces the old flat `[camera.FOV]` keys with the two sub-tables in-place, preserving all other sections and comments.
+   Answer `y`.
 
-6. Verify the written values:
+7. Verify and restart:
 
    ```bash
    grep -A 15 "\[camera\.FOV\]" configs/config.toml
    ```
 
-   The far-plane bounds should be visibly wider than the near-plane bounds. If they are identical or reversed, re-run the calibration.
-
-7. Restart the main stack and confirm `TriggerHandler` logs frustum mode at startup:
+   The far-plane bounds should be visibly wider than the near-plane bounds. Restart the main stack and confirm:
 
    ```
    TriggerHandler: frustum FOV mode  near z=0.1000 m  far z=0.2500 m
    ```
 
-### Key Bindings
-
-| Key | Action |
-|-----|--------|
-| `SPACE` | Auto-detect bright spot and record the current Braid x,y |
-| Left-click | Manual fallback — record Braid x,y at the clicked pixel position |
-| `u` | Undo the last recorded point in the current phase |
-| `n` | Advance to the next phase (requires ≥ 4 points in the current phase) |
-| `s` | Save both planes to config.toml (requires both phases complete) |
-| `q` | Quit without saving |
-
 ### Troubleshooting
 
-- **Bright spot not detected / SPACE has no effect**: the laser may be too dim or too bright relative to the threshold. Try a lower value for a dim laser or a higher value to suppress background reflections:
+- **Far-plane bounds narrower than near-plane bounds**: the laser was at the wrong height when `p` was pressed, or BRAID had not yet acquired it. Press `p` again with the laser at the correct height (the new plane replaces nothing — you'll have 3 planes; the outermost pair is used at save time).
 
-  ```bash
-  uv run python -m src.tools.calibrate_frustum_fov --near-z 0.10 --far-z 0.25 --threshold 150
-  ```
-
-  The cyan circle in the overlay shows the detected spot in real time — use it to confirm detection before pressing SPACE.
-
-- **"No BRAID fix"**: Braid is not tracking the laser. Make sure the laser dot is inside the tracking volume and Braid has acquired it before recording. The BRAID position readout in the overlay turns white when a fix is active.
-
-- **Lens does not move between phases**: check that the serial port in `[liquid_lens] port` in `config.toml` is correct (`ls -l /dev/ttyUSB*`). The tool will print an error at startup if it cannot open the port.
-
-- **Far-plane bounds narrower than near-plane bounds**: the laser was probably held at the wrong height during one of the phases, or the Braid z coordinate was far from the commanded z. Re-run the calibration and confirm the laser height visually.
-
-- **Trigger zone still looks wrong after calibration**: the frustum interpolates linearly between the two planes. If the optical distortion is non-linear across the z range, add a finer trigger zone (narrow `z_min`/`z_max`) so the fly spends less time in the interpolated region.
+- **Trigger zone still looks wrong**: the frustum interpolates linearly. If distortion is non-linear, narrow `z_min`/`z_max` so the fly spends less time in the interpolated region.
 
 ### Output
 
-The tool writes directly to `configs/config.toml`, replacing the `[camera.FOV]` section:
+`calibrate_braid_ximea` writes directly to `configs/config.toml`, replacing the `[camera.FOV]` section:
 
 ```toml
 [camera.FOV]
-# Frustum mode — generated by calibrate_frustum_fov.py
+# Frustum mode — generated by calibrate_braid_ximea.py
 
 [camera.FOV.near]
 z     = 0.1000      # z where these bounds were measured

@@ -146,14 +146,10 @@ The launcher checks for an active Braid recording folder (or starts one automati
 # Visual stimuli standalone test (Panda3D, no hardware)
 python -m src.processes.visual --standalone
 
-# BRAID-to-camera DLT calibration (interactive, requires Braid + camera)
-python -m src.tools.calibrate_braid_ximea --config configs/config.toml
-
-# Perspective-correct frustum FOV calibration
-uv run python -m src.tools.calibrate_frustum_fov --near-z 0.10 --far-z 0.25
-
-# Offline mode (static image, no hardware)
-python -m src.tools.calibrate_braid_ximea --image /path/to/frame.png --config configs/config.toml
+# BRAID-to-camera DLT calibration + multi-plane FOV (requires Braid + camera)
+# Press 'f' to fit, 'p' to pin a FOV plane at the current Braid z, 's' to save.
+# 1 plane -> flat [camera.FOV]; 2 planes -> [camera.FOV.near] + [camera.FOV.far]
+uv run python -m src.tools.calibrate_braid_ximea --config configs/config.toml
 ```
 
 The Panda3D pipeline uses `screen_mapping` in `[visual_stimuli.arena]` to assign compass directions to physical screens — no interactive calibration tool is required. Set `braid_heading_offset_rad` and `braid_heading_flip` to align Braid tracking coordinates with the arena.
