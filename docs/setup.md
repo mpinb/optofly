@@ -146,9 +146,9 @@ The launcher checks for an active Braid recording folder (or starts one automati
 # Visual stimuli standalone test (Panda3D, no hardware)
 python -m src.processes.visual --standalone
 
-# BRAID-to-camera DLT calibration + multi-plane FOV (requires Braid + camera)
-# Press 'f' to fit, 'p' to pin a FOV plane at the current Braid z, 's' to save.
-# 1 plane -> flat [camera.FOV]; 2 planes -> [camera.FOV.near] + [camera.FOV.far]
+# Camera FOV calibration (requires Braid + camera + liquid lens)
+# Collect >= 4 edge points -> press 'n' to finalise plane (z auto-read from Braid).
+# Press 's' to save flat [camera.FOV], or 'a' then repeat for frustum near/far.
 uv run python -m src.tools.calibrate_braid_ximea --config configs/config.toml
 ```
 

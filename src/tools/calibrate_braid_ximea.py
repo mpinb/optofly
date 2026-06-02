@@ -1,26 +1,28 @@
-"""Interactive BRAID-to-Ximea calibration with multi-plane FOV.
+"""Interactive camera FOV calibration — one or two z-planes.
 
-Requires: Ximea camera connected, BRAID running and tracking.
+Requires: Ximea camera, Braid running, liquid lens connected.  No ZMQ stack needed.
 
 Usage:
     uv run python -m src.tools.calibrate_braid_ximea
     uv run python -m src.tools.calibrate_braid_ximea --config configs/config.toml
-    uv run python -m src.tools.calibrate_braid_ximea --out calibrations/braid_to_ximea.npz
 
 Workflow:
-    1. Aim a bright laser at positions across the arena.  Press SPACE (auto-detect)
-       or LEFT-CLICK (manual) to record each BRAID (x,y,z) <-> pixel (u,v) pair.
-       Collect >=6 points spanning 4 corners + interior, varying height.
-    2. Press 'f' to fit the DLT projection matrix.
-    3. Press 'p' to capture a FOV plane at the current BRAID z (no manual entry).
-       Move the target to a different height and press 'p' again to add another plane.
-    4. Press 's' to save.  Writes the projection calibration (.npz) and updates
-       [camera.FOV] in config.toml.
-       * 1 plane  -> flat [camera.FOV]
-       * 2 planes -> [camera.FOV.near] + [camera.FOV.far]
-    5. Press 'u' to undo the last correspondence point; 'q' to quit.
+    1. Move a bright target (laser/LED) to each edge of the camera frame at your
+       desired height.  Press SPACE each time to record the current Braid (x, y, z).
+       A cyan circle shows the auto-detected spot; left-click as a fallback.
+       Collect >= 4 boundary points (at least one near each edge).
 
-    At least 6 non-coplanar correspondences are needed for a valid DLT fit.
+    2. Press 'n' when done.  The tool derives the plane z from the median of the
+       recorded Braid z values and refocuses the lens to that height automatically.
+
+    3. Choose:
+         's' — save as flat [camera.FOV] and quit.
+         'a' — add a second plane (move target to the other height and repeat 1-2).
+
+    4. After the second plane, press 's' to save as [camera.FOV.near] +
+       [camera.FOV.far].  The lower-z plane is always "near" and higher-z is "far".
+
+    Other keys: u=undo last point  q=quit without saving
 """
 
 import argparse
@@ -38,12 +40,14 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from src.utils.calibration import BraidToXimeaCalibration
-from src.utils.config import BraidPublisherConfig
+from src.hardware.lens import LensDriver
+from src.processes.lens import setup_lens_calibration
+from src.utils.config import BraidPublisherConfig, LiquidLensConfig
 
 _DATA_PREFIX = "data: "
 _MAX_RETRIES = 5
 _RETRY_DELAY = 2
+_MIN_POINTS = 4
 
 
 def _parse_chunk(chunk: str) -> dict:
@@ -117,12 +121,12 @@ class _BraidTracker(threading.Thread):
                         pass
             except requests.RequestException as e:
                 if not self._stop_event.is_set():
-                    print(f"  BRAID connection lost: {e} — retrying in 1 s")
+                    print(f"  Braid connection lost: {e} — retrying in 1 s")
                     time.sleep(1)
 
 
 # ---------------------------------------------------------------------------
-# Camera stream
+# Camera
 # ---------------------------------------------------------------------------
 
 
@@ -132,11 +136,6 @@ def _open_ximea_camera(
     fps: float = 10.0,
     exposure_us: int = 2000,
 ) -> tuple:
-    """Open and configure the Ximea camera for calibration preview.
-
-    Returns:
-        (cam, img, actual_width, actual_height)
-    """
     from ximea import Camera, Image
 
     cam = Camera()
@@ -154,20 +153,15 @@ def _open_ximea_camera(
     offset_y = (sensor_h - height) // 2
     inc_x = cam.get_offsetX_increment()
     inc_y = cam.get_offsetY_increment()
-    offset_x = (offset_x // inc_x) * inc_x
-    offset_y = (offset_y // inc_y) * inc_y
-    cam.set_offsetX(offset_x)
-    cam.set_offsetY(offset_y)
-
+    cam.set_offsetX((offset_x // inc_x) * inc_x)
+    cam.set_offsetY((offset_y // inc_y) * inc_y)
     cam.set_acq_timing_mode("XI_ACQ_TIMING_MODE_FRAME_RATE_LIMIT")
     cam.set_framerate(fps)
 
     actual_w = cam.get_width()
     actual_h = cam.get_height()
-
     cam.start_acquisition()
-    img = Image()
-    return cam, img, actual_w, actual_h
+    return cam, Image(), actual_w, actual_h
 
 
 # ---------------------------------------------------------------------------
@@ -198,12 +192,39 @@ def _detect_bright_spot(
 
 
 # ---------------------------------------------------------------------------
+# FOV helpers
+# ---------------------------------------------------------------------------
+
+
+def _compute_fov(points_xy: list[tuple[float, float]]) -> dict[str, float]:
+    xs = [p[0] for p in points_xy]
+    ys = [p[1] for p in points_xy]
+    return {
+        "x_min": float(min(xs)),
+        "x_max": float(max(xs)),
+        "y_min": float(min(ys)),
+        "y_max": float(max(ys)),
+    }
+
+
+def _print_fov(label: str, z: float, fov: dict[str, float]) -> None:
+    print(f"\n  {label}  z = {z:.4f} m:")
+    print(
+        f"    x [{fov['x_min']:.5f}, {fov['x_max']:.5f}]"
+        f"  ({(fov['x_max'] - fov['x_min']) * 1000:.1f} mm wide)"
+    )
+    print(
+        f"    y [{fov['y_min']:.5f}, {fov['y_max']:.5f}]"
+        f"  ({(fov['y_max'] - fov['y_min']) * 1000:.1f} mm tall)"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Config writers
 # ---------------------------------------------------------------------------
 
 
 def _write_fov_to_config(config_path: str, fov: dict[str, float]) -> None:
-    """Overwrite [camera.FOV] x_min/x_max/y_min/y_max values in-place."""
     text = Path(config_path).read_text()
     if not re.search(r"^\[camera\.FOV\]", text, re.MULTILINE):
         raise RuntimeError(
@@ -229,7 +250,6 @@ def _write_frustum_to_config(
     far_z: float,
     far: dict[str, float],
 ) -> None:
-    """Replace the [camera.FOV] block with [camera.FOV.near] and [camera.FOV.far]."""
     text = Path(config_path).read_text()
     lines = text.splitlines(keepends=True)
 
@@ -277,43 +297,7 @@ def _write_frustum_to_config(
 
 
 # ---------------------------------------------------------------------------
-# FOV computation
-# ---------------------------------------------------------------------------
-
-
-def _compute_fov_at_z(
-    calibration: BraidToXimeaCalibration,
-    frame_w: int,
-    frame_h: int,
-    z: float,
-) -> tuple[dict[str, float], list[tuple[int, int]]]:
-    """Compute FOV dict and the projected pixel corners of the FOV rectangle."""
-    fov = calibration.compute_fov(frame_w, frame_h, z)
-
-    corners_world = [
-        (fov["x_min"], fov["y_min"], z),
-        (fov["x_max"], fov["y_min"], z),
-        (fov["x_max"], fov["y_max"], z),
-        (fov["x_min"], fov["y_max"], z),
-    ]
-    fov_pixels = []
-    for x, y, zw in corners_world:
-        u, v = calibration.project(x, y, zw)
-        fov_pixels.append((int(round(u)), int(round(v))))
-
-    return fov, fov_pixels
-
-
-def _print_fov(label: str, z: float, fov: dict, frame_w: int, frame_h: int) -> None:
-    print(f"\n  {label}  z = {z:.4f} m  ({frame_w}x{frame_h} px):")
-    print(f"    x_min = {fov['x_min']:.5f}  x_max = {fov['x_max']:.5f}"
-          f"  ({(fov['x_max'] - fov['x_min']) * 1000:.1f} mm wide)")
-    print(f"    y_min = {fov['y_min']:.5f}  y_max = {fov['y_max']:.5f}"
-          f"  ({(fov['y_max'] - fov['y_min']) * 1000:.1f} mm tall)")
-
-
-# ---------------------------------------------------------------------------
-# Overlay drawing
+# Overlay
 # ---------------------------------------------------------------------------
 
 _GREEN = (0, 220, 0)
@@ -322,87 +306,87 @@ _WHITE = (240, 240, 240)
 _CYAN = (220, 200, 0)
 _ORANGE = (0, 140, 255)
 _GREY = (120, 120, 120)
-_PLANE_COLORS = [_ORANGE, (0, 220, 220), (220, 0, 220), (0, 220, 120)]
 _FONT = cv2.FONT_HERSHEY_SIMPLEX
+
+_PHASE_COLORS = [_GREEN, _ORANGE]
+_PHASE_LABELS = ["Plane 1", "Plane 2"]
 
 
 def _draw_overlay(
     frame: np.ndarray,
-    world_pts: list,
-    pixel_pts: list,
-    braid_pos: tuple | None,
-    reprojection_error: float | None,
-    planes: list[tuple[float, dict, list]],
+    phase: int,
+    phase_done: list[bool],
+    points: list[list[tuple[float, float]]],
+    plane_z: list[float | None],
+    braid_pos: tuple[float, float, float] | None,
     detected_spot: tuple[float, float] | None,
 ) -> np.ndarray:
     vis = frame.copy()
     h, w = vis.shape[:2]
 
-    # Draw each FOV plane rectangle
-    for i, (z, fov, fov_pix) in enumerate(planes):
-        color = _PLANE_COLORS[i % len(_PLANE_COLORS)]
-        if len(fov_pix) == 4:
-            pts = np.array(fov_pix, dtype=np.int32).reshape((-1, 1, 2))
-            cv2.polylines(vis, [pts], isClosed=True, color=color, thickness=2)
-            cv2.putText(
-                vis,
-                f"Plane {i + 1}  z={z:.3f} m",
-                (fov_pix[0][0] + 6, fov_pix[0][1] + 18),
-                _FONT,
-                0.45,
-                color,
-                1,
-                cv2.LINE_AA,
-            )
+    # Draw points for each phase
+    for ph in range(2):
+        color = _PHASE_COLORS[ph] if ph == phase else _GREY
+        for i, (px, py) in enumerate(points[ph]):
+            u, v = int(round(px)), int(round(py))
+            cv2.drawMarker(vis, (u, v), color, cv2.MARKER_CROSS, 14, 2)
+            cv2.putText(vis, f"{i + 1}", (u + 8, v - 6), _FONT, 0.38, color, 1, cv2.LINE_AA)
 
-    # Live detected bright-spot centroid
+    # Live detected spot
     if detected_spot is not None:
-        dx, dy = int(round(detected_spot[0])), int(round(detected_spot[1]))
-        cv2.circle(vis, (dx, dy), 18, _CYAN, 2, cv2.LINE_AA)
-        cv2.drawMarker(vis, (dx, dy), _CYAN, cv2.MARKER_CROSS, 20, 1)
+        u, v = int(round(detected_spot[0])), int(round(detected_spot[1]))
+        cv2.circle(vis, (u, v), 10, _CYAN, 2)
+        cv2.drawMarker(vis, (u, v), _CYAN, cv2.MARKER_CROSS, 20, 1)
 
-    # Collected correspondence points
-    for i, (pp, wp) in enumerate(zip(pixel_pts, world_pts)):
-        u, v = int(pp[0]), int(pp[1])
-        cv2.drawMarker(vis, (u, v), _GREEN, cv2.MARKER_CROSS, 14, 2)
-        cv2.putText(
-            vis,
-            f"{i + 1}: ({wp[0]:.3f},{wp[1]:.3f},{wp[2]:.3f})",
-            (u + 8, v - 6),
-            _FONT,
-            0.38,
-            _GREEN,
-            1,
-            cv2.LINE_AA,
-        )
+    # Status panel
+    current_pts = points[phase]
+    lines: list[tuple[str, tuple]] = []
 
-    # Status panel (top-left)
-    lines: list[tuple[str, tuple]] = [
-        (f"Points: {len(world_pts)}/6+", _WHITE),
-        (
-            f"BRAID: {braid_pos[0]:.3f}, {braid_pos[1]:.3f}, {braid_pos[2]:.3f}"
-            if braid_pos
-            else "BRAID: no fix",
-            _WHITE,
-        ),
-    ]
-    if reprojection_error is not None:
-        lines.append((f"RMS reprojection: {reprojection_error:.2f} px", _WHITE))
-    for i, (z, fov, _) in enumerate(planes):
-        color = _PLANE_COLORS[i % len(_PLANE_COLORS)]
+    if braid_pos:
         lines.append((
-            f"Plane {i + 1}: z={z:.3f} m  "
-            f"x[{fov['x_min']:.3f},{fov['x_max']:.3f}]  "
-            f"y[{fov['y_min']:.3f},{fov['y_max']:.3f}]",
-            color,
+            f"Braid: ({braid_pos[0]:.3f}, {braid_pos[1]:.3f}, {braid_pos[2]:.3f})",
+            _WHITE,
+        ))
+    else:
+        lines.append(("Braid: no fix", _WHITE))
+
+    for ph in range(2):
+        if not points[ph] and ph > phase:
+            break
+        z_str = f"  z={plane_z[ph]:.4f} m" if plane_z[ph] is not None else ""
+        pts_str = f"{len(points[ph])} pts"
+        done_str = " (done)" if phase_done[ph] else ""
+        color = _PHASE_COLORS[ph] if ph == phase else _GREY
+        lines.append((f"{_PHASE_LABELS[ph]}: {pts_str}{z_str}{done_str}", color))
+
+    if current_pts and not phase_done[phase]:
+        xs = [p[0] for p in current_pts]
+        ys = [p[1] for p in current_pts]
+        lines.append((
+            f"  x [{min(xs):.4f}, {max(xs):.4f}]"
+            f"  ({(max(xs) - min(xs)) * 1000:.1f} mm)",
+            _CYAN,
+        ))
+        lines.append((
+            f"  y [{min(ys):.4f}, {max(ys):.4f}]"
+            f"  ({(max(ys) - min(ys)) * 1000:.1f} mm)",
+            _CYAN,
         ))
 
     for i, (line, color) in enumerate(lines):
-        cv2.putText(vis, line, (10, 24 + i * 22), _FONT, 0.52, color, 1, cv2.LINE_AA)
+        cv2.putText(vis, line, (10, 28 + i * 22), _FONT, 0.50, color, 1, cv2.LINE_AA)
 
-    help_text = "SPACE: auto | CLICK: manual | u: undo | f: fit | p: pin plane @ Braid z | s: save | q: quit"
+    # Help text
+    if phase_done[0] and not phase_done[1]:
+        help_text = "s: save flat FOV | a: add second plane | u: undo | q: quit"
+    elif phase_done[1]:
+        help_text = "s: save frustum FOV | u: undo | q: quit"
+    else:
+        need = max(0, _MIN_POINTS - len(current_pts))
+        need_str = f"need {need} more | " if need > 0 else ""
+        help_text = f"SPACE/CLICK: add pt | {need_str}n: finalize plane | u: undo | q: quit"
+
     cv2.putText(vis, help_text, (10, h - 10), _FONT, 0.45, _YELLOW, 1, cv2.LINE_AA)
-
     return vis
 
 
@@ -411,139 +395,112 @@ def _draw_overlay(
 # ---------------------------------------------------------------------------
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Interactive BRAID-to-camera calibration with multi-plane FOV"
+        description="Camera FOV calibration — one or two z-planes, z auto-read from Braid"
     )
     parser.add_argument("--config", default="configs/config.toml")
-    parser.add_argument(
-        "--out",
-        default="calibrations/braid_to_ximea.npz",
-        help="Output projection calibration file",
-    )
     parser.add_argument("--fps", type=float, default=10.0)
     parser.add_argument("--exposure", type=int, default=2000)
     parser.add_argument(
         "--threshold",
         type=int,
         default=200,
-        help="Pixel brightness threshold for auto-detecting the laser dot (0-255)",
+        help="Brightness threshold for auto-detect (0-255)",
     )
     args = parser.parse_args()
 
+    # --- Lens ---
     try:
-        braid_cfg = BraidPublisherConfig(args.config)
+        lens_cfg = LiquidLensConfig(args.config)
+        lens_cal = setup_lens_calibration(lens_cfg.calibration_file, lens_cfg.calibration_model)
+        lens = LensDriver(lens_cfg.port)
+        lens.to_focal_power_mode()
+        print(f"  Lens opened on {lens_cfg.port}")
     except Exception as e:
-        print(f"ERROR: Could not load config from {args.config}: {e}")
+        print(f"ERROR: Cannot open liquid lens: {e}")
         sys.exit(1)
 
+    # --- Braid ---
+    braid_cfg = BraidPublisherConfig(args.config)
     stop_event = threading.Event()
     try:
         tracker = _BraidTracker(braid_cfg.url, stop_event)
     except RuntimeError as e:
         print(f"ERROR: {e}")
+        lens.close()
         sys.exit(1)
     tracker.start()
-    print(f"Connected to Braid SSE at {braid_cfg.url}")
+    print(f"  Connected to Braid SSE at {braid_cfg.url}")
 
+    # --- Camera ---
     try:
         cam, img_obj, frame_w, frame_h = _open_ximea_camera(
             fps=args.fps, exposure_us=args.exposure
         )
-        print(f"Ximea camera opened: {frame_w}x{frame_h} @ {args.fps} fps")
+        print(f"  Ximea camera: {frame_w}x{frame_h} @ {args.fps} fps\n")
     except Exception as e:
         print(f"ERROR: Cannot open Ximea camera: {e}")
         stop_event.set()
+        lens.close()
         sys.exit(1)
 
-    world_pts: list[tuple[float, float, float]] = []
-    pixel_pts: list[tuple[float, float]] = []
-    calibration = BraidToXimeaCalibration()
-    reprojection_error: float | None = None
-    # Each plane: (z, fov_dict, fov_pixels)
-    planes: list[tuple[float, dict, list]] = []
-
     gray_buf = np.empty((frame_h, frame_w), dtype=np.uint8)
+
+    # State: points[0] = plane-1 Braid (x,y) list, points[1] = plane-2
+    points: list[list[tuple[float, float]]] = [[], []]
+    z_values: list[list[float]] = [[], []]   # Braid z per recorded point, per phase
+    plane_z: list[float | None] = [None, None]
+    phase_done: list[bool] = [False, False]
+    phase = 0
+
     click_pending: list[tuple[int, int]] = []
-    detected_spot: tuple[float, float] | None = None
 
     def _on_mouse(event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:
             click_pending.append((x, y))
 
-    window_name = "BRAID-to-Camera Calibration"
+    window_name = "Camera FOV Calibration"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     cv2.setMouseCallback(window_name, _on_mouse)
 
     print(
-        "\n--- Instructions ---"
-        "\n  Required points (minimum 6 total):"
-        "\n    * TOP-LEFT corner of the frame     (1 point)"
-        "\n    * TOP-RIGHT corner of the frame    (1 point)"
-        "\n    * BOTTOM-LEFT corner of the frame  (1 point)"
-        "\n    * BOTTOM-RIGHT corner of the frame (1 point)"
-        "\n    * 2+ additional points anywhere inside the frame"
-        "\n"
-        "\n  Capturing a point:"
-        "\n    SPACE      — auto-detect the laser dot centroid (cyan circle = preview)"
-        "\n    LEFT-CLICK — manual fallback: records the exact clicked pixel"
-        "\n    Both methods snapshot the current BRAID (x, y, z) at capture time."
-        "\n"
-        "\n  Steps:"
-        "\n  1. Collect >=6 correspondences. Press 'f' to fit."
-        "\n  2. Position the laser at a desired height. Press 'p' to capture a FOV"
-        "\n     plane — the z is read from BRAID automatically (no manual entry)."
-        "\n  3. Move to a different height and press 'p' again to add a second plane."
-        "\n  4. Press 's' to save the projection calibration and write FOV to config."
-        "\n     1 plane -> flat [camera.FOV]"
-        "\n     2 planes -> [camera.FOV.near] + [camera.FOV.far]"
-        "\n  5. Press 'u' to undo the last correspondence point. 'q' to quit."
+        "--- Instructions ---"
+        "\n  Move the laser/LED to the LEFT, RIGHT, TOP, and BOTTOM edges"
+        "\n  of the camera frame at your desired height."
+        "\n  Press SPACE (auto-detect) or click to record each edge point."
+        "\n  Collect >= 4 boundary points, then press 'n' to finalise the plane."
+        "\n  Press 'u' to undo, 'q' to quit."
         "\n--------------------\n"
     )
 
-    def _record_point(u: float, v: float, source: str) -> None:
+    def _record_point(u: float | None, v: float | None) -> None:
         braid_pos = tracker.position
         if braid_pos is None:
-            print("  [skip] No BRAID fix — move the target into the tracking volume first")
+            print("  [skip] No Braid fix — move target into tracking volume")
             return
-        world_pts.append(braid_pos)
-        pixel_pts.append((float(u), float(v)))
-        nonlocal reprojection_error
-        reprojection_error = None
-        n = len(world_pts)
+        x, y, z = braid_pos
+        points[phase].append((x, y))
+        z_values[phase].append(z)
+        src = f"pixel ({int(u)},{int(v)})" if u is not None else "click"
         print(
-            f"  Point {n} [{source}]: "
-            f"BRAID ({braid_pos[0]:.4f}, {braid_pos[1]:.4f}, {braid_pos[2]:.4f})"
-            f"  ->  pixel ({u:.1f}, {v:.1f})"
+            f"  Phase {phase + 1} pt {len(points[phase])}: "
+            f"Braid ({x:.4f}, {y:.4f}, {z:.4f})  [{src}]"
         )
-        if n < 4:
-            print(f"  {4 - n} corner point(s) still needed.")
-        elif n == 4:
-            print("  All 4 corners collected — add >=2 more interior points.")
-        elif n == 6:
-            print("  >=6 points collected — press 'f' to fit.")
 
-    def _capture_plane() -> None:
-        if not calibration.is_fitted:
-            print("  Fit first — press 'f'.")
-            return
-        braid_pos = tracker.position
-        if braid_pos is None:
-            print("  [skip] No BRAID fix — move target into tracking volume first.")
-            return
-        z = braid_pos[2]
-        try:
-            fov, fov_pix = _compute_fov_at_z(calibration, frame_w, frame_h, z)
-        except Exception as e:
-            print(f"  FOV computation failed: {e}")
-            return
-        planes.append((z, fov, fov_pix))
-        _print_fov(f"Plane {len(planes)}", z, fov, frame_w, frame_h)
-        print(
-            f"  Plane {len(planes)} captured at z={z:.4f} m (from BRAID)."
-            "\n  Move to another height and press 'p' to add another plane,"
-            "\n  or press 's' to save."
-        )
+    def _finalise_plane() -> bool:
+        """Compute z from median, set lens, print FOV. Returns True on success."""
+        if len(points[phase]) < _MIN_POINTS:
+            print(f"  Need >= {_MIN_POINTS} points (have {len(points[phase])})")
+            return False
+        z_med = float(np.median(z_values[phase]))
+        plane_z[phase] = z_med
+        dpt = lens_cal.get_dpt(z_med)
+        lens.set_diopter(dpt)
+        fov = _compute_fov(points[phase])
+        _print_fov(f"Plane {phase + 1}", z_med, fov)
+        print(f"  Lens refocused to z={z_med:.4f} m ({dpt:+.3f} dpt)")
+        return True
 
     try:
         while True:
@@ -552,129 +509,116 @@ def main():
             except Exception as e:
                 print(f"Camera read failed: {e}")
                 break
+
             ctypes.memmove(gray_buf.ctypes.data, img_obj.bp, frame_w * frame_h)
             frame = cv2.cvtColor(gray_buf, cv2.COLOR_GRAY2BGR)
-
             detected_spot = _detect_bright_spot(gray_buf, threshold=args.threshold)
 
             if click_pending:
                 u, v = click_pending.pop(0)
-                _record_point(u, v, "click")
+                if not phase_done[phase]:
+                    _record_point(float(u), float(v))
 
             vis = _draw_overlay(
-                frame,
-                world_pts,
-                pixel_pts,
-                tracker.position,
-                reprojection_error,
-                planes,
-                detected_spot,
+                frame, phase, phase_done, points, plane_z, tracker.position, detected_spot
             )
             cv2.imshow(window_name, vis)
-
             key = cv2.waitKey(30) & 0xFF
 
             if key == ord("q"):
+                print("\nQuit without saving.")
                 break
 
             elif key == ord(" "):
-                if detected_spot is None:
-                    print(
-                        f"  [skip] No bright spot detected (threshold={args.threshold}). "
-                        "Adjust --threshold or click manually."
-                    )
+                if phase_done[phase]:
+                    print("  This plane is finalised. Press 's' to save or 'a' to add a plane.")
+                elif detected_spot is not None:
+                    _record_point(detected_spot[0], detected_spot[1])
                 else:
-                    _record_point(detected_spot[0], detected_spot[1], "auto")
+                    print(
+                        "  [skip] No bright spot detected — adjust --threshold or click manually"
+                    )
 
             elif key == ord("u"):
-                if world_pts:
-                    rw = world_pts.pop()
-                    rp = pixel_pts.pop()
-                    reprojection_error = None
-                    print(f"  Undid point {len(world_pts) + 1}: BRAID {rw}  pixel {rp}")
+                if points[phase] and not phase_done[phase]:
+                    removed_xy = points[phase].pop()
+                    z_values[phase].pop()
+                    print(f"  Undid point: Braid ({removed_xy[0]:.4f}, {removed_xy[1]:.4f})")
+                elif phase_done[phase]:
+                    print("  Plane already finalised — cannot undo. Start over with 'q'.")
                 else:
                     print("  Nothing to undo")
 
-            elif key == ord("f"):
-                if len(world_pts) < 6:
-                    print(f"  Need >=6 points for DLT fit, have {len(world_pts)}")
-                else:
-                    try:
-                        rms = calibration.fit(np.array(world_pts), np.array(pixel_pts))
-                        reprojection_error = rms
-                        quality = "good" if rms < 3 else "consider adding more points"
+            elif key == ord("n"):
+                if phase_done[phase]:
+                    print("  Already finalised. Press 's' to save or 'a' to add a plane.")
+                elif _finalise_plane():
+                    phase_done[phase] = True
+                    if phase == 0:
                         print(
-                            f"  DLT fit OK — RMS reprojection error: {rms:.2f} px ({quality})"
-                            "\n  Press 'p' to capture a FOV plane at the current BRAID z."
+                            "\n  Plane 1 done."
+                            "\n  Press 's' to save as a flat [camera.FOV] and quit,"
+                            "\n  or 'a' to add a second plane at a different height.\n"
                         )
-                    except Exception as e:
-                        print(f"  Fit failed: {e}")
+                    else:
+                        print(
+                            "\n  Both planes done."
+                            "\n  Press 's' to save as [camera.FOV.near] + [camera.FOV.far].\n"
+                        )
 
-            elif key == ord("p"):
-                _capture_plane()
+            elif key == ord("a"):
+                if not phase_done[0]:
+                    print("  Finalise plane 1 first (press 'n').")
+                elif phase == 1:
+                    print("  Already on plane 2. Collect points and press 'n'.")
+                else:
+                    phase = 1
+                    print(
+                        "\n  Move the target to the other height and collect >= 4 boundary points."
+                        "\n  Press 'n' when done.\n"
+                    )
 
             elif key == ord("s"):
-                # Auto-fit if not yet done
-                if not calibration.is_fitted:
-                    if len(world_pts) >= 6:
-                        try:
-                            rms = calibration.fit(
-                                np.array(world_pts), np.array(pixel_pts)
-                            )
-                            reprojection_error = rms
-                        except Exception as e:
-                            print(f"  Cannot fit before saving: {e}")
-                            continue
-                    else:
-                        print(f"  Need >=6 points to save, have {len(world_pts)}")
-                        continue
+                if not phase_done[0]:
+                    print("  Finalise plane 1 first (press 'n').")
+                    continue
+                if phase == 1 and not phase_done[1]:
+                    print("  Finalise plane 2 first (press 'n').")
+                    continue
 
-                # Auto-capture one plane if none recorded yet
-                if not planes:
-                    print("  No planes captured — capturing one at current BRAID z...")
-                    _capture_plane()
-                    if not planes:
-                        print("  Cannot save: no FOV planes. Press 'p' with a BRAID fix.")
-                        continue
+                fov0 = _compute_fov(points[0])
+                z0 = plane_z[0]
 
-                # Save projection calibration
-                calibration.save(args.out)
-                print(
-                    f"\n  Saved projection calibration -> {args.out}"
-                    f"  (RMS={reprojection_error:.2f} px, {len(world_pts)} points)"
-                )
-
-                # Write FOV to config
-                planes_sorted = sorted(planes, key=lambda t: t[0])
-                if len(planes_sorted) == 1:
-                    z, fov, _ = planes_sorted[0]
+                if not phase_done[1]:
+                    # Single plane — flat FOV
+                    _print_fov("Flat FOV", z0, fov0)
                     ans = (
-                        input(
-                            f"\n  Write flat [camera.FOV] (z={z:.4f} m) to {args.config}? [y/N] "
-                        )
+                        input(f"\n  Write [camera.FOV] to {args.config}? [y/N] ")
                         .strip()
                         .lower()
                     )
                     if ans == "y":
                         try:
-                            _write_fov_to_config(args.config, fov)
-                            print(f"  [camera.FOV] updated in {args.config}")
+                            _write_fov_to_config(args.config, fov0)
+                            print(f"  [camera.FOV] written to {args.config}")
                         except Exception as e:
                             print(f"  WARNING: could not update config: {e}")
                     else:
                         print("  Config not modified.")
                 else:
-                    near_z, near_fov, _ = planes_sorted[0]
-                    far_z, far_fov, _ = planes_sorted[-1]
-                    if len(planes_sorted) > 2:
-                        print(
-                            f"  {len(planes_sorted)} planes captured; "
-                            f"using z={near_z:.4f} m as near and z={far_z:.4f} m as far."
-                        )
+                    # Two planes — frustum FOV, near = lower z
+                    fov1 = _compute_fov(points[1])
+                    z1 = plane_z[1]
+                    if z0 <= z1:
+                        near_z, near_fov, far_z, far_fov = z0, fov0, z1, fov1
+                    else:
+                        near_z, near_fov, far_z, far_fov = z1, fov1, z0, fov0
+                    _print_fov("Near plane", near_z, near_fov)
+                    _print_fov("Far  plane", far_z, far_fov)
                     ans = (
                         input(
-                            f"\n  Write [camera.FOV.near] (z={near_z:.4f} m) and "
-                            f"[camera.FOV.far] (z={far_z:.4f} m) to {args.config}? [y/N] "
+                            f"\n  Write [camera.FOV.near] (z={near_z:.4f} m) and"
+                            f" [camera.FOV.far] (z={far_z:.4f} m) to {args.config}? [y/N] "
                         )
                         .strip()
                         .lower()
@@ -700,15 +644,18 @@ def main():
             cam.close_device()
         except Exception:
             pass
+        try:
+            lens.close()
+        except Exception:
+            pass
         cv2.destroyAllWindows()
         tracker.join(timeout=2)
 
-    if world_pts:
-        print(f"\nSession summary: {len(world_pts)} correspondences, {len(planes)} plane(s)")
-        if reprojection_error is not None:
-            print(f"Final RMS reprojection error: {reprojection_error:.2f} px")
-    else:
-        print("\nNo correspondences collected.")
+    print(
+        f"\nSession summary:"
+        f"\n  Plane 1: {len(points[0])} point(s)"
+        + (f"\n  Plane 2: {len(points[1])} point(s)" if points[1] else "")
+    )
 
 
 if __name__ == "__main__":
