@@ -261,6 +261,7 @@ class VisualProcess(WorkerProcess):
                 {
                     "timestamp": data.get("timestamp", time.time()),
                     "obj_id": data.get("obj_id"),
+                    "frame": data.get("frame"),
                     "braid_heading_rad": braid_rad,
                     "world_heading_deg": world_heading,
                     **stim_params,
