@@ -8,13 +8,12 @@
 #     "matplotlib",
 #     "pypylon",
 #     "pupil-apriltags",
-#     "optotune",
+#     "fastcrc",
 #     "ximea",
 #     "pyserial",
 # ]
 #
 # [tool.uv.sources]
-# optotune = { git = "https://github.com/elhananby/optotune-py" }
 # ximea = { git = "ssh://git@github.com/elhananby/ximea-py.git" }
 # ///
 """
@@ -46,16 +45,31 @@ ARGUMENTS
   --exposure US         XIMEA exposure in microseconds (default: 5000)
   --sweeps K            Full autofocus sweeps per position; results are averaged
                         with IQR outlier rejection (default: 5)
-  --motor-port PATH     USB serial port for Arduino/GRBL motor stage
+  --lens-port PATH      Serial port for the Optotune liquid lens
+                        (default: /dev/optotune_ld)
+  --pico-port PATH      USB serial port for Raspberry Pi Pico motor stage
                         (e.g., /dev/ttyACM0). When set → automated mode.
-  --measurements N      Number of positions across the full 200 mm range
-                        (default: 20). Step size = 200.0 / N.
-                        Only used with --motor-port.
+  --measurements N      Number of measurement positions (default: 20).
+                        Spread evenly across the swept range. Only used with --pico-port.
+  --stroke-mm MM        Physical travel to cover, in mm (default: 235 = full stage).
+                        Measurements span this whole distance using --steps-per-mm,
+                        so by default the sweep covers the ENTIRE motor range.
+                        Set 0 to use --step-size-steps instead. Only used with --pico-port.
+  --steps-per-mm N      Motor steps per mm (default: 1666.67, from motor calibration).
+  --total-range-steps N Total motor steps for the full travel range. Overrides
+                        --stroke-mm. step size = total_range_steps / (measurements − 1).
+                        Only used with --pico-port.
+  --step-size-steps N   Steps to move between measurements (default: 100).
+                        Only used when --total-range-steps unset and --stroke-mm is 0.
+                        Only used with --pico-port.
+  --step-delay-us N     Microseconds between steps for Pico motor
+                        (default: 800, lower = faster).
+                        Only used with --pico-port.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 WORKFLOW
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Manual mode (default, --motor-port absent):
+  Manual mode (default, --pico-port absent):
     1. A live XIMEA preview opens.
          SPACE — confirm tag is in place and start measurement
          Q / ESC — quit
@@ -78,10 +92,12 @@ WORKFLOW
 
     5. Prompt to move to the next position (Enter / Q to finish).
 
-  Automated mode (--motor-port set):
-    • Position the tag at the bottom, press Enter.
-    • Script runs autofocus → tag detection → save → motor move up → repeat
-      automatically for --measurements positions.
+  Automated mode (--pico-port set):
+    • A 3 s live XIMEA preview opens so you can verify tag placement.
+    • Position the tag at the bottom, press Enter in the terminal.
+    • Script runs autofocus (with live camera view) → tag detection → save →
+      motor move up (live view during settle) → repeat automatically for
+      --measurements positions.
     • No interactive prompts per position. Failed detections are skipped
       with a warning.
     • Ctrl+C at any time saves and plots whatever was collected so far.
@@ -103,6 +119,8 @@ from __future__ import annotations
 import argparse
 import csv
 import os
+import select
+import sys
 import time
 import warnings
 import xml.etree.ElementTree as ET
@@ -125,11 +143,32 @@ from scipy.optimize import curve_fit
 # ---------------------------------------------------------------------------
 
 
-def laplacian_variance(image: np.ndarray) -> float:
-    """Variance of the Laplacian after Gaussian pre-blur."""
-    blurred = cv2.GaussianBlur(image, (7, 7), 0)
-    lap = cv2.Laplacian(blurred, cv2.CV_64F)
-    return float(lap.var())
+def focus_metric(image: np.ndarray) -> float:
+    """Tenengrad focus measure: mean squared Sobel gradient magnitude.
+
+    A Laplacian-variance metric was tried first but failed on this camera's
+    dim, low-contrast, noisy imagery: a Gaussian pre-blur destroyed the
+    high-frequency focus signal (leaving a near-constant ~1.0), and the raw
+    Laplacian variance just tracked the overall brightness drift across the
+    sweep.  The Sobel gradient energy (Tenengrad) tracks true focus cleanly
+    here — see the commit message / calibration notes for the comparison.
+    """
+    gx = cv2.Sobel(image, cv2.CV_64F, 1, 0, ksize=3)
+    gy = cv2.Sobel(image, cv2.CV_64F, 0, 1, ksize=3)
+    return float(np.mean(gx * gx + gy * gy))
+
+
+def _lens_temp(lens: Any) -> float:
+    """Lens temperature in °C, or NaN if the driver can't report it.
+
+    The lens self-heats when actuated hard (long calibration sweeps).  Logging
+    it lets you check whether the calibration was done at a different
+    temperature than the experiment — a source of focal-power drift.
+    """
+    try:
+        return float(lens.get_temperature())
+    except Exception:  # noqa: BLE001
+        return float("nan")
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +197,7 @@ def fit_lorentzian(dpts: np.ndarray, vals: np.ndarray) -> tuple[dict[str, float]
     )
     try:
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
+            warnings.filterwarnings("ignore", category=RuntimeWarning)
             popt, _ = curve_fit(
                 lorentzian, dpts, vals, p0=p0, bounds=bounds, maxfev=5000
             )
@@ -171,41 +210,50 @@ def fit_lorentzian(dpts: np.ndarray, vals: np.ndarray) -> tuple[dict[str, float]
 # Motor stage (GRBL over USB serial)
 # ---------------------------------------------------------------------------
 
+# Motor calibration (from --calibrate-motor: 10000 steps measured = 6 mm).
+# Hard-coded so a calibration run can cover the full stroke from --stroke-mm
+# without re-measuring each time.  Override with --steps-per-mm if it changes.
+STEPS_PER_MM = 1666.67
+# Physical travel of the linear stage (mm); default --stroke-mm.
+MOTOR_STROKE_MM = 235.0
 
-class MotorStage:
-    """Thin wrapper over an Arduino running GRBL, single-axis via USB serial."""
 
-    def __init__(self, port: str) -> None:
+class PicoMotorStage:
+    """Stepper motor driven by a Raspberry Pi Pico running MicroPython.
+
+    Protocol: send '<steps> <delay_us>\\n', receive 'ok' or 'error: ...'.
+    Positive steps = forward (up). Pass invert=True if your wiring reverses direction.
+    """
+
+    def __init__(self, port: str, invert: bool = False) -> None:
         import serial
 
-        self._ser = serial.Serial(port, 115200, timeout=2.0)
-        time.sleep(2.0)  # let GRBL boot
-        self._command("$X")  # unlock
-        self._command("G91")  # relative positioning
+        self._ser = serial.Serial(port, 115200, timeout=0.5)  # 500ms per line read
+        self._invert = invert
+        time.sleep(2.0)  # let Pico enumerate
 
-    def _command(self, gcode: str, timeout_s: float = 10.0) -> str:
-        """Send a G-code line, return the last response line (blocks until ok/error)."""
-        self._ser.write(f"{gcode}\n".encode())
+    def move(self, steps: int, delay_us: int = 800) -> None:
+        """Move by steps (positive = up, negative = down)."""
+        if self._invert:
+            steps = -steps
+        self._ser.write(f"{steps} {delay_us}\n".encode())
+        self._ser.flush()  # Force immediate transmission
+        # Timeout: movement time + 2s margin. Large moves can take 30+ seconds.
+        movement_time_s = abs(steps) * delay_us / 1_000_000.0
+        timeout_s = max(35.0, movement_time_s + 2.0)
         deadline = time.monotonic() + timeout_s
-        response = ""
         while time.monotonic() < deadline:
-            line = self._ser.readline().decode().strip()
-            if not line:
+            line = self._ser.readline().decode("ascii").strip()
+            if not line:  # Skip empty lines (timeout)
                 continue
-            response = line
-            if line.startswith("ok") or line.startswith("error"):
-                break
-        else:
-            raise RuntimeError(
-                f"GRBL did not respond within {timeout_s:.0f} s to: {gcode}"
-            )
-        return response
+            if line == "ok":
+                return
+            if line.startswith("error"):
+                raise RuntimeError(f"Pico motor error: {line}")
+        raise RuntimeError(f"Pico motor did not respond within {timeout_s:.1f} s")
 
-    def move_up_mm(self, distance_mm: float, feed_rate: float = 400.0) -> None:
-        """Move upward by distance_mm at feed_rate mm/min."""
-        resp = self._command(f"G0 Y{distance_mm:.3f} F{feed_rate:.0f}")
-        if resp.startswith("error"):
-            raise RuntimeError(f"GRBL move error: {resp}")
+    def move_up(self, steps: int, delay_us: int = 800) -> None:
+        self.move(steps, delay_us)
 
     def close(self) -> None:
         self._ser.close()
@@ -215,9 +263,20 @@ class MotorStage:
 # Diopter sweep
 # ---------------------------------------------------------------------------
 
-# Hardware settle time after each diopter change (seconds)
+# Hardware settle time after each diopter change (seconds).
+# Per the EL-16-40 datasheet the lens settles mechanically in ~25 ms (rings
+# for ~25 ms after a step), so these give comfortable margin.
 COARSE_SETTLE_S = 0.05
 FINE_SETTLE_S = 0.10
+# Settle after re-commanding the lens before a fine sweep.  Mechanical
+# settling is ~25 ms and the LensDriver 4 firmware handles temperature
+# compensation automatically (focal-power mode, ~0.05 dpt), so 0.5 s is
+# already ~20x the physical settling time.
+LENS_SETTLE_S = 0.5
+
+# Debug output directory for per-sweep Lorentzian fit plots.
+SWEEP_DEBUG_DIR = "/tmp/sweep_debug"
+_sweep_idx = 0
 
 
 def sweep(
@@ -227,7 +286,8 @@ def sweep(
     diopters: np.ndarray,
     roi_slice: tuple[slice, slice],
     settle_s: float = COARSE_SETTLE_S,
-    display_window: str | None = None,
+    show_preview: bool = False,
+    label: str = "",
 ) -> np.ndarray:
     """Set each diopter, grab two frames (discard first for freshness), compute contrast."""
     contrasts = np.empty(len(diopters))
@@ -236,11 +296,17 @@ def sweep(
         time.sleep(settle_s)
         cam.get_image(img)  # discard stale frame
         cam.get_image(img)
-        full = img.get_image_data_numpy()
-        roi_frame = full[roi_slice].copy()
-        contrasts[i] = laplacian_variance(roi_frame)
-        if display_window is not None:
-            _show_roi(roi_frame)
+        roi_frame = img.get_image_data_numpy()[roi_slice].copy()
+        contrasts[i] = focus_metric(roi_frame)
+        if show_preview:
+            display = cv2.resize(
+                roi_frame,
+                (int(roi_frame.shape[1] * PREVIEW_SCALE), int(roi_frame.shape[0] * PREVIEW_SCALE)),
+            )
+            display = cv2.cvtColor(display, cv2.COLOR_GRAY2BGR)
+            cv2.putText(display, f"{label}  {dpt:+.3f} dpt", (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1, cv2.LINE_AA)
+            cv2.putText(display, f"focus={contrasts[i]:.0f}", (8, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1, cv2.LINE_AA)
+            cv2.imshow(PREVIEW_WINDOW, display)
             cv2.waitKey(1)
     return contrasts
 
@@ -261,6 +327,13 @@ def _show_roi(frame: np.ndarray) -> None:
         (int(frame.shape[1] * PREVIEW_SCALE), int(frame.shape[0] * PREVIEW_SCALE)),
     )
     cv2.imshow(PREVIEW_WINDOW, display)
+
+
+def _pump_preview(cam: Any, img: Any, roi_slice: tuple[slice, slice]) -> None:
+    """Grab one frame and refresh PREVIEW_WINDOW."""
+    cam.get_image(img)
+    _show_roi(img.get_image_data_numpy()[roi_slice].copy())
+    cv2.waitKey(1)
 
 
 def run_preview_loop(cam: Any, img: Any, roi_slice: tuple[slice, slice]) -> bool:
@@ -293,10 +366,11 @@ def run_preview_loop(cam: Any, img: Any, roi_slice: tuple[slice, slice]) -> bool
 
 MIN_DPT = -2.0
 MAX_DPT = 3.0
-COARSE_STEP = 0.4
-FINE_STEP = 0.04
+COARSE_STEP = 0.1
+# Lens repeatability is ~0.02 dpt (EL-16-40 class 1), so finer steps measure
+# below the hardware noise floor — 0.02 is the meaningful resolution.
+FINE_STEP = 0.02
 FINE_HALF_RANGE = 0.8
-
 
 # ---------------------------------------------------------------------------
 # Autofocus orchestration
@@ -328,22 +402,93 @@ def _run_single_sweep(
 ) -> tuple[float, np.ndarray, np.ndarray, dict[str, float], bool]:
     """One full coarse+fine sweep. Returns (best_dpt, all_dpts, all_vals, params, fit_ok)."""
     coarse_dpts = np.arange(MIN_DPT, MAX_DPT + COARSE_STEP * 0.5, COARSE_STEP)
-    coarse_vals = sweep(cam, img, lens, coarse_dpts, roi_slice, display_window=display_window)
-    coarse_peak_idx = int(np.argmax(coarse_vals))
-    coarse_peak_dpt = float(coarse_dpts[coarse_peak_idx])
+    coarse_vals = sweep(
+        cam, img, lens, coarse_dpts, roi_slice,
+        show_preview=display_window is not None, label="coarse",
+    )
+    # Fit a Lorentzian to the coarse data for a sub-step peak estimate.
+    # With COARSE_STEP=0.1 there are ~51 points — enough for a reliable fit.
+    # This centres the fine sweep accurately so the true peak is never near
+    # fine_lo/fine_hi (which caused sawtooth artefacts when using argmax).
+    coarse_params, coarse_fit_ok = fit_lorentzian(coarse_dpts, coarse_vals)
+    coarse_peak_dpt = (
+        coarse_params["x0"] if coarse_fit_ok
+        else float(coarse_dpts[int(np.argmax(coarse_vals))])
+    )
 
     fine_lo = max(MIN_DPT, coarse_peak_dpt - FINE_HALF_RANGE)
     fine_hi = min(MAX_DPT, coarse_peak_dpt + FINE_HALF_RANGE)
     fine_dpts = np.arange(fine_lo, fine_hi + FINE_STEP * 0.5, FINE_STEP)
-    fine_vals = sweep(cam, img, lens, fine_dpts, roi_slice, settle_s=FINE_SETTLE_S, display_window=display_window)
+
+    # Approach fine_lo from BELOW so the lens is ascending through the fine
+    # range — same physics as the coarse sweep which works correctly.
+    # 1) Descend to an approach point 0.5 dpt below fine_lo and wait.
+    # 2) The fine sweep then ascends from fine_lo, with the lens coming from
+    #    below each commanded value, so it tracks accurately.
+    approach_dpt = max(MIN_DPT, fine_lo - 0.5)
+    lens.set_diopter(float(approach_dpt))
+    time.sleep(LENS_SETTLE_S)
+
+    fine_vals = sweep(
+        cam,
+        img,
+        lens,
+        fine_dpts,
+        roi_slice,
+        settle_s=FINE_SETTLE_S,
+        show_preview=display_window is not None,
+        label="fine",
+    )
+
+    # Fit Lorentzian to fine data only — it has denser coverage and longer
+    # per-step settle than the coarse, so it's the more reliable estimate.
+    # Fall back to the coarse Lorentzian estimate if the fine fit fails.
+    fine_params, fine_fit_ok = fit_lorentzian(fine_dpts, fine_vals)
+    if fine_fit_ok:
+        best_dpt = fine_params["x0"]
+        params = fine_params
+        fit_ok = True
+    else:
+        best_dpt = coarse_peak_dpt
+        params = coarse_params
+        fit_ok = coarse_fit_ok
 
     all_dpts = np.concatenate([coarse_dpts, fine_dpts])
     all_vals = np.concatenate([coarse_vals, fine_vals])
-    order = np.argsort(all_dpts)
-    all_dpts, all_vals = all_dpts[order], all_vals[order]
 
-    params, fit_ok = fit_lorentzian(all_dpts, all_vals)
-    best_dpt = params["x0"] if fit_ok else coarse_peak_dpt
+    # Save debug plot: coarse + fine data with their individual fits.
+    global _sweep_idx
+    os.makedirs(SWEEP_DEBUG_DIR, exist_ok=True)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+
+    x_c = np.linspace(coarse_dpts[0], coarse_dpts[-1], 400)
+    ax1.scatter(coarse_dpts, coarse_vals, s=20, color="tab:blue", zorder=3)
+    if coarse_fit_ok:
+        ax1.plot(x_c, lorentzian(x_c, **coarse_params), color="tab:orange", lw=1.5)
+    ax1.axvline(coarse_peak_dpt, color="tab:red", ls="--", lw=1,
+                label=f"coarse peak={coarse_peak_dpt:+.3f}")
+    ax1.set_title("Coarse")
+    ax1.set_xlabel("dpt")
+    ax1.legend(fontsize=8)
+    ax1.grid(True, alpha=0.3)
+
+    x_f = np.linspace(fine_dpts[0], fine_dpts[-1], 400)
+    ax2.scatter(coarse_dpts, coarse_vals, s=10, color="tab:blue", alpha=0.4, label="coarse")
+    ax2.scatter(fine_dpts, fine_vals, s=15, color="tab:green", zorder=3, label="fine")
+    if fine_fit_ok:
+        ax2.plot(x_f, lorentzian(x_f, **fine_params), color="tab:orange", lw=1.5)
+    ax2.axvline(best_dpt, color="tab:red", ls="--", lw=1,
+                label=f"best={best_dpt:+.4f}")
+    ax2.set_title("Fine fit (final result)")
+    ax2.set_xlabel("dpt")
+    ax2.legend(fontsize=8)
+    ax2.grid(True, alpha=0.3)
+
+    fig.tight_layout()
+    fig.savefig(f"{SWEEP_DEBUG_DIR}/{_sweep_idx:04d}.png", dpi=90)
+    plt.close(fig)
+    _sweep_idx += 1
+
     return best_dpt, all_dpts, all_vals, params, fit_ok
 
 
@@ -362,8 +507,7 @@ def run_autofocus(
     Returns the (averaged) best-focus diopter.
     """
     best_dpts: list[float] = []
-    last_dpts = last_vals = last_params = None
-    last_fit_ok = False
+    print(f"  lens temp: {_lens_temp(lens):.1f} °C")
 
     for i in range(k):
         print(f"\nSweep {i + 1}/{k}")
@@ -372,61 +516,48 @@ def run_autofocus(
         )
         print(f"  best focus: {best_dpt:+.4f} dpt")
         best_dpts.append(best_dpt)
-        last_dpts, last_vals, last_params, last_fit_ok = (
-            all_dpts,
-            all_vals,
-            params,
-            fit_ok,
-        )
+        last_dpts, last_vals, last_params, last_fit_ok = all_dpts, all_vals, params, fit_ok
 
     if k > 1:
-        averaged = _average_excluding_outliers(best_dpts)
-        print(f"\nFinal: {averaged:+.4f} dpt (avg of {k}, IQR filtered)")
-        best_dpt_final = averaged
+        best_dpt_final = _average_excluding_outliers(best_dpts)
+        print(f"\nFinal: {best_dpt_final:+.4f} dpt (avg of {k}, IQR filtered)")
     else:
         best_dpt_final = best_dpts[0]
 
-    # Plot last sweep + final averaged diopter
-    fit_x = np.linspace(last_dpts[0], last_dpts[-1], 500)
-    fit_y = lorentzian(
-        fit_x,
-        last_params["A"],
-        last_params["gamma"],
-        last_params["x0"],
-        last_params["c"],
-    )
-
-    fig, ax = plt.subplots(figsize=(8, 5))
-    ax.scatter(
-        last_dpts,
-        last_vals,
-        s=20,
-        color="tab:blue",
-        label="Data (last sweep)",
-        zorder=3,
-    )
-    if last_fit_ok:
-        ax.plot(
-            fit_x, fit_y, color="tab:orange", lw=2, label="Lorentzian fit (last sweep)"
-        )
-    ax.axvline(
-        best_dpt_final,
-        color="tab:red",
-        ls="--",
-        alpha=0.8,
-        label=f"Best focus: {best_dpt_final:.3f} dpt"
-        + (f" (avg of {k})" if k > 1 else ""),
-    )
-    ax.set_xlabel("Optical power [dpt]")
-    ax.set_ylabel("Contrast (Laplacian variance)")
-    ax.set_title("Autofocus sweep" + (f" ({k} sweeps averaged)" if k > 1 else ""))
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    if display_window is not None:
-        cv2.destroyWindow(display_window)
-
     if show_plot:
+        # Plot last sweep + final averaged diopter
+        fit_x = np.linspace(last_dpts[0], last_dpts[-1], 500)
+        fit_y = lorentzian(fit_x, **last_params)
+
+        fig, ax = plt.subplots(figsize=(8, 5))
+        ax.scatter(
+            last_dpts,
+            last_vals,
+            s=20,
+            color="tab:blue",
+            label="Data (last sweep)",
+            zorder=3,
+        )
+        if last_fit_ok:
+            ax.plot(
+                fit_x, fit_y, color="tab:orange", lw=2, label="Lorentzian fit (last sweep)"
+            )
+        ax.axvline(
+            best_dpt_final,
+            color="tab:red",
+            ls="--",
+            alpha=0.8,
+            label=f"Best focus: {best_dpt_final:.3f} dpt"
+            + (f" (avg of {k})" if k > 1 else ""),
+        )
+        ax.set_xlabel("Optical power [dpt]")
+        ax.set_ylabel("Focus metric (Tenengrad)")
+        ax.set_title("Autofocus sweep" + (f" ({k} sweeps averaged)" if k > 1 else ""))
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+        if display_window is not None:
+            cv2.destroyWindow(display_window)
         print("(close the sweep plot window to continue)")
         plt.show()  # blocking
 
@@ -451,27 +582,34 @@ class CameraCalibration:
     camera_matrix: np.ndarray  # 3x3
 
 
+def _xml_require(parent: ET.Element, tag: str) -> ET.Element:
+    child = parent.find(tag)
+    if child is None:
+        raise ValueError(f"Missing <{tag}> element in calibration XML")
+    return child
+
+
 def parse_calibration_xml(xml_path: str) -> dict[str, CameraCalibration]:
     """Parse a strand-braid multi_camera_reconstructor XML calibration file."""
     tree = ET.parse(xml_path)
     root = tree.getroot()
     cameras: dict[str, CameraCalibration] = {}
     for sc in root.findall("single_camera_calibration"):
-        cam_id = sc.find("cam_id").text.strip()
-        pmat_text = sc.find("calibration_matrix").text.strip()
+        cam_id = _xml_require(sc, "cam_id").text.strip()
+        pmat_text = _xml_require(sc, "calibration_matrix").text.strip()
         rows = pmat_text.split(";")
         P = np.array([[float(v) for v in r.split()] for r in rows])
-        res_text = sc.find("resolution").text.strip().split()
+        res_text = _xml_require(sc, "resolution").text.strip().split()
         resolution = (int(res_text[0]), int(res_text[1]))
-        nlp = sc.find("non_linear_parameters")
-        fx = float(nlp.find("fc1").text)
-        fy = float(nlp.find("fc2").text)
-        cx_ = float(nlp.find("cc1").text)
-        cy_ = float(nlp.find("cc2").text)
-        k1 = float(nlp.find("k1").text)
-        k2 = float(nlp.find("k2").text)
-        p1 = float(nlp.find("p1").text)
-        p2 = float(nlp.find("p2").text)
+        nlp = _xml_require(sc, "non_linear_parameters")
+        fx = float(_xml_require(nlp, "fc1").text)
+        fy = float(_xml_require(nlp, "fc2").text)
+        cx_ = float(_xml_require(nlp, "cc1").text)
+        cy_ = float(_xml_require(nlp, "cc2").text)
+        k1 = float(_xml_require(nlp, "k1").text)
+        k2 = float(_xml_require(nlp, "k2").text)
+        p1 = float(_xml_require(nlp, "p1").text)
+        p2 = float(_xml_require(nlp, "p2").text)
         K = np.array([[fx, 0, cx_], [0, fy, cy_], [0, 0, 1]])
         cameras[cam_id] = CameraCalibration(
             cam_id=cam_id,
@@ -500,14 +638,16 @@ def capture_from_open_cameras(
         accumulated = None
         count = 0
         camera.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
-        for _ in range(n):
-            grab = camera.RetrieveResult(5000, pylon.TimeoutHandling_ThrowException)
-            if grab.GrabSucceeded():
-                frame = grab.Array.astype(np.float64)
-                accumulated = frame if accumulated is None else accumulated + frame
-                count += 1
-            grab.Release()
-        camera.StopGrabbing()
+        try:
+            for _ in range(n):
+                grab = camera.RetrieveResult(5000, pylon.TimeoutHandling_ThrowException)
+                if grab.GrabSucceeded():
+                    frame = grab.Array.astype(np.float64)
+                    accumulated = frame if accumulated is None else accumulated + frame
+                    count += 1
+                grab.Release()
+        finally:
+            camera.StopGrabbing()
         if count > 0:
             images[cam_id] = (accumulated / count).astype(np.uint8)
     return images
@@ -594,6 +734,8 @@ def triangulate_points(
         A.append(y * P[2, :] - P[1, :])
     _, _, Vt = np.linalg.svd(np.array(A))
     X = Vt[-1]
+    if abs(X[3]) < 1e-9:
+        raise ValueError("Degenerate triangulation (homogeneous W ≈ 0) — check camera calibration")
     return X[:3] / X[3]
 
 
@@ -640,7 +782,11 @@ def run_tag_detection(
         if len(obs) < 2:
             print(f"  Tag {tag_id} seen by only 1 camera — cannot triangulate.")
             continue
-        xyz = triangulate_points(obs)
+        try:
+            xyz = triangulate_points(obs)
+        except ValueError as e:
+            print(f"  Tag {tag_id}: {e} — skipping.")
+            continue
         z = float(xyz[2])
 
         X_h = np.append(xyz, 1.0)
@@ -786,6 +932,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Path to strand-braid XML calibration file for Basler cameras",
     )
     p.add_argument(
+        "--lens-port",
+        default="/dev/optotune_ld",
+        help="Serial port for the Optotune liquid lens (default: /dev/optotune_ld)",
+    )
+    p.add_argument(
         "--output",
         default=None,
         help="CSV output path (default: YYYYMMDD_HHMMSS_liquidlens_calibration.csv)",
@@ -821,30 +972,90 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Number of full autofocus sweeps to average (default: 5)",
     )
     p.add_argument(
-        "--motor-port",
+        "--pico-port",
         default=None,
-        help="USB serial port for Arduino/GRBL motor stage (e.g., /dev/ttyACM0). "
+        help="USB serial port for Raspberry Pi Pico motor stage (e.g., /dev/ttyACM0). "
         "When set, runs in automated mode — motor moves the AprilTag upward between "
         "measurements instead of prompting the user to reposition manually.",
+    )
+    p.add_argument(
+        "--calibrate-motor",
+        action="store_true",
+        help="Run interactive motor calibration only (requires --pico-port). "
+        "Moves a known number of steps, prompts for measured displacement, "
+        "and prints the --total-range-steps value to use. "
+        "No cameras or lens required.",
+    )
+    p.add_argument(
+        "--invert-motor",
+        action="store_true",
+        help="Invert motor direction (negate all step commands). "
+        "Use when positive steps move the stage down instead of up.",
     )
     p.add_argument(
         "--measurements",
         type=int,
         default=20,
-        help="Number of positions to measure across the full 200 mm vertical range "
-        "(default: 20). Step size = 200.0 / measurements. Only used with --motor-port.",
+        help="Number of positions to measure (default: 20). Only used with --pico-port.",
+    )
+    p.add_argument(
+        "--total-range-steps",
+        type=int,
+        default=None,
+        help="Total motor steps for the full travel range. When set, step size is computed as "
+        "total_range_steps // (measurements - 1) and --step-size-steps is ignored. "
+        "Only used with --pico-port.",
+    )
+    p.add_argument(
+        "--stroke-mm",
+        type=float,
+        default=MOTOR_STROKE_MM,
+        help=f"Physical travel to cover, in mm (default: {MOTOR_STROKE_MM:.0f} = full "
+        "stage). The --measurements positions are spread evenly across this whole "
+        "distance, using --steps-per-mm. Set to 0 to fall back to --step-size-steps. "
+        "Overridden by --total-range-steps. Only used with --pico-port.",
+    )
+    p.add_argument(
+        "--steps-per-mm",
+        type=float,
+        default=STEPS_PER_MM,
+        help=f"Motor steps per mm (default: {STEPS_PER_MM}, from motor calibration). "
+        "Used with --stroke-mm.",
+    )
+    p.add_argument(
+        "--step-size-steps",
+        type=int,
+        default=100,
+        help="Steps to move between measurements (default: 100). "
+        "Only used when --total-range-steps is unset and --stroke-mm is 0. "
+        "Only used with --pico-port.",
+    )
+    p.add_argument(
+        "--step-delay-us",
+        type=int,
+        default=300,
+        help="Microseconds between steps for the Pico motor (default: 300, lower = faster). "
+        "Only used with --pico-port.",
     )
     return p
 
 
 def _sort_csv(path: Path) -> None:
-    """Re-read CSV, sort rows by z ascending, overwrite."""
+    """Re-read CSV, sort rows by z ascending, overwrite atomically."""
+    import tempfile
+
     with open(path, newline="") as f:
         rows = sorted(csv.DictReader(f), key=lambda r: float(r["z"]))
-    with open(path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["z", "dpt"])
-        writer.writeheader()
-        writer.writerows(rows)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["z", "dpt"])
+            writer.writeheader()
+            writer.writerows(rows)
+        Path(tmp).replace(path)
+    except Exception:
+        os.unlink(tmp)
+        raise
 
 
 def _init_csv(path: Path) -> None:
@@ -870,12 +1081,33 @@ def _run_automated(
     ximea_img: Any,
     lens: Any,
     roi_slice: tuple[slice, slice],
-    motor: MotorStage,
+    motor: PicoMotorStage,
+    step_size_steps: int = 100,
+    step_delay_us: int = 800,
 ) -> None:
     """Automated calibration: motor moves the tag upward, autofocus at each position."""
-    step_size_mm = 200.0 / args.measurements
 
-    input("Position the AprilTag at the bottom of the range, then press Enter to start. ")
+    # Drive lens to MIN_DPT.  The lens descends slowly — wait until the preview
+    # image stops changing (least sharp) before pressing Enter.
+    lens.set_diopter(MIN_DPT)
+    print(f"Lens → {MIN_DPT:+.2f} dpt  (commanding minimum focal power)", flush=True)
+    print()
+    print("Live XIMEA preview is open.")
+    print("  • Position the AprilTag at the BOTTOM of the range.")
+    print(f"  • The lens is descending to {MIN_DPT:+.2f} dpt — this can take 10–30 s.")
+    print("  • Watch the preview: wait until the image stabilises (stops changing).")
+    print("  • Press ENTER here when ready.")
+    cv2.namedWindow(PREVIEW_WINDOW, cv2.WINDOW_NORMAL)
+    t_start = time.monotonic()
+    while True:
+        _pump_preview(ximea_cam, ximea_img, roi_slice)
+        elapsed = time.monotonic() - t_start
+        print(f"  Waiting for Enter … {elapsed:.0f} s elapsed", end="\r", flush=True)
+        cv2.waitKey(30)
+        if select.select([sys.stdin], [], [], 0.0)[0]:
+            sys.stdin.readline()
+            break
+    print(flush=True)
     collected: list[tuple[float, float]] = []
     failed: list[int] = []
 
@@ -883,10 +1115,26 @@ def _run_automated(
         for i in range(args.measurements):
             print(f"\n--- [{i + 1}/{args.measurements}] ---")
 
+            if i > 0:
+                # Lens was reset to MIN_DPT after the previous autofocus.
+                # Wait for it to physically descend before the next sweep.
+                print(f"  Waiting {LENS_SETTLE_S:.0f} s for lens to settle …", flush=True)
+                t_lens = time.monotonic() + LENS_SETTLE_S
+                while time.monotonic() < t_lens:
+                    _pump_preview(ximea_cam, ximea_img, roi_slice)
+                    cv2.waitKey(30)
+
             best_dpt = run_autofocus(
-                ximea_cam, ximea_img, lens, roi_slice,
-                k=args.sweeps, show_plot=False,
+                ximea_cam,
+                ximea_img,
+                lens,
+                roi_slice,
+                k=args.sweeps,
+                display_window=PREVIEW_WINDOW,
+                show_plot=False,
             )
+
+            lens.set_diopter(MIN_DPT)
 
             z = run_tag_detection(
                 basler_cams, open_ids, cameras_cal, args.num_frames, args.tag_family
@@ -901,14 +1149,22 @@ def _run_automated(
                 collected.append((z, best_dpt))
 
             if i < args.measurements - 1:
-                print(f"  Moving motor up by {step_size_mm:.2f} mm...")
-                motor.move_up_mm(step_size_mm)
-                time.sleep(0.5)
+                print(f"  Moving motor up by {step_size_steps} steps...")
+                motor.move_up(step_size_steps, step_delay_us)
+                # Pump frames during the 0.5 s settle wait so the window stays live
+                t_settle = time.monotonic() + 0.5
+                while time.monotonic() < t_settle:
+                    _pump_preview(ximea_cam, ximea_img, roi_slice)
+                    cv2.waitKey(30)
+    except RuntimeError as exc:
+        print(f"\nMotor error: {exc} — stopping early.")
     except KeyboardInterrupt:
         print("\nInterrupted — proceeding with collected data.")
 
     if failed:
-        print(f"\nWARNING: {len(failed)} position(s) skipped due to failed detection: {failed}")
+        print(
+            f"\nWARNING: {len(failed)} position(s) skipped due to failed detection: {failed}"
+        )
 
     if collected:
         _sort_csv(output_path)
@@ -921,12 +1177,76 @@ def _run_automated(
         print("\nNo data collected — cannot fit regression models.")
 
 
+# ---------------------------------------------------------------------------
+# Motor calibration
+# ---------------------------------------------------------------------------
+
+
+def _run_motor_calibration(pico_port: str, step_delay_us: int = 800, invert: bool = False) -> None:
+    """Interactive calibration: move N steps, measure physical displacement, report steps/mm.
+
+    Connects only to the Pico — no cameras or lens required.
+    """
+    motor = PicoMotorStage(pico_port, invert=invert)
+    try:
+        print("\n=== Motor Calibration ===")
+        print("Mark the current stage position (tape, pen, or calipers zeroed).")
+
+        raw = input("Steps to move [1000]: ").strip()
+        test_steps = int(raw) if raw else 1000
+
+        print(f"Moving {test_steps} steps forward at {step_delay_us} µs/step ...")
+        motor.move(test_steps, step_delay_us)
+        print("Done. Measure the displacement with calipers.")
+
+        displacement_mm = float(input("Measured displacement (mm): ").strip())
+        if displacement_mm <= 0:
+            raise ValueError("Displacement must be positive")
+
+        steps_per_mm = test_steps / displacement_mm
+
+        raw_stroke = input("Full stroke of your stage (mm) [200]: ").strip()
+        stroke_mm = float(raw_stroke) if raw_stroke else 200.0
+
+        total_range_steps = round(steps_per_mm * stroke_mm)
+
+        print()
+        print("--- Results ---")
+        print(f"  steps / mm          : {steps_per_mm:.2f}")
+        print(f"  stroke              : {stroke_mm:.0f} mm")
+        print(f"  --total-range-steps : {total_range_steps}")
+        print()
+        print("Example (20 measurements, full range):")
+        print(
+            f"  --pico-port {pico_port} --measurements 20 "
+            f"--total-range-steps {total_range_steps}"
+        )
+
+        raw_move_back = input("\nMove stage back to start? [Y/n]: ").strip().lower()
+        if raw_move_back != "n":
+            print(f"Moving {test_steps} steps back ...")
+            motor.move(-test_steps, step_delay_us)
+            print("Done.")
+    finally:
+        motor.close()
+
+
 def main() -> None:
-    from optotune import LiquidLens
+    parser = _build_parser()
+    args = parser.parse_args()
+
+    # --- Motor calibration (no cameras or lens needed) ---
+    if args.calibrate_motor:
+        if not args.pico_port:
+            raise SystemExit("--calibrate-motor requires --pico-port")
+        _run_motor_calibration(args.pico_port, args.step_delay_us, invert=args.invert_motor)
+        return
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from src.hardware.lens import LensDriver
     from pypylon import pylon
     from ximea import xiapi
 
-    args = _build_parser().parse_args()
     if args.output is None:
         args.output = time.strftime("%Y%m%d_%H%M%S") + "_liquidlens_calibration.csv"
     output_path = Path(args.output)
@@ -977,15 +1297,35 @@ def main() -> None:
     print(f"  XIMEA sensor: {sensor_w}x{sensor_h}  ROI: {roi_sz}x{roi_sz} centred")
 
     # --- Open liquid lens ---
-    lens = LiquidLens("/dev/optotune_ld")
+    lens = LensDriver(args.lens_port)
     lens.to_focal_power_mode()
-    print("  Liquid lens ready")
+    print(f"  Liquid lens ready  (temp: {_lens_temp(lens):.1f} °C)")
 
     # --- Open motor stage (automated mode only) ---
-    motor: MotorStage | None = None
-    if args.motor_port:
-        motor = MotorStage(args.motor_port)
-        print("  Motor stage ready")
+    motor: PicoMotorStage | None = None
+    if args.pico_port:
+        motor = PicoMotorStage(args.pico_port, invert=args.invert_motor)
+        print(f"  Pico motor stage ready{' (inverted)' if args.invert_motor else ''}")
+
+    # --- Resolve step size ---
+    # Precedence: explicit --total-range-steps > --stroke-mm (× steps/mm) >
+    # --step-size-steps.  --stroke-mm defaults to the full stage, so by default
+    # the measurements span the entire motor travel.
+    if args.pico_port and args.total_range_steps is None and args.stroke_mm > 0:
+        args.total_range_steps = round(args.steps_per_mm * args.stroke_mm)
+        print(
+            f"  Stroke {args.stroke_mm:.0f} mm × {args.steps_per_mm:.2f} steps/mm "
+            f"= {args.total_range_steps} steps (full-range sweep)"
+        )
+
+    if args.pico_port and args.total_range_steps is not None:
+        if args.measurements < 2:
+            raise SystemExit("--measurements must be >= 2 when using a full-range sweep")
+        args.step_size_steps = args.total_range_steps // (args.measurements - 1)
+        print(
+            f"  Step size: {args.total_range_steps} total steps / "
+            f"{args.measurements - 1} moves = {args.step_size_steps} steps/move"
+        )
 
     # --- Prepare CSV ---
     _init_csv(output_path)
@@ -997,8 +1337,18 @@ def main() -> None:
     try:
         if motor is not None:
             _run_automated(
-                args, output_path, cameras_cal, open_ids, basler_cams,
-                ximea_cam, ximea_img, lens, roi_slice, motor,
+                args,
+                output_path,
+                cameras_cal,
+                open_ids,
+                basler_cams,
+                ximea_cam,
+                ximea_img,
+                lens,
+                roi_slice,
+                motor,
+                step_size_steps=args.step_size_steps,
+                step_delay_us=args.step_delay_us,
             )
         else:
             while True:
@@ -1009,19 +1359,30 @@ def main() -> None:
                     break
 
                 # 2+3. Autofocus + tag detection — retry loop
+                ans = ""
                 while True:
                     best_dpt = run_autofocus(
-                        ximea_cam, ximea_img, lens, roi_slice, k=args.sweeps,
+                        ximea_cam,
+                        ximea_img,
+                        lens,
+                        roi_slice,
+                        k=args.sweeps,
                         display_window=PREVIEW_WINDOW,
                     )
 
                     z = run_tag_detection(
-                        basler_cams, open_ids, cameras_cal, args.num_frames, args.tag_family
+                        basler_cams,
+                        open_ids,
+                        cameras_cal,
+                        args.num_frames,
+                        args.tag_family,
                     )
                     if z is None:
                         print("No valid Z measured.")
                         ans = (
-                            input("R=retry  Q=quit  Enter=skip position: ").strip().lower()
+                            input("R=retry  Q=quit  Enter=skip position: ")
+                            .strip()
+                            .lower()
                         )
                         if ans == "q":
                             break

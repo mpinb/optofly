@@ -11,7 +11,7 @@ Braid Server (100fps 3D tracking)
 TriggerHandler (src/processes/tracking.py)
     Monitors tracked objects and applies entry gates:
       1. Object must exist for ≥ min_tracking_age (filters noise)
-      2. Must satisfy global refractory_period since last ZONE_ENTER
+      2. Must satisfy global cooldown_period since last ZONE_ENTER
       3. Must be within trigger zone (camera FOV x/y + z bounds)
       4. Velocity must be in [min_velocity, max_velocity] range
       5. Must be heading toward arena center (within heading_cone_deg)
@@ -21,11 +21,11 @@ TriggerHandler (src/processes/tracking.py)
     +---> RustCameraProcess    (starts recording on ZONE_ENTER; stops on ZONE_EXIT)
     +---> LiquidLens           (starts tracking on ZONE_ENTER; follows BRAID until ZONE_EXIT)
     +---> OptoTriggerWorker    (one-shot LED on ZONE_ENTER only)
-    +---> VisualStimuliProcess (one-shot stimulus on ZONE_ENTER only)
+    +---> VisualProcess        (Panda3D; renders stimuli on ZONE_ENTER, one-shot)
     +---> Monitoring Server    (web dashboard, optional)
 ```
 
-TriggerHandler is the single admission controller. Each object can produce at most one `ZONE_ENTER`/`ZONE_EXIT` pair per visit to the trigger volume, with re-entry treated as a new cycle subject only to the global refractory period.
+TriggerHandler is the single admission controller. Each object can produce at most one `ZONE_ENTER`/`ZONE_EXIT` pair per visit to the trigger volume, with re-entry treated as a new cycle subject only to the global cooldown period.
 
 ## Process Model
 
@@ -37,7 +37,7 @@ All processes inherit from `WorkerProcess` (`src/utils/worker.py`) and run as `m
 | TriggerHandler | SUB on 5555, PUB on 5556 (topics: ZONE_ENTER, ZONE_EXIT) | `src/processes/tracking.py` |
 | RustCameraProcess | SUB on 5556 (ZONE_ENTER, ZONE_EXIT, kill) | `src/processes/camera.py` |
 | OptoTriggerWorker | SUB on 5556 (ZONE_ENTER only) | `src/processes/led.py` |
-| VisualStimuliProcess | SUB on 5556 (ZONE_ENTER only) | `src/processes/visual.py` |
+| VisualProcess | SUB on 5556 (ZONE_ENTER only) | `src/visual/process.py` |
 | LiquidLens | SUB on 5555 (BRAID) + 5556 (ZONE_ENTER, ZONE_EXIT) | `src/processes/lens.py` |
 | Monitoring Server | SUB on 5556 (ZONE_ENTER, ZONE_EXIT) | `src/monitoring/server.py` |
 
@@ -92,7 +92,7 @@ Key parameters in `[trigger_handler]`:
 | `max_velocity` | 2.0 m/s | Maximum speed, used to reject tracking noise |
 | `min_tracking_age` | 0.1 s | Object age before it can trigger |
 | `zone_timeout` | 2.0 s | Auto-emit `ZONE_EXIT` if tracking is lost; also used by camera and liquid lens |
-| `refractory_period` | 10.0 s | Global cooldown between `ZONE_ENTER` events |
+| `cooldown_period` | 10.0 s | Global cooldown between `ZONE_ENTER` events |
 
 The trigger zone's x/y bounds come from the camera FOV. `zone_timeout` is the single source of truth for follower processes.
 
@@ -104,7 +104,7 @@ When an object crosses into the spatial trigger zone, `TriggerHandler` applies t
 2. Dies in BRAID.
 3. Times out due to missing updates.
 
-After exit, the same object can trigger again if it re-enters the zone after the global refractory period has elapsed.
+After exit, the same object can trigger again if it re-enters the zone after the global cooldown period has elapsed.
 
 ## Important Notes
 

@@ -20,11 +20,13 @@ uv run pytest tests/ -v               # verbose
 uv run ruff check .
 uv run ruff format .
 
-# Visual stimuli calibration
+# Visual stimuli (Panda3D) standalone test
+python -m src.processes.visual --standalone          # small 1280×320 window, no hardware/ZMQ
+
+# Legacy pyglet calibration tools (heading → pixel mapping)
 python -m src.processes.visual --calibrate           # identify screens
 python -m src.processes.visual --calibrate-mapping   # heading → pixel mapping (manual x,y input)
 python -m src.processes.visual --test-calibration    # verify with sweeping circle
-python -m src.processes.visual --standalone          # test without hardware
 
 # Simulate Braid tracking data (development)
 python -m src.tools.braid_simulator
@@ -56,7 +58,7 @@ TriggerHandler  →  ZMQ PUB  topics=ZONE_ENTER/ZONE_EXIT  port=5556
     ├── RustCameraProcess    (starts recording on ZONE_ENTER; stamps trigger_frame_idx on ZONE_ENTER)
     ├── LiquidLens           (starts focusing on ZONE_ENTER via BRAID; writes lens_timing.csv per video)
     ├── OptoTriggerWorker    (fires LED on ZONE_ENTER, one-shot)
-    ├── VisualStimuliProcess (renders stimuli on ZONE_ENTER, one-shot)
+    ├── VisualProcess        (Panda3D; renders stimuli on ZONE_ENTER, one-shot)
     └── Monitoring Server    (web dashboard, optional)
 ```
 
@@ -100,14 +102,16 @@ Key parameters (all in `configs/config.toml`):
 |---|---|---|---|
 | `[liquid_lens.kalman]` | `velocity_noise` | `1.0` | Measurement noise for Braid velocity estimates fed into the Kalman filter |
 
-### Visual Stimuli
+### Visual Stimuli (Panda3D)
 
-Plugin-based pattern in `src/stimuli/`. Included stimuli: `StaticPatternStimulus`, `LoomingStimulusRenderer`, `VerticalBarStimulus`. To add a stimulus:
-1. Create class in `src/stimuli/my_stimulus.py` extending `BaseStimulus` with `on_trigger`, `update`, `render`, `is_active`
-2. Register in `src/processes/visual.py:_initialize_stimuli()`
+Plugin-based pattern in `src/visual/stimuli/`. Included stimuli: `BackgroundStimulus`, `LoomingStimulus`, `OscillatingSquare`. The process is `VisualProcess` (`src/visual/process.py`). To add a stimulus:
+1. Create class in `src/visual/stimuli/my_stimulus.py` extending `BaseStimulus` (`src/visual/base.py`) with `setup`, `on_trigger`, `update`
+2. Register in `src/visual/process.py:_initialize_stimuli()`
 3. Add `[visual_stimuli.my_stimulus]` section to `configs/visual_stimuli.toml`
 
-Heading-to-pixel conversion uses `GeometryUtils` (`src/stimuli/geometry.py`). With `use_empirical_calibration = true`, it interpolates from `calibrations/heading_mapping_model.npz`; otherwise it uses a geometric formula.
+Coordinate system: fly at origin, North=+Y, East=+X, Z=up, units in cm. Use `angular_to_world_pos` and `angular_size_to_radius` from `src/visual/base.py` for all position/size math. Arena heading alignment is set via `braid_heading_offset_rad` and `braid_heading_flip` in `[visual_stimuli.arena]`.
+
+The legacy pyglet pipeline (`src/stimuli/`) is still present for the `--calibrate*` CLI tools but is not used by `main.py`.
 
 ### Liquid Lens Calibration
 

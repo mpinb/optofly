@@ -93,15 +93,11 @@ class BraidToXimeaCalibration:
         if self._P is None:
             raise RuntimeError("Calibration not fitted — call fit() or load() first")
         d = self._P[:, 2] * z + self._P[:, 3]  # (3,) known offset
-        A_aug = np.column_stack(
-            [self._P[:, 0:2], -np.array([u, v, 1.0])]
-        )  # 3×3
+        A_aug = np.column_stack([self._P[:, 0:2], -np.array([u, v, 1.0])])  # 3×3
         xy_w = np.linalg.solve(A_aug, -d)
         return float(xy_w[0]), float(xy_w[1])
 
-    def compute_fov(
-        self, width: int, height: int, z: float
-    ) -> dict[str, float]:
+    def compute_fov(self, width: int, height: int, z: float) -> dict[str, float]:
         """Compute camera FOV in BRAID world coordinates at a given z height.
 
         Back-projects the four frame corners to world space to find the axis-aligned

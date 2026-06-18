@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 xiapi = { git = "https://github.com/ximea-GmbH/xiapi.git" }
+xiapi-sys = "0.1.2"
 zmq = "0.10"
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }

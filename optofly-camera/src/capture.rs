@@ -1,3 +1,4 @@
+use std::os::raw::c_char;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender};
 use std::sync::Arc;
@@ -5,6 +6,32 @@ use std::sync::Arc;
 use crate::buffer::{FrameBuffer, FrameMeta};
 use crate::config::AppConfig;
 use crate::encoder::{self, EncodeJob};
+
+unsafe fn set_param_int(
+    handle: xiapi_sys::HANDLE,
+    prm: &[u8],
+    value: i32,
+) -> Result<(), String> {
+    let ret = xiapi_sys::xiSetParamInt(handle, prm.as_ptr() as *const c_char, value);
+    if ret != 0 {
+        Err(format!("xiSetParamInt({}) error: {}", String::from_utf8_lossy(prm).trim_end_matches('\0'), ret))
+    } else {
+        Ok(())
+    }
+}
+
+unsafe fn set_param_float(
+    handle: xiapi_sys::HANDLE,
+    prm: &[u8],
+    value: f32,
+) -> Result<(), String> {
+    let ret = xiapi_sys::xiSetParamFloat(handle, prm.as_ptr() as *const c_char, value);
+    if ret != 0 {
+        Err(format!("xiSetParamFloat({}) error: {}", String::from_utf8_lossy(prm).trim_end_matches('\0'), ret))
+    } else {
+        Ok(())
+    }
+}
 
 #[derive(Debug, PartialEq)]
 enum State {
@@ -44,8 +71,27 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
         .map_err(|e| format!("Cannot open XIMEA camera: {}", e))?;
     log::warn!("Camera opened");
 
-    cam.set_exposure(cfg.exposure_us)
-        .map_err(|e| format!("Set exposure error: {}", e))?;
+    if cfg.aeag {
+        // Hardware AEAG via raw FFI — the high-level xiapi crate doesn't wrap these params.
+        // Camera derefs to HANDLE (*mut c_void), so *cam is the raw device handle.
+        let handle = *cam;
+        unsafe {
+            set_param_int(handle, xiapi_sys::XI_PRM_AEAG, 1)?;
+            // 1.0 = adjust exposure only, 0.0 = adjust gain only
+            set_param_float(handle, xiapi_sys::XI_PRM_EXP_PRIORITY, 1.0)?;
+            // Lock gain at 0 dB
+            set_param_float(handle, xiapi_sys::XI_PRM_AG_MAX_LIMIT, 0.0)?;
+            set_param_float(handle, xiapi_sys::XI_PRM_AE_MAX_LIMIT, cfg.ae_max_limit)?;
+            set_param_int(handle, xiapi_sys::XI_PRM_AEAG_LEVEL, cfg.aeag_level)?;
+        }
+        log::info!(
+            "AEAG enabled: level={}, ae_max_limit={:.0}µs, gain locked at 0 dB",
+            cfg.aeag_level, cfg.ae_max_limit
+        );
+    } else {
+        cam.set_exposure(cfg.exposure_us)
+            .map_err(|e| format!("Set exposure error: {}", e))?;
+    }
 
     // Enable sensor corrections (matches Python CameraProcess behavior)
     // Note: BPC (bad pixel correction) is not exposed by the xiapi Rust crate;

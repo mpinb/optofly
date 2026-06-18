@@ -216,10 +216,22 @@ class TriggerHandler(WorkerProcess):
         self.z_max = self.config.z_max
         self.fov_center_x = (self.fov_x_min + self.fov_x_max) / 2.0
         self.fov_center_y = (self.fov_y_min + self.fov_y_max) / 2.0
+        self.fov_frustum: bool = self.config.fov_frustum
+        if self.fov_frustum:
+            self._near_z = self.config.fov_near_z
+            self._near_x_min = self.config.fov_near_x_min
+            self._near_x_max = self.config.fov_near_x_max
+            self._near_y_min = self.config.fov_near_y_min
+            self._near_y_max = self.config.fov_near_y_max
+            self._far_z = self.config.fov_far_z
+            self._far_x_min = self.config.fov_far_x_min
+            self._far_x_max = self.config.fov_far_x_max
+            self._far_y_min = self.config.fov_far_y_min
+            self._far_y_max = self.config.fov_far_y_max
 
-        # Global refractory period — suppress ZONE_ENTER for this many seconds
+        # Global cooldown period — suppress ZONE_ENTER for this many seconds
         # after the last one was sent, regardless of object identity.
-        self.refractory_period: float = self.config.refractory_period
+        self.cooldown_period: float = self.config.cooldown_period
         self._last_zone_enter_time: float = 0.0
 
         # Dictionary to track objects: {obj_id: TrackedObject}
@@ -239,7 +251,7 @@ class TriggerHandler(WorkerProcess):
             self.is_initialized = True
             self.logger.info(
                 f"TriggerHandler initialized successfully "
-                f"(refractory_period={self.refractory_period}s)"
+                f"(cooldown_period={self.cooldown_period}s)"
             )
             return True
         except Exception as e:
@@ -279,13 +291,29 @@ class TriggerHandler(WorkerProcess):
             self.logger.error(f"Unexpected error during ZMQ initialization: {e}")
             raise
 
+    def _get_fov_at_z(self, z: float) -> tuple:
+        """Return (x_min, x_max, y_min, y_max) for the given z, interpolating in frustum mode."""
+        if not self.fov_frustum:
+            return self.fov_x_min, self.fov_x_max, self.fov_y_min, self.fov_y_max
+        alpha = (z - self._near_z) / (self._far_z - self._near_z)
+        return (
+            self._near_x_min + alpha * (self._far_x_min - self._near_x_min),
+            self._near_x_max + alpha * (self._far_x_max - self._near_x_max),
+            self._near_y_min + alpha * (self._far_y_min - self._near_y_min),
+            self._near_y_max + alpha * (self._far_y_max - self._near_y_max),
+        )
+
     def is_in_trigger_zone(self, x: float, y: float, z: float) -> bool:
         """Check if a point is within the trigger zone (camera FOV x/y + z bounds)."""
-        return (
-            self.fov_x_min <= x <= self.fov_x_max
-            and self.fov_y_min <= y <= self.fov_y_max
-            and self.z_min <= z <= self.z_max
-        )
+        if not (self.z_min <= z <= self.z_max):
+            return False
+        x_min, x_max, y_min, y_max = self._get_fov_at_z(z)
+        return x_min <= x <= x_max and y_min <= y <= y_max
+
+    def is_in_xy_zone(self, x: float, y: float, z: float) -> bool:
+        """Check if a point is within the trigger zone x/y bounds only (ignores z)."""
+        x_min, x_max, y_min, y_max = self._get_fov_at_z(z)
+        return x_min <= x <= x_max and y_min <= y <= y_max
 
     def process_message(self, message_data: Dict[str, Any]) -> None:
         """Process a message from the Braid server."""
@@ -397,6 +425,7 @@ class TriggerHandler(WorkerProcess):
         """
         x, y, z = tracked_obj.current_x, tracked_obj.current_y, tracked_obj.current_z
         in_zone_now = self.is_in_trigger_zone(x, y, z)
+        in_xy_zone_now = self.is_in_xy_zone(x, y, z)
 
         if not tracked_obj.in_zone and in_zone_now:
             # Object just entered the zone — check all entry gates
@@ -406,13 +435,13 @@ class TriggerHandler(WorkerProcess):
             if age < self.config.min_tracking_age:
                 return
 
-            # Gate 2: refractory period
+            # Gate 2: cooldown period
             now = time.time()
             elapsed = now - self._last_zone_enter_time
-            if elapsed < self.refractory_period:
+            if elapsed < self.cooldown_period:
                 self.logger.debug(
                     f"ZONE_ENTER suppressed for obj={tracked_obj.obj_id} "
-                    f"(refractory: {elapsed:.1f}s / {self.refractory_period:.1f}s)"
+                    f"(cooldown: {elapsed:.1f}s / {self.cooldown_period:.1f}s)"
                 )
                 return
 
@@ -438,8 +467,8 @@ class TriggerHandler(WorkerProcess):
             tracked_obj.zone_enter_time = time.time()
             self._send_zone_enter(tracked_obj)
 
-        elif tracked_obj.in_zone and not in_zone_now:
-            # Left the zone — emit ZONE_EXIT immediately
+        elif tracked_obj.in_zone and not in_xy_zone_now:
+            # Left the zone (x/y only — z drift does not trigger exit)
             self._send_zone_exit(tracked_obj, reason="left_fov")
             tracked_obj.in_zone = False
             tracked_obj.zone_enter_time = None

@@ -60,9 +60,9 @@ class TriggerHandlerConfig(ConfigBase):
         # Zone timeout: emit ZONE_EXIT if no updates received for this long
         self.zone_timeout: float = float(config.get("zone_timeout", 2.0))
 
-        # Global refractory period: suppress ZONE_ENTER for this many seconds
+        # Global cooldown period: suppress ZONE_ENTER for this many seconds
         # after the last one, regardless of object identity.
-        self.refractory_period: float = float(config.get("refractory_period", 10.0))
+        self.cooldown_period: float = float(config.get("cooldown_period", 10.0))
 
         # Trigger zone x/y = camera FOV (single source of truth)
         camera_config = CameraConfig(config_path)
@@ -70,6 +70,18 @@ class TriggerHandlerConfig(ConfigBase):
         self.fov_x_max: float = camera_config.fov_x_max
         self.fov_y_min: float = camera_config.fov_y_min
         self.fov_y_max: float = camera_config.fov_y_max
+        self.fov_frustum: bool = camera_config.fov_frustum
+        if self.fov_frustum:
+            self.fov_near_z: float = camera_config.fov_near_z
+            self.fov_near_x_min: float = camera_config.fov_near_x_min
+            self.fov_near_x_max: float = camera_config.fov_near_x_max
+            self.fov_near_y_min: float = camera_config.fov_near_y_min
+            self.fov_near_y_max: float = camera_config.fov_near_y_max
+            self.fov_far_z: float = camera_config.fov_far_z
+            self.fov_far_x_min: float = camera_config.fov_far_x_min
+            self.fov_far_x_max: float = camera_config.fov_far_x_max
+            self.fov_far_y_min: float = camera_config.fov_far_y_min
+            self.fov_far_y_max: float = camera_config.fov_far_y_max
 
         # Trigger zone z bounds (from trigger_handler section)
         self.z_min: float = float(config.get("z_min", 0.0))
@@ -122,6 +134,14 @@ class LiquidLensConfig(ConfigBase):
                 f"liquid_lens.calibration_model must be one of {valid}, got {calibration_model!r}"
             )
         self.calibration_model: str = calibration_model
+
+        # Max change in commanded diopter per Braid update (slew-rate limit).
+        # The lens rings at ~400 Hz when fed an abrupt step; limiting the
+        # per-update change ramps large transitions (esp. trial onset) so the
+        # resonance isn't excited. 0 disables limiting (raw steps). Tune against
+        # real fly speed: too small lags fast flies, too large still rings.
+        self.max_diopter_step: float = float(config.get("max_diopter_step", 0.0))
+
         # Zone timeout is now global — read from trigger_handler config
         trigger_config = TriggerHandlerConfig(config_path)
         self.zone_timeout: float = trigger_config.zone_timeout
@@ -223,50 +243,6 @@ class BraidPublisherConfig(ConfigBase):
             f"  Timeout: {self.timeout}s\n"
             f"  Reconnect Delay: {self.reconnect_delay}s\n"
             f"  ZMQ Braid Port: {self.zmq.braid_port}"
-        )
-
-
-class TriggerConfig(ConfigBase):
-    """Configuration for the trigger handler."""
-
-    def __init__(self, config_path: str = "configs/config.toml"):
-        """Initialize trigger configuration."""
-        super().__init__(config_path, "trigger")
-        config = self._load_config()
-
-        # Speed thresholds
-        self.min_speed: float = config["min_speed"]
-        self.max_speed: float = config["max_speed"]
-        self.pre_trigger_frames: int = config["pre_trigger_frames"]
-        self.post_trigger_frames: int = config["post_trigger_frames"]
-
-        # Frame rate used to convert between time and frames
-        self.frame_rate: float = config["frame_rate"]
-
-        # Calculate time equivalents for convenience
-        self.pre_trigger_time: float = self.pre_trigger_frames / self.frame_rate
-        self.post_trigger_time: float = self.post_trigger_frames / self.frame_rate
-
-        # Get camera config for FOV boundaries
-        camera_config = CameraConfig(config_path)
-        self.fov_x_min = camera_config.fov_x_min
-        self.fov_x_max = camera_config.fov_x_max
-        self.fov_y_min = camera_config.fov_y_min
-        self.fov_y_max = camera_config.fov_y_max
-
-    def __str__(self):
-        """Return a string representation of the configuration."""
-        # Calculate FOV dimensions in mm for display
-        fov_width_mm = (self.fov_x_max - self.fov_x_min) * 1000
-        fov_height_mm = (self.fov_y_max - self.fov_y_min) * 1000
-
-        return (
-            f"Trigger Configuration:\n"
-            f"  Speed Threshold: {self.min_speed} to {self.max_speed} m/s\n"
-            f"  Pre-trigger Time: {self.pre_trigger_time}s ({self.pre_trigger_frames} frames)\n"
-            f"  Post-trigger Time: {self.post_trigger_time}s ({self.post_trigger_frames} frames)\n"
-            f"  FOV Dimensions: {fov_width_mm:.1f} x {fov_height_mm:.1f} mm\n"
-            f"  FOV Boundaries: [{self.fov_x_min}, {self.fov_x_max}] x [{self.fov_y_min}, {self.fov_y_max}] m"
         )
 
 
@@ -409,15 +385,39 @@ class CameraConfig(ConfigBase):
         self.save_folder: str = config.get("save_folder", "camera_videos")
 
         fov_config = config.get("FOV", {})
-        self.fov_x_min: float = float(fov_config.get("x_min", -0.1))
-        self.fov_x_max: float = float(fov_config.get("x_max", 0.1))
-        self.fov_y_min: float = float(fov_config.get("y_min", -0.1))
-        self.fov_y_max: float = float(fov_config.get("y_max", 0.1))
+        near = fov_config.get("near")
+        far = fov_config.get("far")
 
-        if self.fov_x_min >= self.fov_x_max:
-            raise ValueError("camera.FOV.x_min must be less than x_max")
-        if self.fov_y_min >= self.fov_y_max:
-            raise ValueError("camera.FOV.y_min must be less than y_max")
+        if near and far:
+            self.fov_frustum: bool = True
+            self.fov_near_z: float = float(near["z"])
+            self.fov_near_x_min: float = float(near["x_min"])
+            self.fov_near_x_max: float = float(near["x_max"])
+            self.fov_near_y_min: float = float(near["y_min"])
+            self.fov_near_y_max: float = float(near["y_max"])
+            self.fov_far_z: float = float(far["z"])
+            self.fov_far_x_min: float = float(far["x_min"])
+            self.fov_far_x_max: float = float(far["x_max"])
+            self.fov_far_y_min: float = float(far["y_min"])
+            self.fov_far_y_max: float = float(far["y_max"])
+            if self.fov_near_z >= self.fov_far_z:
+                raise ValueError("camera.FOV.near.z must be less than camera.FOV.far.z")
+            # Flat attributes: use far-plane values so other consumers (LiquidLens, etc.) work unchanged
+            self.fov_x_min: float = self.fov_far_x_min
+            self.fov_x_max: float = self.fov_far_x_max
+            self.fov_y_min: float = self.fov_far_y_min
+            self.fov_y_max: float = self.fov_far_y_max
+        else:
+            self.fov_frustum = False
+            self.fov_x_min: float = float(fov_config.get("x_min", -0.1))
+            self.fov_x_max: float = float(fov_config.get("x_max", 0.1))
+            self.fov_y_min: float = float(fov_config.get("y_min", -0.1))
+            self.fov_y_max: float = float(fov_config.get("y_max", 0.1))
+
+            if self.fov_x_min >= self.fov_x_max:
+                raise ValueError("camera.FOV.x_min must be less than x_max")
+            if self.fov_y_min >= self.fov_y_max:
+                raise ValueError("camera.FOV.y_min must be less than y_max")
 
         self.braid_ximea_calibration_file: str | None = config.get(
             "braid_ximea_calibration_file", None

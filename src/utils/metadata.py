@@ -29,7 +29,14 @@ def extract_config_columns(config_path: str) -> dict[str, Any]:
     columns: dict[str, Any] = {}
 
     opto = config.get("opto_trigger", {})
-    for key in ("active", "duration", "intensity", "frequency", "color", "sham_probability"):
+    for key in (
+        "active",
+        "duration",
+        "intensity",
+        "frequency",
+        "color",
+        "sham_probability",
+    ):
         columns[f"opto_{key}"] = opto.get(key, None)
 
     visual_config_file = config.get("visual_stimuli", {}).get(

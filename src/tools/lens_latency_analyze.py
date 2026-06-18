@@ -118,16 +118,12 @@ def collect_stage_samples(
                 t_diopter_sent = _maybe_float(row.get("t_diopter_sent", ""))
 
                 if t_serial_start is not None and t_diopter_sent is not None:
-                    samples["usb_ms"].append(
-                        (t_diopter_sent - t_serial_start) * 1000.0
-                    )
+                    samples["usb_ms"].append((t_diopter_sent - t_serial_start) * 1000.0)
 
                 if t_relay is not None:
                     relay_filled += 1
                     if t_serial_start is not None:
-                        samples["pubsub_ms"].append(
-                            (t_serial_start - t_relay) * 1000.0
-                        )
+                        samples["pubsub_ms"].append((t_serial_start - t_relay) * 1000.0)
                     if t_diopter_sent is not None:
                         samples["software_ms"].append(
                             (t_diopter_sent - t_relay) * 1000.0

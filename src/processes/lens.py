@@ -3,7 +3,7 @@ import multiprocessing as mp
 import os
 import statistics
 import time
-from typing import Optional
+from typing import Callable, Optional
 
 import numpy as np
 import zmq
@@ -20,73 +20,121 @@ VALID_CALIBRATION_MODELS = ("linear", "quadratic", "power", "inverse")
 
 
 class LensCalibration:
-    """Maps z position (m) → diopter via a user-selected model.
+    """Maps z position (m) -> diopter via a fitted model.
 
-    The model is fit once at construction; ``get_dpt`` does only fast
-    floating-point arithmetic (no numpy/scipy on the hot path).
+    The model is fit once at construction; get_dpt does only fast
+    floating-point arithmetic on the hot path.
 
     Supported models:
         linear    — dpt = a·z + b
         quadratic — dpt = a·z² + b·z + c  (recommended)
-        power     — dpt = a·(z + shift)^b + c
-        inverse   — dpt = a/(z − b) + c
+        power     — dpt = a·z^b + c
+        inverse   — dpt = a/(z − b) + c   (physically motivated)
 
     z is clamped to the calibration range to prevent extrapolation.
     """
 
-    def __init__(self, z_values, dpt_values, model: str = "quadratic"):
+    def __init__(
+        self,
+        z_values: np.ndarray,
+        dpt_values: np.ndarray,
+        model: str = "quadratic",
+    ) -> None:
         if model not in VALID_CALIBRATION_MODELS:
             raise ValueError(
                 f"calibration_model must be one of {VALID_CALIBRATION_MODELS}, got {model!r}"
             )
-        z = np.array(z_values, dtype=float)
-        dpt = np.array(dpt_values, dtype=float)
+
+        z = np.asarray(z_values, dtype=float)
+        dpt = np.asarray(dpt_values, dtype=float)
         self.z_min = float(z.min())
         self.z_max = float(z.max())
         self.model = model
+        self._predict: Callable[[float], float]
 
         if model == "linear":
-            # polyfit returns [a, b] for degree 1: dpt = a*z + b
             _a, _b = np.polyfit(z, dpt, 1)
-            self._predict = lambda z_val, a=float(_a), b=float(_b): a * z_val + b
+            a, b = float(_a), float(_b)
+            self._predict = lambda z_val, a=a, b=b: a * z_val + b
+
         elif model == "quadratic":
-            # polyfit returns [a, b, c] for degree 2: dpt = a*z² + b*z + c
             _a, _b, _c = np.polyfit(z, dpt, 2)
-            self._predict = lambda z_val, a=float(_a), b=float(_b), c=float(_c): (a * z_val + b) * z_val + c
+            a, b, c = float(_a), float(_b), float(_c)
+            # Horner's method: fewer multiplies than a*z**2 + b*z + c
+            self._predict = lambda z_val, a=a, b=b, c=c: (a * z_val + b) * z_val + c
+
         elif model == "power":
             from scipy.optimize import curve_fit
-            # dpt = a * z^b + c; initial guess derived from data range
+
+            if self.z_min <= 0:
+                raise ValueError(
+                    "power model requires z_min > 0 (got z_min="
+                    f"{self.z_min}); use quadratic or inverse instead."
+                )
             popt, _ = curve_fit(
-                lambda z, a, b, c: a * z ** b + c,
-                z, dpt, p0=[20.0, 1.5, -1.0],
+                lambda z, a, b, c: a * z**b + c,
+                z,
+                dpt,
+                p0=[20.0, 1.5, -1.0],
                 bounds=([0, 0.1, -np.inf], [np.inf, 5.0, np.inf]),
-                maxfev=10000,
+                maxfev=10_000,
             )
-            _a, _b, _c = (float(v) for v in popt)
-            self._predict = lambda z_val, a=_a, b=_b, c=_c: a * z_val ** b + c
-        else:  # inverse
+            a, b, c = (float(v) for v in popt)
+            self._predict = lambda z_val, a=a, b=b, c=c: a * z_val**b + c
+
+        else:  # inverse: dpt = a / (z - b) + c
             from scipy.optimize import curve_fit
-            # dpt = a / (z - b) + c; b must be negative (pole below measurement range)
-            popt, _ = curve_fit(
-                lambda z, a, b, c: a / (z - b) + c,
-                z, dpt, p0=[0.05, -0.3, 5.0],
-                bounds=([0, -np.inf, -np.inf], [np.inf, 0, np.inf]),
-                maxfev=10000,
-            )
-            _a, _b, _c = (float(v) for v in popt)
-            self._predict = lambda z_val, a=_a, b=_b, c=_c: a / (z_val - b) + c
+
+            # The pole b must lie outside the calibration z range.
+            # Try both sides (above z_max and below z_min) and keep whichever
+            # converges with the lower residual.
+            def _inv(z, a, b, c):
+                return a / (z - b) + c
+
+            best_popt = None
+            best_resid = np.inf
+            for p0, bounds in [
+                (
+                    [-3.0, self.z_max + 0.5, -5.0],
+                    ([-np.inf, self.z_max + 1e-3, -np.inf], [np.inf, np.inf, np.inf]),
+                ),
+                (
+                    [3.0, self.z_min - 0.5, 0.0],
+                    ([-np.inf, -np.inf, -np.inf], [np.inf, self.z_min - 1e-3, np.inf]),
+                ),
+            ]:
+                try:
+                    popt, _ = curve_fit(_inv, z, dpt, p0=p0, bounds=bounds, maxfev=10_000)
+                    resid = float(np.sum((dpt - _inv(z, *popt)) ** 2))
+                    if resid < best_resid:
+                        best_resid = resid
+                        best_popt = popt
+                except (RuntimeError, ValueError):
+                    continue
+
+            if best_popt is None:
+                raise RuntimeError("Inverse model fit failed to converge.")
+
+            a, b, c = (float(v) for v in best_popt)
+            self._predict = lambda z_val, a=a, b=b, c=c: a / (z_val - b) + c
 
     def get_dpt(self, z: float) -> float:
-        z = max(self.z_min, min(self.z_max, z))
-        return self._predict(z)
+        return self._predict(max(self.z_min, min(self.z_max, z)))
 
 
-def setup_lens_calibration(calibration_file: str, model: str = "quadratic") -> LensCalibration:
+def setup_lens_calibration(
+    calibration_file: str, model: str = "quadratic"
+) -> LensCalibration:
+    """Load a (z, dpt) CSV and fit a LensCalibration model.
+
+    Raises:
+        RuntimeError: if the file cannot be read or the model fit fails.
+    """
     try:
         data = np.genfromtxt(calibration_file, delimiter=",", names=True)
         return LensCalibration(data["z"], data["dpt"], model=model)
     except Exception as e:
-        raise RuntimeError(f"Error setting up lens calibration: {e}")
+        raise RuntimeError(f"Error setting up lens calibration: {e}") from e
 
 
 class LiquidLens(WorkerProcess):
@@ -122,6 +170,11 @@ class LiquidLens(WorkerProcess):
         self.video_folder = video_folder
         self.csv_writer = None
         self.kalman: Optional[KalmanFilter] = None
+
+        # Last diopter actually commanded to the lens, for slew-rate limiting.
+        # Persists across trials so the onset jump is ramped from the lens's
+        # real resting position. None until the first command is sent.
+        self._last_dpt: Optional[float] = None
 
         self._timing_rows: list = []
         self._recording_obj_id: Optional[int] = None
@@ -379,7 +432,17 @@ class LiquidLens(WorkerProcess):
 
                 # Command the lens and record timing.
                 try:
-                    dpt = self.lens_calibration.get_dpt(focus_z)
+                    target_dpt = self.lens_calibration.get_dpt(focus_z)
+                    # Slew-rate limit: ramp large transitions so the lens's
+                    # ~400 Hz resonance isn't excited by abrupt steps.
+                    max_step = self.lens_config.max_diopter_step
+                    if max_step > 0 and self._last_dpt is not None:
+                        delta = target_dpt - self._last_dpt
+                        delta = max(-max_step, min(max_step, delta))
+                        dpt = self._last_dpt + delta
+                    else:
+                        dpt = target_dpt
+                    self._last_dpt = dpt
                     t_serial_start = time.time()
                     self.lens_driver.set_diopter(dpt)
                     t_diopter_sent = time.time()
@@ -408,6 +471,7 @@ class LiquidLens(WorkerProcess):
                             "z": z,
                             "focus_z": focus_z,
                             "diopter": dpt,
+                            "target_diopter": target_dpt,
                             "predictor": self.lens_config.predictor,
                         }
                     )

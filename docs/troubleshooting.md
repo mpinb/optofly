@@ -38,9 +38,11 @@ level = "DEBUG"
 ```
 
 **Visual stimuli not appearing:**
-- Verify `enabled = true` in `configs/visual_stimuli.toml`
-- Test standalone: `python -m src.processes.visual --standalone`
-- Check window appears (may be on a different screen)
+- Verify `enabled = true` in the relevant subsection of `configs/visual_stimuli.toml`
+- Test standalone: `python -m src.processes.visual --standalone` (opens small 1280×320 window)
+- Check window appears at `window_x_offset` on the correct monitor
+- Verify `"Registered: <StimulusName>"` appears in startup logs
+- For Panda3D: ensure `unstash()` is called in `on_trigger()` — stashed nodes are invisible
 
 **Camera not recording:**
 ```python
@@ -67,16 +69,15 @@ ls calibrations/liquid_lens.csv
 
 ## Performance
 
-**Visual stimuli FPS drops below target:**
-
-Check logs for: `WARNING - Performance: 45.2 fps [target: 60 fps]`
+**Visual stimuli FPS drops below target (Panda3D pipeline):**
 
 Causes:
-- Shapes being created/deleted every frame instead of updated in-place
-- Too many shapes in scene (>1000)
-- Expensive computation in `update()` or `render()`
+- `update(dt)` allocating objects or doing heavy math each frame
+- Per-frame `removeNode()`/`attachNewNode()` cycles — prefer `stash()`/`unstash()`
+- Too many scene-graph nodes
 
-Fixes: Pre-calculate constants in `__init__()`, reduce shape count, use rectangles instead of circles.
+Fixes: Pre-calculate constants in `setup()` or `__init__()`. Keep `update()` to simple arithmetic.
+Use `stash()`/`unstash()` for repeated show/hide — `removeNode` + `attachNewNode` is significantly slower.
 
 **Camera frame drops:**
 - Check CPU usage during recording

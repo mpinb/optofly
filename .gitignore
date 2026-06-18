@@ -163,3 +163,6 @@ braid-cookies.json
 # Local branch notes
 BRANCHES.md
 *.npz
+
+# Liquid lens calibration output (timestamped, generated at runtime)
+*_liquidlens_calibration.csv

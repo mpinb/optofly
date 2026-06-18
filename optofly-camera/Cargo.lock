@@ -732,6 +732,7 @@ dependencies = [
  "signal-hook",
  "toml",
  "xiapi",
+ "xiapi-sys",
  "zmq",
 ]
 

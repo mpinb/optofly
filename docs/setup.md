@@ -51,7 +51,7 @@ experiments_path = "/mnt/data/experiments/" # Where .braid folders are saved
 
 [trigger_handler]
 min_tracking_age = 0.1      # Min object age before triggering (s)
-refractory_period = 10.0    # Global cooldown between ZONE_ENTER (s)
+cooldown_period = 10.0    # Global cooldown between ZONE_ENTER (s)
 z_min = 0.15                # Minimum z for trigger (m)
 z_max = 0.25                # Maximum z for trigger (m)
 heading_cone_deg = 45.0     # Heading tolerance from center-directed (degrees)
@@ -87,34 +87,47 @@ port = 5000
 
 ### configs/visual_stimuli.toml
 
+Uses the Panda3D pipeline. Arena geometry goes in `[visual_stimuli.arena]`; each stimulus is a separate subsection.
+
 ```toml
 [visual_stimuli]
 active = true
-window_x_offset = 3840
-window_width = 7680
-window_height = 1080
-target_fps = 60
-arena_center_to_screen_cm = 25.0
+log_file = "stim.csv"
 
-[visual_stimuli.static]
+[visual_stimuli.arena]
+viewing_distance_cm = 25.0
+window_x_offset = 3840          # X position of leftmost screen on desktop
+# Physical screens left-to-right → compass direction
+screen_mapping = ["South", "West", "North", "East"]
+braid_heading_offset_rad = 0.0  # Braid value that maps to North screen
+braid_heading_flip = false      # True if Braid heading runs opposite to arena
+
+[visual_stimuli.background]
 enabled = true
-pattern_density = 0.5
-random_seed = 42
+square_size_px = 40
+density = 0.5
+seed = 42
 
 [visual_stimuli.looming]
 enabled = true
 initial_size_deg = 5.0
 final_size_deg = 72.0
-expansion_duration_ms = 500
-positions_deg = [-90, 0, 90]
+expansion_duration_ms = 300
+hold_time_ms = 200
+expansion_type = "exponential"  # "lv_ratio", "exponential", or "linear"
+color = [0, 0, 0]
+positions_deg = [-90, -45, 0, 45, 90]
 
-[visual_stimuli.vertical_bar]
+[visual_stimuli.oscillating_square]
 enabled = false
-bar_width_deg = 20.0
-positions_deg = [90, 0, 180]
+size_deg = 10.0
+amplitude_deg = 30.0
+frequency_hz = 2.0
+duration_ms = 2000
+positions_deg = [-45, 0, 45]
 ```
 
-See the example files for all available options.
+See `configs/visual_stimuli.example.toml` for all available options.
 
 ## Running an Experiment
 
@@ -130,17 +143,16 @@ The launcher checks for an active Braid recording folder (or starts one automati
 ## Calibration Tools
 
 ```bash
-# Visual stimuli heading → pixel mapping (interactive)
-python -m src.processes.visual --calibrate
-python -m src.processes.visual --calibrate-mapping
-python -m src.processes.visual --test-calibration
+# Visual stimuli standalone test (Panda3D, no hardware)
+python -m src.processes.visual --standalone
 
-# BRAID-to-camera DLT calibration (interactive, requires Braid + camera)
-python -m src.tools.calibrate_braid_ximea --config configs/config.toml
-
-# Offline mode (static image, no hardware)
-python -m src.tools.calibrate_braid_ximea --image /path/to/frame.png --config configs/config.toml
+# Camera FOV calibration (requires Braid + camera + liquid lens)
+# Collect >= 4 edge points -> press 'n' to finalise plane (z auto-read from Braid).
+# Press 's' to save flat [camera.FOV], or 'a' then repeat for frustum near/far.
+uv run python -m src.tools.calibrate_braid_ximea --config configs/config.toml
 ```
+
+The Panda3D pipeline uses `screen_mapping` in `[visual_stimuli.arena]` to assign compass directions to physical screens — no interactive calibration tool is required. Set `braid_heading_offset_rad` and `braid_heading_flip` to align Braid tracking coordinates with the arena.
 
 See [docs/calibration.md](calibration.md) for full procedures.
 

@@ -1,6 +1,10 @@
-# Visual Stimuli
+# Visual Stimuli (Legacy — Pyglet Pipeline)
 
-Developer guide for the visual stimulus rendering system.
+> **This pipeline is superseded by the Panda3D pipeline (`src/visual/`), which is what `main.py` uses.**
+> For new stimulus development, see [visual-stimuli-panda3d.md](visual-stimuli-panda3d.md).
+> This document is kept as a reference for the legacy `src/stimuli/` (pyglet) code, which is still
+> used by the `--calibrate` / `--calibrate-mapping` / `--test-calibration` CLI flags in
+> `python -m src.processes.visual`.
 
 ## Overview
 
