@@ -61,7 +61,9 @@ active = true
 port = "/dev/opto_trigger"
 duration = [100, 200, 300]          # ms — randomly selected per trigger
 intensity = [0, 51, 102, 153, 204, 255]
+frequency = 0                       # Hz — 0 = continuous; list for random selection
 color = "red"
+sham_probability = 0.0              # 0.0–1.0 fraction of sham (no-light) trials
 ```
 
 ## Bench Testing

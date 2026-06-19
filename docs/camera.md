@@ -113,10 +113,10 @@ Kill signal: `[b"kill", b""]`
 
 **Metadata CSV:** `{save_folder}/obj_id_{obj_id}_frame_{frame}.csv`
 ```csv
-frame_idx,nframe,ts_sec,ts_usec,cam_time_ns
-0,100,1234,567890,1234567890000
+frame_idx,nframe,ts_sec,ts_usec,cam_time_ns,trigger_frame_idx
+0,100,1234,567890,1234567890000,42
 ```
-`trigger_frame_idx` is logged to stderr (warn level) and indicates which buffer frame corresponds to the real `ZONE_ENTER` moment.
+`trigger_frame_idx` is written to every row and indicates which buffer frame corresponds to the real `ZONE_ENTER` moment. Frames before it are pre-stimulus baseline; frames after are the response.
 
 **Lens timing CSV:** `{save_folder}/obj_id_{obj_id}_frame_{frame}_lens_timing.csv`
 
