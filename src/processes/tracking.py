@@ -9,11 +9,11 @@ and emits ZONE_ENTER / ZONE_EXIT events when objects enter or leave the trigger 
 from collections import deque
 from dataclasses import dataclass, field
 import json
+import math
 import multiprocessing as mp
 import time
 from typing import Any, Dict, Optional, Tuple
 import numpy as np
-from scipy import stats
 import zmq
 
 from src.utils.config import TriggerHandlerConfig
@@ -59,6 +59,11 @@ class TrackedObject:
     # Track last time this object was checked
     last_check_time: float = field(default_factory=time.time)
 
+    # Running sums for incremental circular mean (headings) and mean velocity
+    _sin_sum: float = 0.0
+    _cos_sum: float = 0.0
+    _vel_sum: list = field(default_factory=lambda: [0.0, 0.0, 0.0])
+
     def update(
         self,
         x: float,
@@ -90,16 +95,32 @@ class TrackedObject:
 
         # Add to history
         self.positions.append((x, y, z))
-        self.velocities.append((xvel, yvel, zvel))
         self.timestamps.append(timestamp)
 
+        # Incremental mean velocity — evict oldest value before deque auto-drops it
+        if len(self.velocities) == self.velocities.maxlen:
+            old = self.velocities[0]
+            self._vel_sum[0] -= old[0]
+            self._vel_sum[1] -= old[1]
+            self._vel_sum[2] -= old[2]
+        self._vel_sum[0] += xvel
+        self._vel_sum[1] += yvel
+        self._vel_sum[2] += zvel
+        self.velocities.append((xvel, yvel, zvel))
+
         # Calculate velocity magnitude in xy plane
-        velocity_magnitude = np.sqrt(xvel**2 + yvel**2)
+        velocity_magnitude = math.sqrt(xvel**2 + yvel**2)
 
         # Only calculate and store heading if object is actually moving
         # This prevents noise from stationary objects triggering false positives
         if velocity_magnitude >= min_velocity:
-            heading = np.arctan2(yvel, xvel)
+            heading = math.atan2(yvel, xvel)
+            if len(self.headings) == self.headings.maxlen:
+                old = self.headings[0]
+                self._sin_sum -= math.sin(old)
+                self._cos_sum -= math.cos(old)
+            self._sin_sum += math.sin(heading)
+            self._cos_sum += math.cos(heading)
             self.headings.append(heading)
 
         # Update last check time
@@ -128,9 +149,7 @@ class TrackedObject:
         """
         if not self.headings:
             return None
-
-        # Use scipy.stats.circmean for proper circular mean calculation
-        return stats.circmean(list(self.headings), high=np.pi, low=-np.pi)
+        return math.atan2(self._sin_sum, self._cos_sum)
 
     def is_heading_toward_center(
         self,
@@ -168,13 +187,10 @@ class TrackedObject:
         Returns:
             Tuple of (vx, vy, vz) mean velocities or None if no velocity data
         """
-        if not self.velocities:
+        n = len(self.velocities)
+        if n == 0:
             return None
-
-        # Calculate mean of recent velocities
-        velocities_array = np.array(list(self.velocities))
-        mean_vel = np.mean(velocities_array, axis=0)
-        return tuple(mean_vel)
+        return (self._vel_sum[0] / n, self._vel_sum[1] / n, self._vel_sum[2] / n)
 
 
 class TriggerHandler(WorkerProcess):
