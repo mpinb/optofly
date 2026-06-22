@@ -24,6 +24,9 @@ braid_pub_hwm = 1000
 # Liquid lens feed is latest-only to prevent stale focus commands.
 lens_update_conflate = true
 
+# Transport protocol: "tcp" works across machines; "ipc" is faster on a single host.
+# transport = "ipc"
+
 [logging]
 # Global logging level
 level = "INFO"

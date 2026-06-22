@@ -222,6 +222,14 @@ class ZMQConfig(ConfigBase):
         # Queue policy
         self.braid_pub_hwm: int = int(config.get("braid_pub_hwm", 1000))
         self.lens_update_conflate: bool = bool(config.get("lens_update_conflate", True))
+
+        # Transport
+        self.transport: str = config.get("transport", "tcp")
+        if self.transport not in ("tcp", "ipc"):
+            raise ValueError(
+                f"zmq.transport must be 'tcp' or 'ipc', got {self.transport!r}"
+            )
+
         # Validate configuration
         self._validate_config()
 
@@ -233,12 +241,16 @@ class ZMQConfig(ConfigBase):
         if self.braid_pub_hwm <= 0:
             raise ValueError("zmq.braid_pub_hwm must be positive")
 
-    def get_subscriber_address(self, port: int):
+    def get_subscriber_address(self, port: int) -> str:
         """Get the subscriber address for a given port."""
+        if self.transport == "ipc":
+            return f"ipc:///tmp/optofly_{port}.sock"
         return f"tcp://localhost:{port}"
 
-    def get_publisher_address(self, port: int):
+    def get_publisher_address(self, port: int) -> str:
         """Get the publisher address for a given port."""
+        if self.transport == "ipc":
+            return f"ipc:///tmp/optofly_{port}.sock"
         return f"tcp://*:{port}"
 
 
