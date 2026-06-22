@@ -5,11 +5,16 @@ Provides interactive prompts for experiment metadata (experimenter, cross, dates
 and writes them to experiment_data.toml in the braid recording folder.
 """
 
+import csv
 import tomllib
+import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-import csv
+
+
+class UserCancelledError(Exception):
+    """Raised when the user explicitly declines to proceed with metadata."""
 
 
 def extract_config_columns(config_path: str) -> dict[str, Any]:
@@ -127,7 +132,7 @@ def collect_metadata() -> dict[str, Any]:
     confirm = input("\nProceed with this metadata? [Y/n] ").strip().lower()
     if confirm and confirm not in ("y", "yes"):
         print("⚠ Metadata collection cancelled. Exiting.")
-        raise KeyboardInterrupt("User cancelled metadata collection")
+        raise UserCancelledError("User cancelled metadata collection")
 
     print()
     return metadata
@@ -190,18 +195,38 @@ def append_metadata_to_csv(
 
     file_exists = csv_path.exists() and csv_path.stat().st_size > 0
 
-    try:
-        with open(csv_path, mode="a", newline="") as f:
-            fieldnames = (
-                list(metadata.keys())
-                + list(config_columns.keys() if config_columns else [])
-                + ["braid_file"]
-            )
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
+    new_fields = (
+        list(metadata.keys())
+        + list(config_columns.keys() if config_columns else [])
+        + ["braid_file"]
+    )
 
+    try:
+        if file_exists:
+            with open(csv_path, newline="") as f_check:
+                existing_header = next(csv.reader(f_check), [])
+            missing = [col for col in existing_header if col not in new_fields]
+            extra = [col for col in new_fields if col not in existing_header]
+            if missing or extra:
+                warnings.warn(
+                    f"optofly_experiments.csv schema mismatch detected.\n"
+                    f"  In file but not in current row: {missing}\n"
+                    f"  New columns not in file: {extra}\n"
+                    "  Missing columns will be written as empty strings.",
+                    stacklevel=2,
+                )
+                for col in missing:
+                    row.setdefault(col, "")
+                fieldnames = existing_header + [c for c in new_fields if c not in existing_header]
+            else:
+                fieldnames = existing_header
+        else:
+            fieldnames = new_fields
+
+        with open(csv_path, mode="a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
             if not file_exists:
                 writer.writeheader()
-
             writer.writerow(row)
         print(f"✓ Metadata appended to {csv_path}")
     except Exception as e:

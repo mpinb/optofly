@@ -22,10 +22,11 @@ from src.processes.lens import LiquidLens
 from src.utils.braid import check_braid_folder_exists, copy_csv_files_to_braid
 from src.utils.logger import configure_process_logging
 from src.utils.metadata import (
-    collect_metadata,
-    write_metadata,
+    UserCancelledError,
     append_metadata_to_csv,
+    collect_metadata,
     extract_config_columns,
+    write_metadata,
 )
 from src.monitoring.server import run_server
 
@@ -156,29 +157,27 @@ def main():
         action="store_true",
         help="Skip experiment metadata prompt (for quick tests)",
     )
+    parser.add_argument(
+        "--config",
+        default="configs/config.toml",
+        help="Path to TOML configuration file (default: configs/config.toml)",
+    )
     args = parser.parse_args()
 
     # Configuration file path
-    config_path = "configs/config.toml"
+    config_path = args.config
 
     # Load configuration
     print(f"Loading configuration from {config_path}...")
     config = load_config(config_path)
 
-    # Collect experiment metadata
-    metadata = None
-    if not args.skip_metadata:
-        metadata = collect_metadata()
-        experiment_duration = float(metadata.get("experiment_duration", 24))
-    else:
-        experiment_duration = 24.0
-        print("⚠ Skipping metadata collection (--skip-metadata flag set)")
-
     # Initialize variables for cleanup
     braid_folder = None
     braid_proxy = None
 
-    # Check for Braid recording folder or start recording if not found
+    # Confirm Braid is recording BEFORE prompting for metadata — so the
+    # researcher sees where data will go before filling in the form, and
+    # metadata is never discarded due to a Braid connection failure.
     experiments_path = config.get("braid_publisher", {}).get(
         "experiments_path", "/mnt/data/experiments/"
     )
@@ -189,6 +188,15 @@ def main():
         experiments_path, callback_url=callback_url, auto_start_recording=True
     )
     print(f"Experiment data will be saved to: {braid_folder}")
+
+    # Collect experiment metadata (after Braid folder is confirmed)
+    metadata = None
+    if not args.skip_metadata:
+        metadata = collect_metadata()
+        experiment_duration = float(metadata.get("experiment_duration", 24))
+    else:
+        experiment_duration = 24.0
+        print("⚠ Skipping metadata collection (--skip-metadata flag set)")
 
     # Write metadata to braid folder if it was collected
     if metadata is not None:
@@ -340,6 +348,10 @@ def main():
                 print("\n\nExperiment duration reached, shutting down...")
                 stop_event.set()
             time.sleep(0.1)
+
+    except UserCancelledError:
+        print("\nMetadata collection cancelled by user. Exiting.")
+        sys.exit(0)
 
     except KeyboardInterrupt:
         print("\n\nReceived keyboard interrupt, shutting down...")
