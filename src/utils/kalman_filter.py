@@ -46,6 +46,12 @@ class KalmanFilter:
         self.dt = 0.0
         self.last_timestamp: Optional[float] = None
 
+        # Pre-allocated temporaries reused every update() call
+        self._F = np.eye(2)
+        self._Q = np.zeros((2, 2))
+        self._z_meas = np.zeros((1, 1))
+        self._vz_meas = np.zeros((1, 1))
+
     def init(
         self,
         z: float,
@@ -72,22 +78,29 @@ class KalmanFilter:
             self.last_timestamp = timestamp
 
         dt = self.dt
-        F = np.array([[1.0, dt], [0.0, 1.0]])
+        if dt <= 0:
+            return
 
-        # DWNA process noise: Q = process_noise * G G^T
+        # Fill pre-allocated F in-place: [[1, dt], [0, 1]]
+        self._F[0, 1] = dt
+
+        # DWNA process noise: Q = process_noise * G G^T, computed element-wise
         g0 = dt * dt / 2.0
-        G = np.array([[g0], [dt]])
-        Q = self.process_noise * (G @ G.T)
+        pn = self.process_noise
+        self._Q[0, 0] = pn * g0 * g0
+        self._Q[0, 1] = pn * g0 * dt
+        self._Q[1, 0] = self._Q[0, 1]
+        self._Q[1, 1] = pn * dt * dt
 
-        z_meas = np.array([[z]])
+        self._z_meas[0, 0] = z
         self.x, self.P = _kalman_update(
-            self.x, self.P, z_meas, F, self.H_pos, Q, self.R_pos
+            self.x, self.P, self._z_meas, self._F, self.H_pos, self._Q, self.R_pos
         )
 
         if vz is not None:
-            vz_meas = np.array([[vz]])
+            self._vz_meas[0, 0] = vz
             self.x, self.P = _kalman_measurement_update(
-                self.x, self.P, vz_meas, self.H_vel, self.R_vel
+                self.x, self.P, self._vz_meas, self.H_vel, self.R_vel
             )
 
     def predict(self, dt: float) -> float:
