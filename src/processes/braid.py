@@ -103,6 +103,7 @@ class BraidPublisher(WorkerProcess):
         self._topic_bytes = self.config.zmq.braid_topic.encode("utf-8")
         self._active_topic_bytes = self.config.zmq.active_braid_topic.encode("utf-8")
         self._active_obj_id: Optional[int] = None
+        self._active_last_seen: float = 0.0  # monotonic time of last matching Update
 
         # Connection objects (initialized later)
         self.session = None
@@ -244,6 +245,17 @@ class BraidPublisher(WorkerProcess):
         if self.trigger_socket is None:
             return
 
+        # Expire a stuck active object if Braid has stopped sending updates for it.
+        if self._active_obj_id is not None and self._active_last_seen > 0:
+            age = time.monotonic() - self._active_last_seen
+            if age > self.config.zone_timeout:
+                self.logger.warning(
+                    f"Active object {self._active_obj_id} timed out "
+                    f"({age:.2f}s > zone_timeout={self.config.zone_timeout}s) — clearing"
+                )
+                self._active_obj_id = None
+                self._active_last_seen = 0.0
+
         while True:
             try:
                 topic_b, raw = self.trigger_socket.recv_multipart(flags=zmq.NOBLOCK)
@@ -299,6 +311,7 @@ class BraidPublisher(WorkerProcess):
             and isinstance(update, dict)
             and update.get("obj_id") == self._active_obj_id
         ):
+            self._active_last_seen = time.monotonic()
             active_message = json.dumps(update)
             self.active_braid_socket.send_multipart(
                 [self._active_topic_bytes, active_message.encode("utf-8")]

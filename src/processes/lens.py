@@ -251,6 +251,10 @@ class LiquidLens(WorkerProcess):
         else:
             self.logger.info("Predictor: none (raw z from Braid)")
 
+        self._prediction_time = (
+            self.lens_config.system_latency + self.lens_config.prediction_horizon
+        )
+
         self.logger.info("Liquid Lens process initialized.")
 
     def _log_csv(self, event: str, **kwargs):
@@ -292,14 +296,6 @@ class LiquidLens(WorkerProcess):
         self.current_tracked_obj = None
         self._pending_first_update = None
 
-    def _drain_braid_idle(self):
-        """Discard queued BRAID traffic while no trial is active."""
-        while True:
-            try:
-                self.braid_socket.recv_multipart(flags=zmq.NOBLOCK)
-            except zmq.Again:
-                break
-
     def _drain_active_braid_idle(self):
         """Discard queued active-object updates while no trial is active."""
         while True:
@@ -321,38 +317,6 @@ class LiquidLens(WorkerProcess):
 
         return latest
 
-    def _get_next_update_for_current_object(self):
-        """Drain the queue and return the most recent BRAID update for the tracked object.
-
-        Older queued updates are discarded — the Kalman predictor extrapolates
-        from the freshest measurement, so chasing stale positions is wasted work.
-        """
-        latest = None
-        saw_death = False
-
-        while True:
-            try:
-                _, raw = self.braid_socket.recv_multipart(flags=zmq.NOBLOCK)
-            except zmq.Again:
-                break
-
-            braid_msg = json.loads(raw)
-
-            if "Death" in braid_msg and braid_msg["Death"] == self.current_tracked_obj:
-                saw_death = True
-                continue
-
-            if "Update" not in braid_msg:
-                continue
-
-            update = braid_msg["Update"]
-            if update.get("obj_id") != self.current_tracked_obj:
-                continue
-
-            latest = update
-
-        return latest, saw_death
-
     def _drain_trigger_socket(self):
         """Process all pending zone enter/exit events."""
         while True:
@@ -369,7 +333,6 @@ class LiquidLens(WorkerProcess):
                     self.logger.info(f"ZONE_ENTER: start tracking object {obj_id}")
                     self.is_tracking = True
                     self.current_tracked_obj = obj_id
-                    self.last_position_time = time.time()
                     self._log_csv("zone_enter", obj_id=obj_id)
                     self._timing_rows = []
                     self._recording_obj_id = obj_id
@@ -429,29 +392,19 @@ class LiquidLens(WorkerProcess):
                 if self._pending_first_update is not None:
                     update = self._pending_first_update
                     self._pending_first_update = None
-                    saw_death = False
                 elif self.active_braid_socket in events:
                     update = self._get_latest_active_update()
-                    saw_death = False
                 else:
                     continue
-
-                if saw_death:
-                    self.logger.warning(
-                        "BRAID reported death for tracked object %s before ZONE_EXIT",
-                        self.current_tracked_obj,
-                    )
 
                 if update is None:
                     continue
 
-                u = update
-                self.last_position_time = time.time()
-                x, y, z = u["x"], u["y"], u["z"]
-                vz = u.get("zvel", 0.0)
-                timestamp = u.get("timestamp")
-                t_relay = u.get("t_relay")
                 t_lens_recv = time.time()
+                x, y, z = update["x"], update["y"], update["z"]
+                vz = update.get("zvel", 0.0)
+                timestamp = update.get("timestamp")
+                t_relay = update.get("t_relay")
 
                 # Pick the focus depth according to predictor mode.
                 predictor = self.lens_config.predictor
@@ -466,17 +419,9 @@ class LiquidLens(WorkerProcess):
                         self.kalman.init(z, vz, timestamp)
                     else:
                         self.kalman.update(z, vz, timestamp)
-                    prediction_time = (
-                        self.lens_config.system_latency
-                        + self.lens_config.prediction_horizon
-                    )
-                    focus_z = self.kalman.predict(prediction_time)
+                    focus_z = self.kalman.predict(self._prediction_time)
                 elif predictor == "linear":
-                    prediction_time = (
-                        self.lens_config.system_latency
-                        + self.lens_config.prediction_horizon
-                    )
-                    focus_z = z + vz * prediction_time
+                    focus_z = z + vz * self._prediction_time
                 else:
                     focus_z = z
 
@@ -515,7 +460,7 @@ class LiquidLens(WorkerProcess):
                             "t_serial_start": t_serial_start,
                             "t_diopter_sent": t_diopter_sent,
                             "delay_ms": delay_ms,
-                            "frame": u.get("frame"),
+                            "frame": update.get("frame"),
                             "obj_id": self.current_tracked_obj,
                             "x": x,
                             "y": y,
@@ -549,7 +494,7 @@ class LiquidLens(WorkerProcess):
                 self.lens_driver.close()
             except Exception:
                 pass
-        for sock_attr in ("braid_socket", "active_braid_socket", "trigger_socket"):
+        for sock_attr in ("active_braid_socket", "trigger_socket"):
             sock = getattr(self, sock_attr, None)
             if sock:
                 try:

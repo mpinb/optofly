@@ -244,6 +244,10 @@ class BraidPublisherConfig(ConfigBase):
         # Shared ZMQ configuration
         self.zmq = ZMQConfig(config_path)
 
+        # Zone timeout — used to expire a stuck _active_obj_id if ZONE_EXIT is missed.
+        trigger_config = TriggerHandlerConfig(config_path)
+        self.zone_timeout: float = trigger_config.zone_timeout
+
     def __str__(self) -> str:
         """Return a readable description of the Braid publisher configuration."""
         return (
