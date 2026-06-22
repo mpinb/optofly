@@ -118,7 +118,13 @@ class LiquidLensConfig(ConfigBase):
         config = self._load_config()
 
         # Hardware configuration
-        self.port: str = config["port"]
+        try:
+            self.port: str = config["port"]
+        except KeyError:
+            raise ValueError(
+                "Missing required config key: liquid_lens.port\n"
+                "  Example: port = \"/dev/optotune_ld\""
+            )
 
         # Control mode
         self.mode: str = config.get("mode", "diopter")
@@ -185,12 +191,30 @@ class ZMQConfig(ConfigBase):
         config = self._load_config()
 
         # Ports
-        self.braid_port: int = config["braid_port"]
-        self.trigger_port: int = config["trigger_port"]
+        try:
+            self.braid_port: int = config["braid_port"]
+        except KeyError:
+            raise ValueError(
+                "Missing required config key: zmq.braid_port\n"
+                "  Example: braid_port = 5555"
+            )
+        try:
+            self.trigger_port: int = config["trigger_port"]
+        except KeyError:
+            raise ValueError(
+                "Missing required config key: zmq.trigger_port\n"
+                "  Example: trigger_port = 5556"
+            )
         self.active_braid_port: int = int(config.get("active_braid_port", 5557))
 
         # Topics
-        self.braid_topic: str = config["braid_topic"]
+        try:
+            self.braid_topic: str = config["braid_topic"]
+        except KeyError:
+            raise ValueError(
+                "Missing required config key: zmq.braid_topic\n"
+                "  Example: braid_topic = \"BRAID\""
+            )
         self.zone_enter_topic: str = config.get("zone_enter_topic", "ZONE_ENTER")
         self.zone_exit_topic: str = config.get("zone_exit_topic", "ZONE_EXIT")
         self.active_braid_topic: str = config.get("active_braid_topic", "ACTIVE_BRAID")
@@ -273,7 +297,13 @@ class OptoTriggerConfig(ConfigBase):
         self.active: bool = config.get("active", False)
 
         # Serial connection details
-        self.port: str = config["port"]
+        try:
+            self.port: str = config["port"]
+        except KeyError:
+            raise ValueError(
+                "Missing required config key: opto_trigger.port\n"
+                "  Example: port = \"/dev/opto_trigger\""
+            )
         self.baudrate: int = int(config.get("baudrate", 115200))
 
         # Stimulation parameters - store as option lists
@@ -296,6 +326,22 @@ class OptoTriggerConfig(ConfigBase):
 
         # Sham probability controls how often a stimulation is skipped
         self.sham_probability: float = float(config.get("sham_probability", 0.0))
+        if not (0.0 <= self.sham_probability <= 1.0):
+            raise ValueError(
+                f"opto_trigger.sham_probability must be in [0.0, 1.0], "
+                f"got {self.sham_probability}. Use 0.5 for 50% sham trials."
+            )
+
+        for v in self.intensity_options:
+            if not (0 <= int(v) <= 255):
+                raise ValueError(
+                    f"opto_trigger.intensity values must be in [0, 255], got {v}"
+                )
+        for v in self.duration_options:
+            if int(v) < 0:
+                raise ValueError(
+                    f"opto_trigger.duration values must be >= 0, got {v}"
+                )
 
     def get_trigger_command(self) -> str:
         """Return the formatted command string expected by the Arduino firmware."""
@@ -435,6 +481,20 @@ class CameraConfig(ConfigBase):
         self.braid_ximea_calibration_file: str | None = config.get(
             "braid_ximea_calibration_file", None
         )
+
+        # Cross-validate: recording must be long enough to cover the zone timeout.
+        try:
+            _zt = TriggerHandlerConfig(config_path).zone_timeout
+            if self.max_recording_time < _zt:
+                import warnings
+                warnings.warn(
+                    f"camera.max_recording_time ({self.max_recording_time}s) is less than "
+                    f"trigger_handler.zone_timeout ({_zt}s). Every recording will be "
+                    "truncated before the fly exits the zone.",
+                    stacklevel=2,
+                )
+        except Exception:
+            pass
 
     def __str__(self):
         """Return a string representation of the configuration."""
