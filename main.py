@@ -339,6 +339,20 @@ def main():
         # Allow child processes to finish their initialization
         time.sleep(1)
 
+        # Verify critical hardware processes are still alive after init.
+        # They exit immediately on serial connection failure — catch that here
+        # rather than running a silent experiment with no autofocus or backlight.
+        _critical = {"LiquidLens": None, "OptoTriggerWorker": None}
+        for name, proc in processes:
+            if name in _critical:
+                _critical[name] = proc
+        for name, proc in _critical.items():
+            if proc is not None and not proc.is_alive():
+                print(f"\nFATAL: {name} process exited during initialization.")
+                print("  Check hardware connection and the relevant port in config.toml.")
+                stop_event.set()
+                sys.exit(1)
+
         # Print experiment summary
         print_experiment_config(config, active_process_names)
 
@@ -373,11 +387,13 @@ def main():
         # Give processes time to cleanup
         time.sleep(1)
 
-        # Join all processes
+        # Join all processes — camera needs extra time for the encoder to finish.
+        _SHUTDOWN_TIMEOUTS = {"CameraProcess": 35, "RustCamera": 35}
         for name, process in processes:
             if process.is_alive():
                 print(f"  Waiting for {name} to terminate...")
-                process.join(timeout=5)
+                timeout = _SHUTDOWN_TIMEOUTS.get(name, 5)
+                process.join(timeout=timeout)
                 if process.is_alive():
                     print(f"  Force terminating {name}...")
                     process.terminate()

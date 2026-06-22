@@ -595,6 +595,11 @@ class CameraProcess(WorkerProcess):
                         trigger_frame_idx,
                     )
                 )
+                # Wait for the encoder to finish with this buffer before
+                # repurposing it as the standby capture buffer for the next
+                # trial. Prevents a rapid second ZONE_ENTER from overwriting
+                # frames the encoder is still reading.
+                encode_queue.join()
 
             # Swap to standby buffer
             active_idx = 1 - active_idx
