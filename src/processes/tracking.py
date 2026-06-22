@@ -265,6 +265,7 @@ class TriggerHandler(WorkerProcess):
 
             # Publisher for zone events (ZONE_ENTER, ZONE_EXIT)
             self.publisher = self.context.socket(zmq.PUB)
+            self.publisher.setsockopt(zmq.TCP_NODELAY, 1)
             publisher_address = self.config.zmq.get_publisher_address(
                 self.config.zmq.trigger_port
             )
@@ -273,6 +274,7 @@ class TriggerHandler(WorkerProcess):
 
             # Subscriber for Braid tracking data
             self.subscriber = self.context.socket(zmq.SUB)
+            self.subscriber.setsockopt(zmq.TCP_NODELAY, 1)
             subscriber_address = self.config.zmq.get_subscriber_address(
                 self.config.zmq.braid_port
             )
@@ -366,7 +368,7 @@ class TriggerHandler(WorkerProcess):
         try:
             obj_id = data["obj_id"]
             frame = data["frame"]
-            timestamp = time.time()
+            now = time.time()
 
             if obj_id not in self.tracked_objects:
                 self.logger.debug(
@@ -382,13 +384,13 @@ class TriggerHandler(WorkerProcess):
                     xvel=data["xvel"],
                     yvel=data["yvel"],
                     zvel=data["zvel"],
-                    timestamp=timestamp,
+                    timestamp=now,
                     frame=frame,
                     min_velocity=self.config.min_velocity,
                 )
 
             tracked_obj = self.tracked_objects[obj_id]
-            self._evaluate_zone_transitions(tracked_obj)
+            self._evaluate_zone_transitions(tracked_obj, now)
 
         except KeyError as e:
             self.logger.error(f"Missing field in Update message: {e}")
@@ -410,7 +412,7 @@ class TriggerHandler(WorkerProcess):
         except Exception as e:
             self.logger.error(f"Error processing Death message: {e}")
 
-    def _evaluate_zone_transitions(self, tracked_obj: TrackedObject) -> None:
+    def _evaluate_zone_transitions(self, tracked_obj: TrackedObject, now: float) -> None:
         """
         Evaluate zone enter/exit transitions for a tracked object.
 
@@ -436,7 +438,6 @@ class TriggerHandler(WorkerProcess):
                 return
 
             # Gate 2: cooldown period
-            now = time.time()
             elapsed = now - self._last_zone_enter_time
             if elapsed < self.cooldown_period:
                 self.logger.debug(
@@ -464,23 +465,23 @@ class TriggerHandler(WorkerProcess):
 
             # All gates passed — emit ZONE_ENTER
             tracked_obj.in_zone = True
-            tracked_obj.zone_enter_time = time.time()
-            self._send_zone_enter(tracked_obj)
+            tracked_obj.zone_enter_time = now
+            self._send_zone_enter(tracked_obj, now)
 
         elif tracked_obj.in_zone and not in_xy_zone_now:
             # Left the zone (x/y only — z drift does not trigger exit)
-            self._send_zone_exit(tracked_obj, reason="left_fov")
+            self._send_zone_exit(tracked_obj, reason="left_fov", now=now)
             tracked_obj.in_zone = False
             tracked_obj.zone_enter_time = None
 
-    def _send_zone_enter(self, tracked_obj: TrackedObject) -> None:
+    def _send_zone_enter(self, tracked_obj: TrackedObject, now: float) -> None:
         """Emit a ZONE_ENTER event."""
         try:
             mean_heading = tracked_obj.get_mean_heading()
             message_data = {
                 "obj_id": tracked_obj.obj_id,
                 "frame": tracked_obj.current_frame,
-                "timestamp": time.time(),
+                "timestamp": now,
                 "x": tracked_obj.current_x,
                 "y": tracked_obj.current_y,
                 "z": tracked_obj.current_z,
@@ -493,7 +494,7 @@ class TriggerHandler(WorkerProcess):
             message = json.dumps(message_data)
             topic = self.config.zmq.zone_enter_topic.encode("utf-8")
             self.publisher.send_multipart([topic, message.encode("utf-8")])
-            self._last_zone_enter_time = time.time()
+            self._last_zone_enter_time = now
             self.logger.debug(
                 f"ZONE_ENTER obj={tracked_obj.obj_id} "
                 f"pos=({tracked_obj.current_x:.3f}, {tracked_obj.current_y:.3f}, {tracked_obj.current_z:.3f}) "
@@ -502,10 +503,11 @@ class TriggerHandler(WorkerProcess):
         except Exception as e:
             self.logger.error(f"Error sending ZONE_ENTER: {e}")
 
-    def _send_zone_exit(self, tracked_obj: TrackedObject, reason: str) -> None:
+    def _send_zone_exit(self, tracked_obj: TrackedObject, reason: str, now: float | None = None) -> None:
         """Emit a ZONE_EXIT event."""
         try:
-            now = time.time()
+            if now is None:
+                now = time.time()
             duration = (
                 now - tracked_obj.zone_enter_time
                 if tracked_obj.zone_enter_time
@@ -537,7 +539,7 @@ class TriggerHandler(WorkerProcess):
         for obj_id, obj in self.tracked_objects.items():
             if current_time - obj.last_check_time > self.config.zone_timeout:
                 if obj.in_zone:
-                    self._send_zone_exit(obj, reason="timeout")
+                    self._send_zone_exit(obj, reason="timeout", now=current_time)
                     obj.in_zone = False
                     obj.zone_enter_time = None
 
@@ -564,9 +566,9 @@ class TriggerHandler(WorkerProcess):
         try:
             while not self.stop_event.is_set():
                 # Poll for messages with timeout (1ms for low-latency trigger response)
-                socks = dict(poller.poll(1))
+                socks = {s for s, _ in poller.poll(1)}
 
-                if self.subscriber in socks and socks[self.subscriber] == zmq.POLLIN:
+                if self.subscriber in socks:
                     try:
                         topic, message = self.subscriber.recv_multipart()
                         topic = topic.decode("utf-8")

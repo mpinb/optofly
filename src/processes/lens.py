@@ -187,6 +187,7 @@ class LiquidLens(WorkerProcess):
         # ZMQ
         self.context = zmq.Context()
         self.active_braid_socket = self.context.socket(zmq.SUB)
+        self.active_braid_socket.setsockopt(zmq.TCP_NODELAY, 1)
         if self.zmq_config.lens_update_conflate:
             self.active_braid_socket.setsockopt(zmq.CONFLATE, 1)
             self.active_braid_socket.setsockopt(zmq.RCVHWM, 1)
@@ -198,6 +199,7 @@ class LiquidLens(WorkerProcess):
         )
 
         self.trigger_socket = self.context.socket(zmq.SUB)
+        self.trigger_socket.setsockopt(zmq.TCP_NODELAY, 1)
         self.trigger_socket.connect(
             self.zmq_config.get_subscriber_address(self.zmq_config.trigger_port)
         )
@@ -379,20 +381,20 @@ class LiquidLens(WorkerProcess):
 
         while self.is_running and not self.stop_event.is_set():
             try:
-                events = dict(poller.poll(timeout=10))
+                socks = {s for s, _ in poller.poll(timeout=10)}
 
-                if self.trigger_socket in events:
+                if self.trigger_socket in socks:
                     self._drain_trigger_socket()
 
                 if not self.is_tracking:
-                    if self.active_braid_socket in events:
+                    if self.active_braid_socket in socks:
                         self._drain_active_braid_idle()
                     continue
 
                 if self._pending_first_update is not None:
                     update = self._pending_first_update
                     self._pending_first_update = None
-                elif self.active_braid_socket in events:
+                elif self.active_braid_socket in socks:
                     update = self._get_latest_active_update()
                 else:
                     continue
@@ -426,6 +428,7 @@ class LiquidLens(WorkerProcess):
                     focus_z = z
 
                 # Command the lens and record timing.
+                prev_dpt = self._last_dpt
                 try:
                     target_dpt = self.lens_calibration.get_dpt(focus_z)
                     # Slew-rate limit: ramp large transitions so the lens's
@@ -437,6 +440,8 @@ class LiquidLens(WorkerProcess):
                         dpt = self._last_dpt + delta
                     else:
                         dpt = target_dpt
+                    if prev_dpt is not None and abs(dpt - prev_dpt) < 1e-5:
+                        continue
                     self._last_dpt = dpt
                     t_serial_start = time.time()
                     self.lens_driver.set_diopter(dpt)

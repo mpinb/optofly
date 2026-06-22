@@ -191,6 +191,7 @@ class BraidPublisher(WorkerProcess):
             self.zmq_context = zmq.Context()
             self.zmq_socket = self.zmq_context.socket(zmq.PUB)
             self.zmq_socket.setsockopt(zmq.SNDHWM, self.config.zmq.braid_pub_hwm)
+            self.zmq_socket.setsockopt(zmq.TCP_NODELAY, 1)
             bind_address = self.config.zmq.get_publisher_address(
                 self.config.zmq.braid_port
             )
@@ -200,6 +201,7 @@ class BraidPublisher(WorkerProcess):
 
             self.active_braid_socket = self.zmq_context.socket(zmq.PUB)
             self.active_braid_socket.setsockopt(zmq.SNDHWM, 1)
+            self.active_braid_socket.setsockopt(zmq.TCP_NODELAY, 1)
             active_bind_address = self.config.zmq.get_publisher_address(
                 self.config.zmq.active_braid_port
             )
@@ -208,6 +210,7 @@ class BraidPublisher(WorkerProcess):
 
             self.trigger_socket = self.zmq_context.socket(zmq.SUB)
             self.trigger_socket.setsockopt(zmq.RCVHWM, 100)
+            self.trigger_socket.setsockopt(zmq.TCP_NODELAY, 1)
             trigger_address = self.config.zmq.get_subscriber_address(
                 self.config.zmq.trigger_port
             )
