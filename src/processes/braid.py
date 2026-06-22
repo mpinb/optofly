@@ -3,6 +3,7 @@ Braid Server subscriber that connects to a Braid server and publishes events to 
 """
 
 import json
+import logging
 import multiprocessing as mp
 import signal
 import time
@@ -319,7 +320,7 @@ class BraidPublisher(WorkerProcess):
             self.active_braid_socket.send_multipart(
                 [self._active_topic_bytes, active_message.encode("utf-8")]
             )
-        self.logger.debug(f"Published message: {message[:50]}...")
+        self.logger.debug("Published message: %.50s...", message)
 
     def _process_stream(self) -> None:
         """Process the event stream in a separate thread.
@@ -362,14 +363,14 @@ class BraidPublisher(WorkerProcess):
                     if event_type == "braid":
                         self._dispatch_event(data_str)
 
-                    now = time.monotonic()
-                    gap = now - last_boundary
-                    if gap > BOUNDARY_GAP_WARN_S:
-                        self.logger.warning(
-                            f"SSE boundary gap {gap * 1000:.1f} ms "
-                            f"(>{BOUNDARY_GAP_WARN_S * 1000:.0f} ms)"
-                        )
-                    last_boundary = now
+                        now = time.monotonic()
+                        gap = now - last_boundary
+                        if gap > BOUNDARY_GAP_WARN_S:
+                            self.logger.warning(
+                                f"SSE boundary gap {gap * 1000:.1f} ms "
+                                f"(>{BOUNDARY_GAP_WARN_S * 1000:.0f} ms)"
+                            )
+                        last_boundary = now
 
             except (requests.RequestException, ConnectionError) as e:
                 if self.stop_event.is_set():
@@ -378,7 +379,7 @@ class BraidPublisher(WorkerProcess):
                 connection_attempts += 1
                 retry_delay = min(self.config.reconnect_delay * connection_attempts, 30)
 
-                self.logger.debug(
+                self.logger.warning(
                     f"Connection error: {e}. Retrying in {retry_delay}s..."
                 )
                 time.sleep(retry_delay)
