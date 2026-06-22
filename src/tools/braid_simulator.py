@@ -251,6 +251,11 @@ def run_simulation(args: argparse.Namespace) -> None:
         random.seed(args.seed)
         np.random.seed(args.seed)
 
+    print(
+        "WARNING: braid_simulator binds to the same ZMQ port as BraidPublisher.\n"
+        "  Ensure BraidPublisher (and main.py) is NOT running before starting the simulator."
+    )
+
     context = zmq.Context()
     publisher = context.socket(zmq.PUB)
     bind_address = zmq_config.get_publisher_address(zmq_config.braid_port)

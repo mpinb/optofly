@@ -20,7 +20,7 @@ from src.visual.process import VisualProcess
 from src.processes.led import OptoTriggerWorker
 from src.processes.camera import RustCameraProcess as CameraProcess
 from src.processes.lens import LiquidLens
-from src.utils.braid import check_braid_folder_exists, copy_csv_files_to_braid
+from src.utils.braid import check_braid_folder_exists, verify_csv_files_in_braid
 from src.utils.logger import configure_process_logging
 from src.utils.metadata import (
     UserCancelledError,
@@ -77,17 +77,20 @@ def print_experiment_config(config: dict, active_processes: list):
         print("\nMonitoring Dashboard:")
         print(f"  URL: http://{display_host}:{port}")
 
-    # Visual stimuli details
+    # Visual stimuli details — read actual enabled flags from the stimuli config file
     if "VisualProcess" in active_processes:
-        visual_config = config.get("visual_stimuli", {})
+        vs_cfg = config.get("visual_stimuli", {})
+        vs_config_file = vs_cfg.get("config_file", "configs/visual_stimuli.toml")
         enabled_stimuli = []
-        if visual_config.get("background", {}).get("enabled", True):
-            enabled_stimuli.append("Background (textured walls + ground)")
-        if visual_config.get("looming", {}).get("enabled", False):
-            expansion = visual_config["looming"].get("expansion_type", "exponential")
-            enabled_stimuli.append(f"Looming disk ({expansion})")
+        try:
+            with open(vs_config_file, "rb") as f:
+                vs_data = tomllib.load(f).get("visual_stimuli", {})
+            for section_name, section in vs_data.items():
+                if isinstance(section, dict) and section.get("enabled", False):
+                    enabled_stimuli.append(section_name.replace("_", " ").capitalize())
+        except Exception:
+            pass  # config file not present; skip stimulus listing
 
-        # Only show section if stimuli are configured
         if enabled_stimuli:
             print("\nVisual Stimuli (Panda3D):")
             for stimulus in enabled_stimuli:
@@ -411,7 +414,7 @@ def main():
         # Verify CSV files are present
         if braid_folder:
             print("\nVerifying data files...")
-            copy_csv_files_to_braid(braid_folder)
+            verify_csv_files_in_braid(braid_folder)
 
         # Stop Braid recording if we started it
         if braid_proxy is not None:

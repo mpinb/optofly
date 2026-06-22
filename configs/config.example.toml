@@ -111,6 +111,10 @@ y_max = 0.041
 [opto_trigger]
 # LED optogenetic stimulation
 active = false
+# 'port' must be a udev symlink pointing to the Arduino serial device.
+# Create /etc/udev/rules.d/99-optofly.rules with a line like:
+#   SUBSYSTEM=="tty", ATTRS{idVendor}=="2341", ATTRS{idProduct}=="0043", SYMLINK+="opto_trigger"
+# Then reload: sudo udevadm control --reload && sudo udevadm trigger
 port = "/dev/opto_trigger"
 baudrate = 115200
 
@@ -129,6 +133,10 @@ sham_probability = 0.0           # Probability of sham trials (0.0-1.0)
 
 [liquid_lens]
 # Liquid lens auto-focus system (activates automatically with camera)
+# 'port' must be a udev symlink pointing to the Optotune LD lens controller.
+# Create /etc/udev/rules.d/99-optofly.rules with a line like:
+#   SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", SYMLINK+="optotune_ld"
+# Then reload: sudo udevadm control --reload && sudo udevadm trigger
 port = "/dev/optotune_ld"
 mode = "diopter"
 calibration_file = "calibrations/liquid_lens.csv"
