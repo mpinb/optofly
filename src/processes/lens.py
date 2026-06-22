@@ -179,17 +179,23 @@ class LiquidLens(WorkerProcess):
         self._timing_rows: list = []
         self._recording_obj_id: Optional[int] = None
         self._recording_frame: Optional[int] = None
+        self._pending_first_update: Optional[dict] = None
 
     def initialize(self):
         self.logger.debug(f"Liquid Lens config: {self.lens_config}")
 
         # ZMQ
         self.context = zmq.Context()
-        self.braid_socket = self.context.socket(zmq.SUB)
-        self.braid_socket.connect(
-            self.zmq_config.get_subscriber_address(self.zmq_config.braid_port)
+        self.active_braid_socket = self.context.socket(zmq.SUB)
+        if self.zmq_config.lens_update_conflate:
+            self.active_braid_socket.setsockopt(zmq.CONFLATE, 1)
+            self.active_braid_socket.setsockopt(zmq.RCVHWM, 1)
+        self.active_braid_socket.connect(
+            self.zmq_config.get_subscriber_address(self.zmq_config.active_braid_port)
         )
-        self.braid_socket.setsockopt_string(zmq.SUBSCRIBE, self.zmq_config.braid_topic)
+        self.active_braid_socket.setsockopt_string(
+            zmq.SUBSCRIBE, self.zmq_config.active_braid_topic
+        )
 
         self.trigger_socket = self.context.socket(zmq.SUB)
         self.trigger_socket.connect(
@@ -200,7 +206,7 @@ class LiquidLens(WorkerProcess):
             self.zmq_config.zone_exit_topic,
         ):
             self.trigger_socket.setsockopt_string(zmq.SUBSCRIBE, topic)
-        self.logger.debug("Connected to BraidPublisher and TriggerHandler.")
+        self.logger.debug("Connected to BraidPublisher active feed and TriggerHandler.")
 
         # Calibration
         self.lens_calibration = setup_lens_calibration(
@@ -284,6 +290,7 @@ class LiquidLens(WorkerProcess):
         self.kalman = None
         self.is_tracking = False
         self.current_tracked_obj = None
+        self._pending_first_update = None
 
     def _drain_braid_idle(self):
         """Discard queued BRAID traffic while no trial is active."""
@@ -292,6 +299,27 @@ class LiquidLens(WorkerProcess):
                 self.braid_socket.recv_multipart(flags=zmq.NOBLOCK)
             except zmq.Again:
                 break
+
+    def _drain_active_braid_idle(self):
+        """Discard queued active-object updates while no trial is active."""
+        while True:
+            try:
+                self.active_braid_socket.recv_multipart(flags=zmq.NOBLOCK)
+            except zmq.Again:
+                break
+
+    def _get_latest_active_update(self):
+        """Drain active-object updates and return the newest payload."""
+        latest = None
+
+        while True:
+            try:
+                _, raw = self.active_braid_socket.recv_multipart(flags=zmq.NOBLOCK)
+            except zmq.Again:
+                break
+            latest = json.loads(raw)
+
+        return latest
 
     def _get_next_update_for_current_object(self):
         """Drain the queue and return the most recent BRAID update for the tracked object.
@@ -347,6 +375,22 @@ class LiquidLens(WorkerProcess):
                     self._recording_obj_id = obj_id
                     self._recording_frame = msg.get("frame")
                     self.kalman = None
+                    self._pending_first_update = {
+                        key: msg[key]
+                        for key in (
+                            "obj_id",
+                            "frame",
+                            "x",
+                            "y",
+                            "z",
+                            "xvel",
+                            "yvel",
+                            "zvel",
+                            "timestamp",
+                            "t_relay",
+                        )
+                        if key in msg
+                    }
 
             elif topic == self.zmq_config.zone_exit_topic and self.is_tracking:
                 if msg.get("obj_id") == self.current_tracked_obj:
@@ -368,7 +412,7 @@ class LiquidLens(WorkerProcess):
 
         poller = zmq.Poller()
         poller.register(self.trigger_socket, zmq.POLLIN)
-        poller.register(self.braid_socket, zmq.POLLIN)
+        poller.register(self.active_braid_socket, zmq.POLLIN)
 
         while self.is_running and not self.stop_event.is_set():
             try:
@@ -378,14 +422,19 @@ class LiquidLens(WorkerProcess):
                     self._drain_trigger_socket()
 
                 if not self.is_tracking:
-                    if self.braid_socket in events:
-                        self._drain_braid_idle()
+                    if self.active_braid_socket in events:
+                        self._drain_active_braid_idle()
                     continue
 
-                if self.braid_socket not in events:
+                if self._pending_first_update is not None:
+                    update = self._pending_first_update
+                    self._pending_first_update = None
+                    saw_death = False
+                elif self.active_braid_socket in events:
+                    update = self._get_latest_active_update()
+                    saw_death = False
+                else:
                     continue
-
-                update, saw_death = self._get_next_update_for_current_object()
 
                 if saw_death:
                     self.logger.warning(
@@ -399,9 +448,10 @@ class LiquidLens(WorkerProcess):
                 u = update
                 self.last_position_time = time.time()
                 x, y, z = u["x"], u["y"], u["z"]
-                vx, vy, vz = u.get("xvel", 0.0), u.get("yvel", 0.0), u.get("zvel", 0.0)
+                vz = u.get("zvel", 0.0)
                 timestamp = u.get("timestamp")
                 t_relay = u.get("t_relay")
+                t_lens_recv = time.time()
 
                 # Pick the focus depth according to predictor mode.
                 predictor = self.lens_config.predictor
@@ -461,6 +511,7 @@ class LiquidLens(WorkerProcess):
                         {
                             "t_braid": timestamp,
                             "t_relay": t_relay,
+                            "t_lens_recv": t_lens_recv,
                             "t_serial_start": t_serial_start,
                             "t_diopter_sent": t_diopter_sent,
                             "delay_ms": delay_ms,
@@ -498,7 +549,7 @@ class LiquidLens(WorkerProcess):
                 self.lens_driver.close()
             except Exception:
                 pass
-        for sock_attr in ("braid_socket", "trigger_socket"):
+        for sock_attr in ("braid_socket", "active_braid_socket", "trigger_socket"):
             sock = getattr(self, sock_attr, None)
             if sock:
                 try:

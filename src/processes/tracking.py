@@ -484,6 +484,9 @@ class TriggerHandler(WorkerProcess):
                 "x": tracked_obj.current_x,
                 "y": tracked_obj.current_y,
                 "z": tracked_obj.current_z,
+                "xvel": tracked_obj.velocities[-1][0] if tracked_obj.velocities else 0.0,
+                "yvel": tracked_obj.velocities[-1][1] if tracked_obj.velocities else 0.0,
+                "zvel": tracked_obj.velocities[-1][2] if tracked_obj.velocities else 0.0,
                 "mean_heading": mean_heading,
             }
 

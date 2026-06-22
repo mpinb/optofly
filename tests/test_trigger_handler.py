@@ -118,6 +118,9 @@ def test_emits_zone_enter_when_all_gates_pass(handler):
     messages = zone_messages(handler.publisher)
     assert [topic for topic, _ in messages] == ["ZONE_ENTER"]
     assert messages[0][1]["obj_id"] == 7
+    assert messages[0][1]["xvel"] == -0.2
+    assert messages[0][1]["yvel"] == 0.0
+    assert messages[0][1]["zvel"] == 0.0
 
 
 def test_first_seen_update_for_unknown_object_is_evaluated(handler):
