@@ -6,6 +6,7 @@ Automatically enables/disables processes based on their 'active' flags.
 """
 
 import argparse
+import logging
 import multiprocessing as mp
 import sys
 import time
@@ -170,6 +171,8 @@ def main():
     # Load configuration
     print(f"Loading configuration from {config_path}...")
     config = load_config(config_path)
+    log_level_str = config.get("logging", {}).get("level", "INFO").upper()
+    log_level_int = getattr(logging, log_level_str, logging.INFO)
 
     # Initialize variables for cleanup
     braid_folder = None
@@ -222,7 +225,7 @@ def main():
 
     # Set up file logging — all processes write to a shared log file
     log_path = str(Path(braid_folder) / "optofly.log")
-    configure_process_logging(log_path, "Main", "WHITE")
+    configure_process_logging(log_path, "Main", "WHITE", level=log_level_int)
     print(f"Logging to: {log_path}")
 
     # Create shared stop event for coordinated shutdown
@@ -239,7 +242,8 @@ def main():
         # 1. BraidPublisher - connects to Braid tracking and publishes to ZMQ
         print("  ✓ BraidPublisher")
         braid_publisher = BraidPublisher(
-            config_path=config_path, event=stop_event, log_path=log_path
+            config_path=config_path, event=stop_event, log_path=log_path,
+            log_level=log_level_str,
         )
         braid_publisher.start()
         processes.append(("BraidPublisher", braid_publisher))
@@ -249,7 +253,8 @@ def main():
         # 2. TriggerHandler - applies spatial/temporal gating
         print("  ✓ TriggerHandler")
         trigger_handler = TriggerHandler(
-            config_path=config_path, event=stop_event, log_path=log_path
+            config_path=config_path, event=stop_event, log_path=log_path,
+            log_level=log_level_str,
         )
         trigger_handler.start()
         processes.append(("TriggerHandler", trigger_handler))
@@ -286,6 +291,7 @@ def main():
                 event=stop_event,
                 braid_folder=braid_folder,
                 log_path=log_path,
+                log_level=log_level_str,
             )
             visual_process.start()
             processes.append(("VisualProcess", visual_process))
@@ -307,6 +313,7 @@ def main():
                 event=stop_event,
                 save_folder=video_folder,
                 log_path=log_path,
+                log_level=log_level_str,
             )
             camera.start()
             processes.append(("CameraProcess", camera))
@@ -319,6 +326,7 @@ def main():
                 braid_folder=braid_folder,
                 video_folder=video_folder,
                 log_path=log_path,
+                log_level=log_level_str,
             )
             liquid_lens.start()
             processes.append(("LiquidLens", liquid_lens))
@@ -331,6 +339,7 @@ def main():
             braid_folder=braid_folder,
             config_path=config_path,
             log_path=log_path,
+            log_level=log_level_str,
         )
         opto_trigger.start()
         processes.append(("OptoTriggerWorker", opto_trigger))
