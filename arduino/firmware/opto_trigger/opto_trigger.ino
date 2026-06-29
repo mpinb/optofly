@@ -2,8 +2,8 @@
 #include <ctype.h>
 #include <string.h>
 
-const uint8_t PWM_RED_PIN = 3;
-const uint8_t PWM_GREEN_PIN = 5;
+const uint8_t PWM_RED_PIN = 5;
+const uint8_t PWM_GREEN_PIN = 3;
 const uint8_t PWM_BLUE_PIN = 6;
 const uint8_t PWM_BACKLIGHT_PIN = 9;
 

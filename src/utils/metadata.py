@@ -204,22 +204,24 @@ def append_metadata_to_csv(
     try:
         if file_exists:
             with open(csv_path, newline="") as f_check:
-                existing_header = next(csv.reader(f_check), [])
+                reader = csv.DictReader(f_check)
+                existing_header = reader.fieldnames or []
+                existing_rows = list(reader)
             missing = [col for col in existing_header if col not in new_fields]
             extra = [col for col in new_fields if col not in existing_header]
-            if missing or extra:
-                warnings.warn(
-                    f"optofly_experiments.csv schema mismatch detected.\n"
-                    f"  In file but not in current row: {missing}\n"
-                    f"  New columns not in file: {extra}\n"
-                    "  Missing columns will be written as empty strings.",
-                    stacklevel=2,
-                )
-                for col in missing:
-                    row.setdefault(col, "")
-                fieldnames = existing_header + [c for c in new_fields if c not in existing_header]
+            if extra:
+                fieldnames = list(existing_header) + [c for c in new_fields if c not in existing_header]
+                # Rewrite the file with the expanded header; old rows get empty strings for new columns.
+                with open(csv_path, mode="w", newline="") as f_rewrite:
+                    writer = csv.DictWriter(f_rewrite, fieldnames=fieldnames, extrasaction="ignore")
+                    writer.writeheader()
+                    for old_row in existing_rows:
+                        writer.writerow(old_row)
+                print(f"  ↳ Added {len(extra)} new column(s) to {csv_path.name}: {extra}")
             else:
-                fieldnames = existing_header
+                fieldnames = list(existing_header)
+            for col in missing:
+                row.setdefault(col, "")
         else:
             fieldnames = new_fields
 

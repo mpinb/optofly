@@ -175,6 +175,9 @@ class LiquidLens(WorkerProcess):
         # Persists across trials so the onset jump is ramped from the lens's
         # real resting position. None until the first command is sent.
         self._last_dpt: Optional[float] = None
+        # Monotonic timestamp of the last serial command; enforces the lens's
+        # 25 ms minimum inter-command interval (~40 Hz max update rate).
+        self._last_cmd_time: float = 0.0
 
         self._timing_rows: list = []
         self._recording_obj_id: Optional[int] = None
@@ -187,7 +190,6 @@ class LiquidLens(WorkerProcess):
         # ZMQ
         self.context = zmq.Context()
         self.active_braid_socket = self.context.socket(zmq.SUB)
-        self.active_braid_socket.setsockopt(zmq.TCP_NODELAY, 1)
         if self.zmq_config.lens_update_conflate:
             self.active_braid_socket.setsockopt(zmq.CONFLATE, 1)
             self.active_braid_socket.setsockopt(zmq.RCVHWM, 1)
@@ -199,7 +201,6 @@ class LiquidLens(WorkerProcess):
         )
 
         self.trigger_socket = self.context.socket(zmq.SUB)
-        self.trigger_socket.setsockopt(zmq.TCP_NODELAY, 1)
         self.trigger_socket.connect(
             self.zmq_config.get_subscriber_address(self.zmq_config.trigger_port)
         )
@@ -442,7 +443,11 @@ class LiquidLens(WorkerProcess):
                         dpt = target_dpt
                     if prev_dpt is not None and abs(dpt - prev_dpt) < 1e-5:
                         continue
+                    now = time.monotonic()
+                    if now - self._last_cmd_time < 0.025:
+                        continue
                     self._last_dpt = dpt
+                    self._last_cmd_time = now
                     t_serial_start = time.time()
                     self.lens_driver.set_diopter(dpt)
                     t_diopter_sent = time.time()

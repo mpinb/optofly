@@ -6,6 +6,7 @@ import json
 import logging
 import multiprocessing as mp
 import signal
+import socket as _socket
 import time
 from threading import Thread
 from typing import Any, Dict, Iterable, Iterator, Optional
@@ -24,7 +25,38 @@ MAX_RETRIES = 5
 RETRY_DELAY = 2
 # Warn if the wall-clock gap between SSE event boundaries exceeds this.
 # Braid runs at 100 Hz (10 ms cadence), so >25 ms means an upstream stall.
-BOUNDARY_GAP_WARN_S = 0.025
+# NOTE: TCP delayed-ACK (40 ms Linux default) + server-side Nagle can batch
+# ~4 events together, producing gaps slightly above 40 ms that are NOT stalls.
+# TCP_QUICKACK (set below) eliminates that batching; this threshold catches
+# genuine stalls that survive the fix.
+BOUNDARY_GAP_WARN_S = 0.050
+
+_HAS_QUICKACK = hasattr(_socket, "TCP_QUICKACK")
+
+
+def _iter_lines_quickack(response: requests.Response) -> Iterator[Optional[str]]:
+    """Yield lines from a streaming response, maintaining TCP_QUICKACK.
+
+    Re-enables TCP_QUICKACK after yielding each line so the next recv() sends
+    an immediate ACK.  This breaks the Nagle + delayed-ACK deadlock that
+    causes Braid's 100 Hz SSE stream to be delivered in ~25 Hz bursts.
+    Falls back to plain iter_lines() on non-Linux or if socket is unavailable.
+    """
+    raw_sock = None
+    if _HAS_QUICKACK:
+        try:
+            raw_sock = response.raw._connection.sock
+            raw_sock.setsockopt(_socket.IPPROTO_TCP, _socket.TCP_QUICKACK, 1)
+        except (AttributeError, OSError):
+            raw_sock = None
+
+    for line in response.iter_lines(decode_unicode=True):
+        yield line
+        if raw_sock is not None:
+            try:
+                raw_sock.setsockopt(_socket.IPPROTO_TCP, _socket.TCP_QUICKACK, 1)
+            except OSError:
+                raw_sock = None
 
 def iter_sse_events(lines: Iterable[str]) -> Iterator[tuple[Optional[str], str]]:
     """Yield complete SSE events from an iterable of decoded lines."""
@@ -192,7 +224,6 @@ class BraidPublisher(WorkerProcess):
             self.zmq_context = zmq.Context()
             self.zmq_socket = self.zmq_context.socket(zmq.PUB)
             self.zmq_socket.setsockopt(zmq.SNDHWM, self.config.zmq.braid_pub_hwm)
-            self.zmq_socket.setsockopt(zmq.TCP_NODELAY, 1)
             bind_address = self.config.zmq.get_publisher_address(
                 self.config.zmq.braid_port
             )
@@ -202,7 +233,6 @@ class BraidPublisher(WorkerProcess):
 
             self.active_braid_socket = self.zmq_context.socket(zmq.PUB)
             self.active_braid_socket.setsockopt(zmq.SNDHWM, 1)
-            self.active_braid_socket.setsockopt(zmq.TCP_NODELAY, 1)
             active_bind_address = self.config.zmq.get_publisher_address(
                 self.config.zmq.active_braid_port
             )
@@ -211,7 +241,6 @@ class BraidPublisher(WorkerProcess):
 
             self.trigger_socket = self.zmq_context.socket(zmq.SUB)
             self.trigger_socket.setsockopt(zmq.RCVHWM, 100)
-            self.trigger_socket.setsockopt(zmq.TCP_NODELAY, 1)
             trigger_address = self.config.zmq.get_subscriber_address(
                 self.config.zmq.trigger_port
             )
@@ -354,7 +383,7 @@ class BraidPublisher(WorkerProcess):
                 last_boundary = time.monotonic()
 
                 for event_type, data_str in iter_sse_events(
-                    response.iter_lines(decode_unicode=True)
+                    _iter_lines_quickack(response)
                 ):
                     if self.stop_event.is_set():
                         break

@@ -281,7 +281,6 @@ class TriggerHandler(WorkerProcess):
 
             # Publisher for zone events (ZONE_ENTER, ZONE_EXIT)
             self.publisher = self.context.socket(zmq.PUB)
-            self.publisher.setsockopt(zmq.TCP_NODELAY, 1)
             publisher_address = self.config.zmq.get_publisher_address(
                 self.config.zmq.trigger_port
             )
@@ -290,7 +289,6 @@ class TriggerHandler(WorkerProcess):
 
             # Subscriber for Braid tracking data
             self.subscriber = self.context.socket(zmq.SUB)
-            self.subscriber.setsockopt(zmq.TCP_NODELAY, 1)
             subscriber_address = self.config.zmq.get_subscriber_address(
                 self.config.zmq.braid_port
             )
