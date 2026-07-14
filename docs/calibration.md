@@ -169,15 +169,23 @@ At startup, `LensCalibration` reads the CSV and fits the selected model to the `
 
 ### Automated Calibration (AprilTag Triangulation)
 
-Manually finding "in focus" by eye is slow and subjective. `apriltag_autofocus_calibration.py` builds the same `(z, dpt)` CSV without a human judgment call: it sweeps the lens through its diopter range and uses two or more Basler cameras to triangulate an AprilTag's 3D position at each step.
+Manually finding "in focus" by eye is slow and subjective. The `liquid_lens_calibration` tool builds the same `(z, dpt)` CSV without a human judgment call: it sweeps the lens through its diopter range and uses a multi-camera Basler rig to triangulate a static AprilTag target's true `z`, then finds the best-focus diopter at each position with a focus metric computed on a XIMEA camera behind the lens.
 
-Requires a XIMEA camera, an Optotune liquid lens, 2+ Basler cameras (via `pypylon`), and a `strand-braid` `multi_camera_reconstructor` calibration XML for the Basler pair. It declares its own dependencies via a `uv run` script header, so no separate install step:
+This tool lives in a separate repository (`liquid_lens_calibration`), not inside OptoFly. Point it at a `strand-braid` multi-camera calibration XML and run it from its own project directory:
 
 ```bash
-uv run src/tools/apriltag_autofocus_calibration.py --calibration path/to/reconstructor.xml
+uv run lens-calibrate --calibration /path/to/calibration_charuco.xml
 ```
 
-By default it writes `YYYYMMDD_HHMMSS_liquidlens_calibration.csv`; pass `--output` to choose the path. Point `liquid_lens.calibration_file` at the result the same way as a manually-collected CSV.
+It writes `lens_calib_YYYYMMDD_HHMMSS.csv` with columns `z, diopter, x, y, n_cameras, n_tags, focus_metric_peak, timestamp`. OptoFly's loader (`setup_lens_calibration` in `src/processes/lens.py`) expects exactly two columns named `z` and `dpt`, so rename the `diopter` column to `dpt` and drop the rest before pointing `liquid_lens.calibration_file` at the result:
+
+```bash
+python -c "import csv; rows = list(csv.DictReader(open('lens_calib_YYYYMMDD_HHMMSS.csv'))); \
+w = csv.writer(open('calibrations/liquid_lens.csv', 'w')); w.writerow(['z', 'dpt']); \
+[w.writerow([r['z'], r['diopter']]) for r in rows]"
+```
+
+See that repo's own README for hardware setup and the full option list.
 
 ### Tuning Prediction Latency
 

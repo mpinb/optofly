@@ -44,7 +44,7 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from src.hardware.lens import LensDriver
+from optotune_lens import Lens as LensDriver
 from src.processes.lens import setup_lens_calibration
 from src.utils.config import BraidPublisherConfig, LiquidLensConfig
 

@@ -136,7 +136,7 @@ The legacy pyglet pipeline (`src/stimuli/`) is still present for the `--calibrat
 
 ### Liquid Lens Calibration
 
-`calibrations/liquid_lens.csv` maps `z` (meters) → `dpt` (diopters), fitted at startup by `LensCalibration` (`src/processes/lens.py`) using `calibration_model` (`linear` | `quadratic` | `power` | `inverse`). Build the CSV manually by stepping through z-heights with `src/hardware/lens.py:LensDriver`, or automate it with `src/tools/apriltag_autofocus_calibration.py` (XIMEA + dual Basler AprilTag triangulation). See `docs/calibration.md`.
+`calibrations/liquid_lens.csv` maps `z` (meters) → `dpt` (diopters), fitted at startup by `LensCalibration` (`src/processes/lens.py`) using `calibration_model` (`linear` | `quadratic` | `power` | `inverse`). The loader expects exactly two columns, `z` and `dpt`. Build the CSV manually by stepping through z-heights with `src/hardware/lens.py:LensDriver`, or automate it with the separate `liquid_lens_calibration` repo (XIMEA + multi-Basler AprilTag triangulation); its output uses a `diopter` column, which needs renaming to `dpt` before use. See `docs/calibration.md`.
 
 ### Camera
 

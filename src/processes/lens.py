@@ -13,7 +13,7 @@ from src.utils.config import LiquidLensConfig, ZMQConfig, CameraConfig
 from src.utils.csv_writer import CSVWriter
 from src.utils.worker import WorkerProcess
 from src.utils.kalman_filter import KalmanFilter
-from src.hardware.lens import LensDriver
+from optotune_lens import Lens as LensDriver
 
 
 VALID_CALIBRATION_MODELS = ("linear", "quadratic", "power", "inverse")

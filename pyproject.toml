@@ -5,13 +5,13 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "fastcrc>=0.3.4",
     "flask>=3.1.2",
     "loguru>=0.7.3",
     "matplotlib>=3.10.3",
     "numba>=0.61.2",
     "numpy>=2.2.5",
     "opencv-python>=4.13.0.92",
+    "optotune-lens",
     "panda3d>=1.10.0",
     "pandas>=2.2.3",
     "pyglet>=2.1.9",
@@ -36,6 +36,7 @@ dev = [
 
 [tool.uv.sources]
 optofly = { workspace = true }
+optotune-lens = { path = "../optotune-lens" }
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
