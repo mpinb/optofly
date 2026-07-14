@@ -57,9 +57,14 @@ All processes inherit from `WorkerProcess` (`src/utils/worker.py`) and run as `m
   "x": 0.01,
   "y": -0.02,
   "z": 0.18,
+  "xvel": 0.05,
+  "yvel": -0.12,
+  "zvel": 0.01,
   "mean_heading": 1.57
 }
 ```
+
+`xvel`/`yvel`/`zvel` are the object's most recent instantaneous velocity (not the mean over `HEADING_HISTORY_SIZE` used for `mean_heading`). `LiquidLens` uses them to seed its first focus command immediately on `ZONE_ENTER`, without waiting for the next `ACTIVE_BRAID` update.
 
 **ZONE_EXIT topic** (TriggerHandler → camera, lens, monitoring):
 ```json

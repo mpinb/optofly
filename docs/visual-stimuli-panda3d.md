@@ -574,7 +574,7 @@ class BaseStimulus(ABC):
     @abstractmethod
     def on_trigger(self, heading_deg: float, trigger_data: dict) -> None:
         """Called on ZONE_ENTER. heading_deg is Braid→world converted (0=North, 90=East).
-        trigger_data has: obj_id, frame, timestamp, mean_heading (Braid radians), x, y, z."""
+        trigger_data has: obj_id, frame, timestamp, x, y, z, xvel, yvel, zvel, mean_heading (Braid radians)."""
 
     @abstractmethod
     def update(self, dt: float) -> None:

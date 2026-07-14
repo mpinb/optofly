@@ -120,12 +120,12 @@ frame_idx,nframe,ts_sec,ts_usec,cam_time_ns,trigger_frame_idx
 
 **Lens timing CSV:** `{save_folder}/obj_id_{obj_id}_frame_{frame}_lens_timing.csv`
 
-Written by the Python `LiquidLens` process. One row per BRAID position update received while tracking an object.
+Written by the Python `LiquidLens` process. One row per commanded diopter change while tracking an object (updates that fall below the slew-rate threshold or arrive within the 25ms hardware rate limit are skipped and don't produce a row).
 ```csv
-t_braid_received,t_diopter_sent,delay_ms,frame,obj_id,x,y,z,focus_z,diopter,kalman
-1234567.891,1234567.893,2.1,4589,123,0.01,-0.02,0.18,0.18,3.2,false
+t_braid,t_relay,t_lens_recv,t_serial_start,t_diopter_sent,delay_ms,frame,obj_id,x,y,z,focus_z,diopter,target_diopter,predictor
+1234567.888,1234567.889,1234567.890,1234567.891,1234567.893,2.1,4589,123,0.01,-0.02,0.18,0.18,3.2,3.2,kalman
 ```
-`delay_ms` = time from receiving the BRAID update to completing the `set_diopter()` serial call. Useful for diagnosing lens latency.
+`delay_ms` = time from `t_serial_start` to `t_diopter_sent`, i.e. the USB serial write itself. `predictor` records which mode (`none`, `linear`, `kalman`) produced `focus_z` for that row. `diopter` is the slew-rate-limited value actually sent to the lens; `target_diopter` is what the calibration curve returned before limiting. Compare the two to see how much `max_diopter_step` is holding back a given trial. Feed this file to `uv run python -m src.tools.lens_latency_analyze` for latency percentile breakdowns and a recommended `system_latency`.
 
 **Debug histograms:** Generate offline with `src/tools/generate_camera_histograms.py`
 - Reads CSV files and produces PNG histograms showing frame counter diffs, inter-frame interval, jitter, timeline
@@ -164,3 +164,5 @@ python tests/test_camera_integration.py
 # Check Rust compilation
 cd optofly-camera && cargo check
 ```
+
+`test_camera_integration.py` exercises the pure-Python `CameraProcess` class in `src/processes/camera.py` (talks to the camera directly via `ximea-py`), not `RustCameraProcess`. The two are separate implementations in the same file. `main.py` runs `RustCameraProcess` (imported under the alias `CameraProcess`) for actual experiments, so passing this test does not confirm the Rust binary path works. Verify that by running `main.py` with `[camera] active = true` and checking a recording is produced.

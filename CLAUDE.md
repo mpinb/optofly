@@ -28,8 +28,20 @@ python -m src.processes.visual --calibrate           # identify screens
 python -m src.processes.visual --calibrate-mapping   # heading → pixel mapping (manual x,y input)
 python -m src.processes.visual --test-calibration    # verify with sweeping circle
 
+# Panda3D heading calibration (fits braid_heading_offset_rad / braid_heading_flip)
+uv run python -m src.tools.calibrate_heading
+
+# Frustum FOV calibration (near/far z planes for camera.FOV)
+uv run python -m src.tools.calibrate_frustum_fov
+
+# Liquid lens focusing latency report (recommends system_latency for [liquid_lens.kalman])
+uv run python -m src.tools.lens_latency_analyze /mnt/data/videos/<braid_dir>
+
 # Simulate Braid tracking data (development)
 python -m src.tools.braid_simulator
+
+# Real-time tracking visualization (ReRun)
+python -m src.tools.braid_visualizer
 ```
 
 ## Configuration
@@ -84,7 +96,7 @@ All processes inherit `WorkerProcess` (`src/utils/worker.py`) and run as `multip
 
 **ZONE_ENTER** (from TriggerHandler):
 ```json
-{"obj_id": 1, "frame": 12345, "timestamp": 1234.56, "x": 0.01, "y": -0.02, "z": 0.18, "mean_heading": 0.52}
+{"obj_id": 1, "frame": 12345, "timestamp": 1234.56, "x": 0.01, "y": -0.02, "z": 0.18, "xvel": 0.05, "yvel": -0.12, "zvel": 0.01, "mean_heading": 0.52}
 ```
 
 **ZONE_EXIT** (from TriggerHandler):
@@ -100,7 +112,16 @@ Key parameters (all in `configs/config.toml`):
 
 | Section | Key | Default | Purpose |
 |---|---|---|---|
-| `[liquid_lens.kalman]` | `velocity_noise` | `1.0` | Measurement noise for Braid velocity estimates fed into the Kalman filter |
+| `[liquid_lens]` | `predictor` | `"none"` | `"none"` uses raw Braid z; `"linear"` extrapolates `z + vz * (system_latency + prediction_horizon)`; `"kalman"` runs the 2-state filter below |
+| `[liquid_lens]` | `max_diopter_step` | `0.0` | Per-update slew-rate limit on commanded diopter; `0.0` disables it. Ramps large jumps (esp. trial onset) so the lens's ~400 Hz resonance isn't excited |
+| `[liquid_lens.kalman]` | `system_latency` | `0.05` | Measured message + serial write delay (seconds); calibrate with `lens_latency_analyze` |
+| `[liquid_lens.kalman]` | `prediction_horizon` | `0.05` | Additional lookahead beyond `system_latency` (seconds) |
+| `[liquid_lens.kalman]` | `process_noise` | `0.01` | (Kalman only) How quickly velocity can change |
+| `[liquid_lens.kalman]` | `measurement_noise` | `0.1` | (Kalman only) Trust in Braid position measurements |
+| `[liquid_lens.kalman]` | `initial_covariance` | `1.0` | (Kalman only) Uncertainty in the initial state |
+| `[liquid_lens.kalman]` | `velocity_noise` | `1.0` | (Kalman only) Trust in Braid velocity estimates fed into the filter |
+
+`LiquidLens` also enforces a hardware floor of 25ms between serial commands regardless of `predictor` or `max_diopter_step` (~40 Hz max update rate).
 
 ### Visual Stimuli (Panda3D)
 
@@ -115,11 +136,13 @@ The legacy pyglet pipeline (`src/stimuli/`) is still present for the `--calibrat
 
 ### Liquid Lens Calibration
 
-`calibrations/liquid_lens.csv` maps `z` (meters) → `dpt` (diopters). Create it manually by stepping through z-heights and finding the in-focus diopter value with `src/hardware/lens.py:LensDriver`. See `calibrations/LIQUID_LENS_CALIBRATION.md`.
+`calibrations/liquid_lens.csv` maps `z` (meters) → `dpt` (diopters), fitted at startup by `LensCalibration` (`src/processes/lens.py`) using `calibration_model` (`linear` | `quadratic` | `power` | `inverse`). Build the CSV manually by stepping through z-heights with `src/hardware/lens.py:LensDriver`, or automate it with `src/tools/apriltag_autofocus_calibration.py` (XIMEA + dual Basler AprilTag triangulation). See `docs/calibration.md`.
 
 ### Camera
 
-`RustCameraProcess` (`src/processes/camera.py`) launches the `optofly-camera` Rust binary (`optofly-camera/`) as a subprocess. The binary captures frames via the XIMEA SDK (`xiapi` crate) into a linear double-buffer and pipes raw frames to ffmpeg for H.264 encoding (NVENC with x264 fallback). On shutdown, the Python wrapper sends a ZMQ `kill` message for graceful exit. Requires `ffmpeg` on PATH and the XIMEA SDK. Build: `cd optofly-camera && cargo build --release`.
+`RustCameraProcess` (`src/processes/camera.py`) launches the `optofly-camera` Rust binary (`optofly-camera/`) as a subprocess. The binary captures frames via the XIMEA SDK (`xiapi` crate) into a linear double-buffer and pipes raw frames to ffmpeg for H.264 encoding (NVENC with x264 fallback). On shutdown, the Python wrapper sends a ZMQ `kill` message for graceful exit. Requires `ffmpeg` on PATH and the XIMEA SDK. Build: `cd optofly-camera && cargo build --release`. `main.py` imports this class under the alias `CameraProcess`.
+
+`src/processes/camera.py` also defines a separate pure-Python `CameraProcess` class that drives the camera directly through `ximea-py` instead of the Rust binary. `main.py` does not use it. `tests/test_camera_integration.py` does; that test exercises the Python path, not `RustCameraProcess`.
 
 State machine (Rust binary):
 - **IDLE + `ZONE_ENTER`** → start recording; `trigger_frame_idx = 0`
@@ -128,12 +151,12 @@ State machine (Rust binary):
 Output files per trial (all in `camera.save_folder`):
 - `obj_id_{N}_frame_{M}.mp4` — encoded video
 - `obj_id_{N}_frame_{M}.csv` — per-frame metadata (`frame_idx`, `nframe`, `ts_sec`, `ts_usec`, `cam_time_ns`, `trigger_frame_idx`). `trigger_frame_idx` repeats on every row — it is the buffer index at which `ZONE_ENTER` fired, marking stimulus onset. Use it to align trials: frames before it are pre-stimulus baseline, frames after are the response.
-- `obj_id_{N}_frame_{M}_lens_timing.csv` — per-adjustment lens timing (`t_serial_start`, `t_diopter_sent`, `delay_ms`, `z`, `diopter`, ...)
+- `obj_id_{N}_frame_{M}_lens_timing.csv`: per-adjustment lens timing (`t_braid`, `t_relay`, `t_lens_recv`, `t_serial_start`, `t_diopter_sent`, `delay_ms`, `z`, `focus_z`, `diopter`, `target_diopter`, `predictor`, ...)
 
 **`max_recording_time` vs `zone_timeout`**: `camera.max_recording_time` is a frame-buffer size limit — it counts from `ZONE_ENTER`. `trigger_handler.zone_timeout` is the tracker's dead-reckoning timeout for declaring a fly has left the zone. Set `max_recording_time` ≥ `zone_timeout`.
 
 ### Liquid Lens
 
-`LiquidLens` (`src/processes/lens.py`) responds to `ZONE_ENTER` and subscribes to BRAID position updates, calling `LensDriver.set_diopter()` on every update while tracking.
+`LiquidLens` (`src/processes/lens.py`) responds to `ZONE_ENTER` and subscribes to the `ACTIVE_BRAID` feed, calling `LensDriver.set_diopter()` while tracking. Three filters gate each command: the `predictor` mode picks the target z, `max_diopter_step` optionally slew-limits the jump from the last commanded diopter, and a command is dropped outright if it arrives less than 25ms after the last one or changes the diopter by under `1e-5`.
 
-**Kalman filter** (`src/utils/kalman_filter.py`): 6D state `[x, y, z, vx, vy, vz]`, DWNA process noise model. When enabled, predicts z position `system_latency + prediction_horizon` seconds ahead to compensate for lens settling time. Velocity from Braid is fused as a proper sequential measurement update (controlled by `velocity_noise`) rather than overwriting the state — keeping the covariance matrix consistent. Covariance updates use the Joseph form for numerical stability.
+**Kalman filter** (`src/utils/kalman_filter.py`): 2-state `[z, vz]`. x/y are intentionally excluded, since the liquid lens only needs z and the states are decoupled under the constant-velocity (DWNA) model anyway. When `predictor = "kalman"`, `KalmanFilter.predict()` projects z forward `system_latency + prediction_horizon` seconds to compensate for lens settling time. Velocity from Braid is fused as a proper sequential measurement update (controlled by `velocity_noise`) rather than overwriting the state, which keeps the covariance matrix consistent. Covariance updates use the Joseph form for numerical stability.

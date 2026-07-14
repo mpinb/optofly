@@ -1,14 +1,29 @@
 # Calibration
 
+## Panda3D Heading Calibration
+
+Screen assignment for the Panda3D pipeline comes from `screen_mapping` in `[visual_stimuli.arena]`. No interactive tool is needed there: just list which physical screen, left to right, faces which compass direction.
+
+Aligning Braid's heading coordinate frame with the arena needs `braid_heading_offset_rad` and `braid_heading_flip`. Fit both automatically:
+
+```bash
+uv run python -m src.tools.calibrate_heading
+uv run python -m src.tools.calibrate_heading --standalone       # no Braid connection
+uv run python -m src.tools.calibrate_heading --screens North South   # calibrate a subset
+```
+
+The tool shows a bright dot on each arena screen in turn. Place a Braid-trackable target (a small white ball works) directly in front of the dot and press Enter. After all screens, it fits `braid_heading_offset_rad` and `braid_heading_flip` from the Braid *position* angle of the target at each known screen direction, and offers to write both values into `visual_stimuli.toml`.
+
+This works because Braid heading (velocity direction) and position angle share the same coordinate frame, so the same transform applies to `mean_heading` at runtime:
+
+```
+world_heading = (braid_position_angle - offset) * (-1 if flip else 1)
+```
+
 ## Visual Stimuli Calibration (Legacy Pyglet Pipeline)
 
-> The Panda3D pipeline (`src/visual/`) does not use this interactive calibration.
-> Screen assignment is configured via `screen_mapping` in `[visual_stimuli.arena]` of
-> `configs/visual_stimuli.toml`. Set `braid_heading_offset_rad` and `braid_heading_flip`
-> to align Braid heading with the arena compass.
->
 > The steps below apply only to the legacy pyglet pipeline (`src/stimuli/`), invoked via
-> `python -m src.processes.visual --calibrate*`.
+> `python -m src.processes.visual --calibrate*`. The Panda3D pipeline uses the section above instead.
 
 ### Step 1: Screen Identification
 
@@ -152,6 +167,28 @@ At startup, `LensCalibration` reads the CSV and fits the selected model to the `
 
 `linear` and `quadratic` use `numpy.polyfit`; `power` and `inverse` use `scipy.optimize.curve_fit`. The fitted coefficients are captured in a lambda so `get_dpt(z)` is pure floating-point arithmetic — no lookup table, no numpy on the hot path. `z` is clamped to the calibration range to prevent extrapolation.
 
+### Automated Calibration (AprilTag Triangulation)
+
+Manually finding "in focus" by eye is slow and subjective. `apriltag_autofocus_calibration.py` builds the same `(z, dpt)` CSV without a human judgment call: it sweeps the lens through its diopter range and uses two or more Basler cameras to triangulate an AprilTag's 3D position at each step.
+
+Requires a XIMEA camera, an Optotune liquid lens, 2+ Basler cameras (via `pypylon`), and a `strand-braid` `multi_camera_reconstructor` calibration XML for the Basler pair. It declares its own dependencies via a `uv run` script header, so no separate install step:
+
+```bash
+uv run src/tools/apriltag_autofocus_calibration.py --calibration path/to/reconstructor.xml
+```
+
+By default it writes `YYYYMMDD_HHMMSS_liquidlens_calibration.csv`; pass `--output` to choose the path. Point `liquid_lens.calibration_file` at the result the same way as a manually-collected CSV.
+
+### Tuning Prediction Latency
+
+If you enable `predictor = "linear"` or `predictor = "kalman"` (see the Liquid Lens section of [architecture.md](architecture.md)), the `system_latency` value under `[liquid_lens.kalman]` should reflect your rig's actual measured delay, not a guess. After running a session, measure it from the recorded lens timing CSVs:
+
+```bash
+uv run python -m src.tools.lens_latency_analyze /mnt/data/videos/<braid_dir>
+```
+
+It reads every `*_lens_timing.csv` in the folder and prints percentile breakdowns (p50/p90/p95/p99) for the USB serial write, the BraidPublisher-to-LiquidLens pubsub hop, and the end-to-end software path, plus a recommended `system_latency`.
+
 ### Troubleshooting
 
 - **Serial port not found**: run `ls -l /dev/ttyUSB*` and check permissions with `sudo chmod 666 /dev/ttyUSB1`
@@ -235,7 +272,19 @@ Same as Camera FOV Calibration above.
 
 ### Procedure
 
-Frustum calibration is an extension of the standard FOV calibration. After completing plane 1, press **`a`** instead of **`s`**:
+Two tools produce the same `[camera.FOV.near]` / `[camera.FOV.far]` result. Pick one:
+
+- **`calibrate_braid_ximea.py`**: the two-plane workflow is built into the same tool used for flat FOV calibration. After finalising plane 1, press `a` instead of `s` to add a second plane.
+- **`calibrate_frustum_fov.py`**: a standalone tool dedicated to the two-plane workflow. Use it when you know upfront you want a frustum and don't need the single-plane branch:
+
+  ```bash
+  uv run python -m src.tools.calibrate_frustum_fov
+  uv run python -m src.tools.calibrate_frustum_fov --near-z 0.10 --far-z 0.25
+  ```
+
+  It refocuses the lens to each z automatically and drives the same SPACE-to-record / `n`-to-finalise / `s`-to-save flow.
+
+The `calibrate_braid_ximea.py` `a`-key path is described below.
 
 1. Run `calibrate_braid_ximea` and collect ≥ 4 edge points at the **near height** (lowest typical flight z). Press **`n`** to finalise.
 

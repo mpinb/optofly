@@ -56,7 +56,8 @@ z_min = 0.15                # Minimum z for trigger (m)
 z_max = 0.25                # Maximum z for trigger (m)
 heading_cone_deg = 45.0     # Heading tolerance from center-directed (degrees)
 min_velocity = 0.01         # Min velocity threshold (m/s)
-pre_zone_expansion = 0.01   # Extra metres added to each FOV edge for the pre-trigger zone
+max_velocity = 2.0          # Max velocity threshold, rejects tracking noise (m/s)
+zone_timeout = 2.0          # Auto ZONE_EXIT if no updates for this long (s)
 
 [camera]
 active = true
@@ -138,7 +139,13 @@ See `configs/visual_stimuli.example.toml` for all available options.
 uv run python main.py
 ```
 
-The launcher checks for an active Braid recording folder (or starts one automatically), copies configuration files to the experiment folder, starts all enabled processes, and runs until Ctrl+C or the configured `experiment_duration` is reached.
+The launcher checks for an active Braid recording folder (or starts one automatically), then prompts interactively for experiment metadata: experimenter name, genetic cross, cross/F1/ATR dates, fly count, `experiment_duration` (hours, default 24), and free-text notes. It writes the answers to `experiment_data.toml` and an appended CSV row in the Braid folder, alongside a snapshot of `config.toml` and `visual_stimuli.toml`. Skip the prompt for quick tests:
+
+```bash
+uv run python main.py --skip-metadata
+```
+
+With `--skip-metadata`, `experiment_duration` defaults to 24 hours. The launcher starts all enabled processes and runs until Ctrl+C or `experiment_duration` elapses.
 
 ## Calibration Tools
 
@@ -150,11 +157,17 @@ python -m src.processes.visual --standalone
 # Collect >= 4 edge points -> press 'n' to finalise plane (z auto-read from Braid).
 # Press 's' to save flat [camera.FOV], or 'a' then repeat for frustum near/far.
 uv run python -m src.tools.calibrate_braid_ximea --config configs/config.toml
+
+# Braid heading -> arena screen heading (fits braid_heading_offset_rad / braid_heading_flip)
+uv run python -m src.tools.calibrate_heading
+
+# Liquid lens latency measurement (recommends system_latency for [liquid_lens.kalman])
+uv run python -m src.tools.lens_latency_analyze /mnt/data/videos/<braid_dir>
 ```
 
-The Panda3D pipeline uses `screen_mapping` in `[visual_stimuli.arena]` to assign compass directions to physical screens — no interactive calibration tool is required. Set `braid_heading_offset_rad` and `braid_heading_flip` to align Braid tracking coordinates with the arena.
+The Panda3D pipeline assigns compass directions to physical screens via `screen_mapping` in `[visual_stimuli.arena]`; no interactive tool is needed for that part. `calibrate_heading.py` measures `braid_heading_offset_rad` and `braid_heading_flip` for you instead of setting them by hand: it shows a target dot on each screen in turn and fits the transform from where Braid sees a tracked object placed in front of each dot.
 
-See [docs/calibration.md](calibration.md) for full procedures.
+See [docs/calibration.md](calibration.md) for full procedures, including the liquid lens `(z, dpt)` calibration methods and frustum FOV calibration.
 
 ## Testing
 

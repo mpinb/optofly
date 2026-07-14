@@ -51,7 +51,7 @@ results = check_camera_prerequisites("configs/config.toml")
 print(results)
 ```
 
-Common causes: camera not detected (`lsusb | grep Ximea`), ximea-py not installed, user not in `video` group, insufficient disk space.
+`check_camera_prerequisites` checks four things: the `optofly-camera` Rust binary is findable, `ffmpeg` is on PATH, the save folder is writable, and the ZMQ trigger port is reachable. Common causes: binary not built (`cd optofly-camera && cargo build --release`), camera not detected at the hardware level (`lsusb | grep Ximea`), user not in `video` group, insufficient disk space.
 
 **Video encoding slow:**
 ```bash

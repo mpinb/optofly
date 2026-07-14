@@ -311,7 +311,7 @@ class BaseStimulus(ABC):
         pass
 
     def on_trigger(self, trigger_data: dict):  # Optional: handle ZONE_ENTER
-        # trigger_data has: obj_id, frame, timestamp, x, y, z, mean_heading
+        # trigger_data has: obj_id, frame, timestamp, x, y, z, xvel, yvel, zvel, mean_heading
         pass
 
     def initialize_rendering(self, batch):  # Optional: one-time rendering setup
@@ -330,6 +330,9 @@ When a ZONE_ENTER event is dispatched to stimuli:
     "x": 0.01,                      # Position (meters)
     "y": -0.02,
     "z": 0.18,
+    "xvel": 0.05,                   # Instantaneous velocity (m/s)
+    "yvel": -0.12,
+    "zvel": 0.01,
     "mean_heading": 1.57            # Fly heading (radians, 0 = +x direction)
 }
 ```
