@@ -6,18 +6,22 @@ Integrates Braid 3D fly tracking with triggered video recording, optogenetic LED
 
 ## Documentation
 
+New to OptoFly? Start with [**Getting Started**](docs/getting-started.md). It walks through the entire pipeline in order, from install through every calibration step to your first experiment.
+
 Full documentation is in the [`docs/`](docs/) folder:
 
-- [Setup](docs/setup.md) — installation, configuration, running experiments
+- [Getting Started](docs/getting-started.md) — installation, the full calibration pipeline in order, running experiments
+- [Calibration](docs/calibration.md) — camera intrinsics, Braid, liquid lens, camera FOV, and arena heading calibration, in depth
 - [Architecture](docs/architecture.md) — system overview, data flow, ZMQ topology
-- [Calibration](docs/calibration.md) — visual stimuli, liquid lens, and BRAID-to-camera calibration
 - [Visual Stimuli — Panda3D](docs/visual-stimuli-panda3d.md) — developer guide for the Panda3D stimulus pipeline
 - [Visual Stimuli — Legacy](docs/visual-stimuli.md) — pyglet pipeline (calibration tools only)
 - [Camera](docs/camera.md) — Ximea high-speed camera system
 - [Opto Trigger](docs/opto-trigger.md) — Arduino LED firmware and protocol
 - [Troubleshooting](docs/troubleshooting.md) — common issues and fixes
 
-## Quick Start
+## Software Quick Start
+
+This gets the software installed and runnable. It skips camera, lens, and arena calibration, which a new rig needs first; see [Getting Started](docs/getting-started.md) for the full sequence.
 
 ```bash
 # Install dependencies
@@ -30,8 +34,6 @@ cp configs/visual_stimuli.example.toml configs/visual_stimuli.toml
 # Run experiment (start Braid recording first)
 uv run python main.py
 ```
-
-See [docs/setup.md](docs/setup.md) for full setup instructions.
 
 ## Real-Time Tracking And Liquid Lens Path
 

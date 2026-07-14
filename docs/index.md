@@ -2,13 +2,17 @@
 
 Real-time tracking and closed-loop optogenetic stimulation system for flying insects.
 
-## Contents
+## New to OptoFly? Start here.
+
+[**Getting Started**](getting-started.md) walks through the whole pipeline in order, from a fresh checkout to a running experiment: install, calibrate every camera and the liquid lens, align the arena, bench-test the LED, then run. Each step links to the reference doc below for full detail.
+
+## Reference
 
 | Document | Description |
 |----------|-------------|
-| [Setup](setup.md) | Installation, configuration, and running experiments |
+| [Getting Started](getting-started.md) | Installation, the full calibration pipeline in order, and running experiments |
+| [Calibration](calibration.md) | Every calibration procedure in depth: camera intrinsics, Braid, liquid lens, camera FOV, arena heading |
 | [Architecture](architecture.md) | System architecture, data flow, and ZMQ topology |
-| [Calibration](calibration.md) | Visual stimuli and liquid lens calibration procedures |
 | [Visual Stimuli — Panda3D](visual-stimuli-panda3d.md) | Developer guide for the Panda3D stimulus pipeline (current, used by main.py) |
 | [Visual Stimuli — Legacy](visual-stimuli.md) | Legacy pyglet pipeline reference (calibration CLI tools only) |
 | [Camera](camera.md) | Ximea high-speed camera system |

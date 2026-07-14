@@ -1,106 +1,39 @@
 # Calibration
 
-## Panda3D Heading Calibration
+The sections below are ordered the way you'll actually do them: each one depends on the one before it. If you're setting up a new rig, work through them top to bottom. If you're fixing one part of an already-working rig, jump straight to that section.
 
-Screen assignment for the Panda3D pipeline comes from `screen_mapping` in `[visual_stimuli.arena]`. No interactive tool is needed there: just list which physical screen, left to right, faces which compass direction.
+| # | Calibration | Depends on | Tool |
+|---|---|---|---|
+| 1 | [Camera Intrinsic Calibration](#camera-intrinsic-calibration) | A Basler tracking camera | `basler_charuco_calibrator` (separate repo) |
+| 2 | [Braid Multi-Camera Calibration](#braid-multi-camera-extrinsic-calibration) | Step 1, done for every tracking camera | Braid's own tooling |
+| 3 | [Liquid Lens Calibration](#liquid-lens-calibration) | Braid tracking live | `optotune_lens`, or `liquid_lens_calibration` (separate repo) |
+| 4 | [Camera FOV Calibration](#camera-fov-calibration) | Step 3 | `src.tools.calibrate_braid_ximea` |
+| 5 | [Frustum FOV Calibration](#frustum-fov-calibration) | Step 3 (optional refinement of step 4) | `src.tools.calibrate_braid_ximea` or `calibrate_frustum_fov` |
+| 6 | [Panda3D Heading Calibration](#panda3d-heading-calibration) | Braid tracking live | `src.tools.calibrate_heading` |
 
-Aligning Braid's heading coordinate frame with the arena needs `braid_heading_offset_rad` and `braid_heading_flip`. Fit both automatically:
+## Camera Intrinsic Calibration
 
-```bash
-uv run python -m src.tools.calibrate_heading
-uv run python -m src.tools.calibrate_heading --standalone       # no Braid connection
-uv run python -m src.tools.calibrate_heading --screens North South   # calibrate a subset
-```
+Before Braid can triangulate 3D fly positions from multiple 2D camera views, every tracking camera needs its own intrinsic calibration: focal length, principal point, and lens distortion. This is the first thing to do on a new rig. It's also the only step that touches each camera in isolation; everything after this involves the whole multi-camera rig working together.
 
-The tool shows a bright dot on each arena screen in turn. Place a Braid-trackable target (a small white ball works) directly in front of the dot and press Enter. After all screens, it fits `braid_heading_offset_rad` and `braid_heading_flip` from the Braid *position* angle of the target at each known screen direction, and offers to write both values into `visual_stimuli.toml`.
-
-This works because Braid heading (velocity direction) and position angle share the same coordinate frame, so the same transform applies to `mean_heading` at runtime:
-
-```
-world_heading = (braid_position_angle - offset) * (-1 if flip else 1)
-```
-
-## Visual Stimuli Calibration (Legacy Pyglet Pipeline)
-
-> The steps below apply only to the legacy pyglet pipeline (`src/stimuli/`), invoked via
-> `python -m src.processes.visual --calibrate*`. The Panda3D pipeline uses the section above instead.
-
-### Step 1: Screen Identification
-
-Identifies which physical screen corresponds to which display port.
+OptoFly doesn't include a tool for this. Use the separate `basler_charuco_calibrator` repository, which drives a Basler camera via `pypylon`, shows a live detection overlay of a ChArUco board, and auto-captures frames as you move the board to cover the frame:
 
 ```bash
-python -m src.processes.visual --calibrate
+cd basler_charuco_calibrator
+uv sync
+uv run python -m basler_charuco_calibrator
 ```
 
-Labels appear on each screen showing "Screen 1", "Screen 2", etc. with display port names. Identify which screen is North/East/South/West in your arena, then press ESC. Update `screen_mapping` in `configs/visual_stimuli.toml` if needed.
+Move the board around in front of the camera until all four coverage bars (horizontal position, vertical position, size, skew) in the overlay reach 70%, then press `c` to calibrate and `q` to quit. Repeat once per tracking camera. Each run writes a ROS-format YAML (`Basler-<serial>.yaml`) with the camera matrix and distortion coefficients. See that repo's README for the full key-binding and config reference.
 
-### Step 2: Heading-to-Pixel Mapping
+Do this for every Basler camera in the tracking rig before moving to step 2.
 
-Creates a mapping from Braid tracking coordinates to screen pixel positions.
+## Braid Multi-Camera (Extrinsic) Calibration
 
-```bash
-python -m src.processes.visual --calibrate-mapping
-```
+The per-camera intrinsics from step 1 feed into Braid's own multi-camera extrinsic calibration, which works out where each camera sits and points relative to the others and produces the `multi_camera_reconstructor` XML that Braid uses to triangulate 3D positions from synchronized 2D detections. This step is part of the Braid/strand-braid toolchain, not OptoFly. Follow Braid's own calibration documentation for the procedure.
 
-For each of the 4 calibration positions (one per screen):
-1. A red circle appears at the calibration position
-2. Place a tracked object in the arena so it faces directly toward the circle
-3. Note the object's x, y coordinates from the Braid browser interface
-4. Enter those values when prompted in the terminal
-5. Press Enter to advance to the next position
+The output XML matters to OptoFly in one place: the external `liquid_lens_calibration` tool (see [Liquid Lens Calibration](#liquid-lens-calibration) below) takes this file as its `--calibration` argument so it can triangulate a target's true `z` using the same camera geometry Braid uses for tracking.
 
-**Output files:**
-
-| File | Description |
-|------|-------------|
-| `calibrations/heading_mapping_data.csv` | Raw calibration data (pixel_x, braid_x, braid_y) |
-| `calibrations/heading_mapping_model.npz` | Interpolation model used at runtime |
-
-**Apply calibration in `configs/visual_stimuli.toml`:**
-```toml
-[visual_stimuli]
-calibration_mapping_file = "calibrations/heading_mapping_model.npz"
-use_empirical_calibration = true
-```
-
-### Step 3: Verify Calibration
-
-```bash
-python -m src.processes.visual --test-calibration
-```
-
-A red circle sweeps clockwise around all screens. Verify:
-- The circle moves smoothly from screen to screen
-- Direction labels match your physical arrangement
-- The circle wraps at the edges (South edge connects to West edge)
-
-Controls: SPACE (pause/resume), LEFT/RIGHT (manual adjust when paused), R (reset to 0), ESC (exit).
-
-### Calibration Theory
-
-**Coordinate systems:**
-
-- Braid space: (x, y, z) in meters, heading = `arctan2(yvel, xvel)`, origin at arena center
-- Display space: (0, 0) at bottom-left, (7680, 1080) at top-right, four 1920x1080 screens, cylindrical wrap
-
-The calibration builds a lookup table: `Braid heading (radians) → Screen pixel X`. At runtime, `GeometryUtils.heading_to_pixel_x()` linearly interpolates between calibration points.
-
-### Manual Calibration File
-
-If you need to create a calibration file manually:
-
-```csv
-pixel_x,braid_x,braid_y
-0,-0.05,0.02
-640,-0.04,0.03
-```
-
-The `.npz` model contains two arrays:
-- `headings`: sorted heading values in radians
-- `pixels`: corresponding pixel X positions
-
----
+Once this step is done, Braid should be tracking flies in 3D and publishing over its SSE endpoint (`http://<host>:8397/events`). Confirm that in Braid's own web UI before continuing. Every calibration step below assumes Braid is already running and tracking.
 
 ## Liquid Lens Calibration
 
@@ -112,15 +45,15 @@ Maps fly z-position (meters) to lens focal power (diopters) so the lens tracks f
 - Braid running with a tracked object visible
 - OptoFly environment activated
 
-### Procedure
+### Manual Procedure
 
 1. Place a target at a known height in the arena and note its z-coordinate from Braid.
 
 2. Connect to the lens and switch to focal power mode:
 
    ```python
-   from src.hardware.lens import LensDriver
-   lens = LensDriver(port="/dev/ttyUSB1")
+   from optotune_lens import Lens
+   lens = Lens(port="/dev/ttyUSB1")
    lens.to_focal_power_mode()
    ```
 
@@ -171,7 +104,7 @@ At startup, `LensCalibration` reads the CSV and fits the selected model to the `
 
 Manually finding "in focus" by eye is slow and subjective. The `liquid_lens_calibration` tool builds the same `(z, dpt)` CSV without a human judgment call: it sweeps the lens through its diopter range and uses a multi-camera Basler rig to triangulate a static AprilTag target's true `z`, then finds the best-focus diopter at each position with a focus metric computed on a XIMEA camera behind the lens.
 
-This tool lives in a separate repository (`liquid_lens_calibration`), not inside OptoFly. Point it at a `strand-braid` multi-camera calibration XML and run it from its own project directory:
+This tool lives in a separate repository (`liquid_lens_calibration`), not inside OptoFly. Point it at the reconstructor XML from step 2 above and run it from its own project directory:
 
 ```bash
 uv run lens-calibrate --calibration /path/to/calibration_charuco.xml
@@ -200,7 +133,7 @@ It reads every `*_lens_timing.csv` in the folder and prints percentile breakdown
 ### Troubleshooting
 
 - **Serial port not found**: run `ls -l /dev/ttyUSB*` and check permissions with `sudo chmod 666 /dev/ttyUSB1`
-- **Lens not responding**: verify the handshake by running `LensDriver` interactively with `debug=True`
+- **Lens not responding**: verify the handshake by running `Lens` interactively with `debug=True`
 - **Poor focus across z-range**: add more calibration points, especially at the extremes
 
 ---
@@ -358,3 +291,109 @@ x_max = 0.039
 y_min = -0.025
 y_max = 0.041
 ```
+
+---
+
+## Panda3D Heading Calibration
+
+Screen assignment for the Panda3D pipeline comes from `screen_mapping` in `[visual_stimuli.arena]`. No interactive tool is needed there: just list which physical screen, left to right, faces which compass direction.
+
+Aligning Braid's heading coordinate frame with the arena needs `braid_heading_offset_rad` and `braid_heading_flip`. Fit both automatically:
+
+```bash
+uv run python -m src.tools.calibrate_heading
+uv run python -m src.tools.calibrate_heading --standalone       # no Braid connection
+uv run python -m src.tools.calibrate_heading --screens North South   # calibrate a subset
+```
+
+The tool shows a bright dot on each arena screen in turn. Place a Braid-trackable target (a small white ball works) directly in front of the dot and press Enter. After all screens, it fits `braid_heading_offset_rad` and `braid_heading_flip` from the Braid *position* angle of the target at each known screen direction, and offers to write both values into `visual_stimuli.toml`.
+
+This works because Braid heading (velocity direction) and position angle share the same coordinate frame, so the same transform applies to `mean_heading` at runtime:
+
+```
+world_heading = (braid_position_angle - offset) * (-1 if flip else 1)
+```
+
+---
+
+## Visual Stimuli Calibration (Legacy Pyglet Pipeline)
+
+> The steps below apply only to the legacy pyglet pipeline (`src/stimuli/`), invoked via
+> `python -m src.processes.visual --calibrate*`. New rigs use the Panda3D pipeline and the
+> heading calibration section above instead. Read this section only if you're maintaining
+> an existing pyglet-based setup.
+
+### Step 1: Screen Identification
+
+Identifies which physical screen corresponds to which display port.
+
+```bash
+python -m src.processes.visual --calibrate
+```
+
+Labels appear on each screen showing "Screen 1", "Screen 2", etc. with display port names. Identify which screen is North/East/South/West in your arena, then press ESC. Update `screen_mapping` in `configs/visual_stimuli.toml` if needed.
+
+### Step 2: Heading-to-Pixel Mapping
+
+Creates a mapping from Braid tracking coordinates to screen pixel positions.
+
+```bash
+python -m src.processes.visual --calibrate-mapping
+```
+
+For each of the 4 calibration positions (one per screen):
+1. A red circle appears at the calibration position
+2. Place a tracked object in the arena so it faces directly toward the circle
+3. Note the object's x, y coordinates from the Braid browser interface
+4. Enter those values when prompted in the terminal
+5. Press Enter to advance to the next position
+
+**Output files:**
+
+| File | Description |
+|------|-------------|
+| `calibrations/heading_mapping_data.csv` | Raw calibration data (pixel_x, braid_x, braid_y) |
+| `calibrations/heading_mapping_model.npz` | Interpolation model used at runtime |
+
+**Apply calibration in `configs/visual_stimuli.toml`:**
+```toml
+[visual_stimuli]
+calibration_mapping_file = "calibrations/heading_mapping_model.npz"
+use_empirical_calibration = true
+```
+
+### Step 3: Verify Calibration
+
+```bash
+python -m src.processes.visual --test-calibration
+```
+
+A red circle sweeps clockwise around all screens. Verify:
+- The circle moves smoothly from screen to screen
+- Direction labels match your physical arrangement
+- The circle wraps at the edges (South edge connects to West edge)
+
+Controls: SPACE (pause/resume), LEFT/RIGHT (manual adjust when paused), R (reset to 0), ESC (exit).
+
+### Calibration Theory
+
+**Coordinate systems:**
+
+- Braid space: (x, y, z) in meters, heading = `arctan2(yvel, xvel)`, origin at arena center
+- Display space: (0, 0) at bottom-left, (7680, 1080) at top-right, four 1920x1080 screens, cylindrical wrap
+
+The calibration builds a lookup table: `Braid heading (radians) → Screen pixel X`. At runtime, `GeometryUtils.heading_to_pixel_x()` linearly interpolates between calibration points.
+
+### Manual Calibration File
+
+If you need to create a calibration file manually:
+
+```csv
+pixel_x,braid_x,braid_y
+0,-0.05,0.02
+640,-0.04,0.03
+```
+
+The `.npz` model contains two arrays:
+- `headings`: sorted heading values in radians
+- `pixels`: corresponding pixel X positions
