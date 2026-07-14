@@ -36,7 +36,7 @@ dev = [
 
 [tool.uv.sources]
 optofly = { workspace = true }
-optotune-lens = { path = "../optotune-lens" }
+optotune-lens = { git = "ssh://git@github.com/elhananby/optotune-lens.git" }
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
