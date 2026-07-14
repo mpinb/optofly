@@ -6,7 +6,7 @@ The sections below are ordered the way you'll actually do them: each one depends
 |---|---|---|---|
 | 1 | [Camera Intrinsic Calibration](#camera-intrinsic-calibration) | A Basler tracking camera | `basler_charuco_calibrator` (separate repo) |
 | 2 | [Braid Multi-Camera Calibration](#braid-multi-camera-extrinsic-calibration) | Step 1, done for every tracking camera | Braid's own tooling |
-| 3 | [Liquid Lens Calibration](#liquid-lens-calibration) | Braid tracking live | `optotune_lens`, or `liquid_lens_calibration` (separate repo) |
+| 3 | [Liquid Lens Calibration](#liquid-lens-calibration) | Braid tracking live | `optotune_lens`, or [`liquid-lens-calibration`](https://github.com/elhananby/liquid-lens-calibration) (separate repo) |
 | 4 | [Camera FOV Calibration](#camera-fov-calibration) | Step 3 | `src.tools.calibrate_braid_ximea` |
 | 5 | [Frustum FOV Calibration](#frustum-fov-calibration) | Step 3 (optional refinement of step 4) | `src.tools.calibrate_braid_ximea` or `calibrate_frustum_fov` |
 | 6 | [Panda3D Heading Calibration](#panda3d-heading-calibration) | Braid tracking live | `src.tools.calibrate_heading` |
@@ -31,7 +31,7 @@ Do this for every Basler camera in the tracking rig before moving to step 2.
 
 The per-camera intrinsics from step 1 feed into Braid's own multi-camera extrinsic calibration, which works out where each camera sits and points relative to the others and produces the `multi_camera_reconstructor` XML that Braid uses to triangulate 3D positions from synchronized 2D detections. This step is part of the Braid/strand-braid toolchain, not OptoFly. Follow Braid's own calibration documentation for the procedure.
 
-The output XML matters to OptoFly in one place: the external `liquid_lens_calibration` tool (see [Liquid Lens Calibration](#liquid-lens-calibration) below) takes this file as its `--calibration` argument so it can triangulate a target's true `z` using the same camera geometry Braid uses for tracking.
+The output XML matters to OptoFly in one place: the external [`liquid-lens-calibration`](https://github.com/elhananby/liquid-lens-calibration) tool (see [Liquid Lens Calibration](#liquid-lens-calibration) below) takes this file as its `--calibration` argument so it can triangulate a target's true `z` using the same camera geometry Braid uses for tracking.
 
 Once this step is done, Braid should be tracking flies in 3D and publishing over its SSE endpoint (`http://<host>:8397/events`). Confirm that in Braid's own web UI before continuing. Every calibration step below assumes Braid is already running and tracking.
 
@@ -102,11 +102,14 @@ At startup, `LensCalibration` reads the CSV and fits the selected model to the `
 
 ### Automated Calibration (AprilTag Triangulation)
 
-Manually finding "in focus" by eye is slow and subjective. The `liquid_lens_calibration` tool builds the same `(z, dpt)` CSV without a human judgment call: it sweeps the lens through its diopter range and uses a multi-camera Basler rig to triangulate a static AprilTag target's true `z`, then finds the best-focus diopter at each position with a focus metric computed on a XIMEA camera behind the lens.
+Manually finding "in focus" by eye is slow and subjective. The [`liquid-lens-calibration`](https://github.com/elhananby/liquid-lens-calibration) tool builds the same `(z, dpt)` CSV without a human judgment call: it sweeps the lens through its diopter range and uses a multi-camera Basler rig to triangulate a static AprilTag target's true `z`, then finds the best-focus diopter at each position with a focus metric computed on a XIMEA camera behind the lens.
 
-This tool lives in a separate repository (`liquid_lens_calibration`), not inside OptoFly. Point it at the reconstructor XML from step 2 above and run it from its own project directory:
+This tool lives in a separate repository, [`liquid-lens-calibration`](https://github.com/elhananby/liquid-lens-calibration), not inside OptoFly. Clone it, point it at the reconstructor XML from step 2 above, and run it from its own project directory:
 
 ```bash
+git clone https://github.com/elhananby/liquid-lens-calibration.git
+cd liquid-lens-calibration
+uv sync
 uv run lens-calibrate --calibration /path/to/calibration_charuco.xml
 ```
 
