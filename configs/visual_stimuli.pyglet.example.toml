@@ -8,7 +8,7 @@
 #   [visual_stimuli]
 #   config_file = "configs/visual_stimuli.pyglet.toml"
 #
-# Documentation: https://github.com/elhananby/OptoFly
+# Documentation: https://github.com/elhananby/optofly
 
 [visual_stimuli]
 # Main visual stimuli settings
