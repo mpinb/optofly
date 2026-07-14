@@ -4,7 +4,7 @@ The sections below are ordered the way you'll actually do them: each one depends
 
 | # | Calibration | Depends on | Tool |
 |---|---|---|---|
-| 1 | [Camera Intrinsic Calibration](#camera-intrinsic-calibration) | A Basler tracking camera | `basler_charuco_calibrator` (separate repo) |
+| 1 | [Camera Intrinsic Calibration](#camera-intrinsic-calibration) | A Basler tracking camera | [`basler-charuco-calibrator`](https://github.com/elhananby/basler-charuco-calibrator) (separate repo) |
 | 2 | [Braid Multi-Camera Calibration](#braid-multi-camera-extrinsic-calibration) | Step 1, done for every tracking camera | Braid's own tooling |
 | 3 | [Liquid Lens Calibration](#liquid-lens-calibration) | Braid tracking live | `optotune_lens`, or [`liquid-lens-calibration`](https://github.com/elhananby/liquid-lens-calibration) (separate repo) |
 | 4 | [Camera FOV Calibration](#camera-fov-calibration) | Step 3 | `src.tools.calibrate_braid_ximea` |
@@ -15,10 +15,11 @@ The sections below are ordered the way you'll actually do them: each one depends
 
 Before Braid can triangulate 3D fly positions from multiple 2D camera views, every tracking camera needs its own intrinsic calibration: focal length, principal point, and lens distortion. This is the first thing to do on a new rig. It's also the only step that touches each camera in isolation; everything after this involves the whole multi-camera rig working together.
 
-OptoFly doesn't include a tool for this. Use the separate `basler_charuco_calibrator` repository, which drives a Basler camera via `pypylon`, shows a live detection overlay of a ChArUco board, and auto-captures frames as you move the board to cover the frame:
+OptoFly doesn't include a tool for this. Use the separate [`basler-charuco-calibrator`](https://github.com/elhananby/basler-charuco-calibrator) repository, which drives a Basler camera via `pypylon`, shows a live detection overlay of a ChArUco board, and auto-captures frames as you move the board to cover the frame:
 
 ```bash
-cd basler_charuco_calibrator
+git clone https://github.com/elhananby/basler-charuco-calibrator.git
+cd basler-charuco-calibrator
 uv sync
 uv run python -m basler_charuco_calibrator
 ```
