@@ -41,7 +41,7 @@ Default settings (3s, 500fps, 2112x2112): ~8.5GB.
 
 - **xiapi** (Rust crate) — Rust bindings for XIMEA SDK
 - **ffmpeg** — must be on PATH; NVENC requires NVIDIA drivers
-- **XIMEA SDK** — system install required for camera access
+- **XIMEA SDK** — system install required for camera access; install with `sudo scripts/install_ximea_driver.sh`
 
 ## Building
 

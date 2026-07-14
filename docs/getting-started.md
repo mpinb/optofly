@@ -4,7 +4,7 @@ This is the path from a fresh checkout to a running experiment. Each step is a s
 
 ## Hardware you'll need
 
-- One or more **Basler cameras** for Braid's 3D tracking rig
+- Three or more **Basler cameras** for Braid's 3D tracking rig
 - A **Ximea high-speed camera** for triggered video recording
 - An **Optotune liquid lens** for dynamic autofocus
 - An **Arduino** (Uno, Nano, or compatible) wired to a PicoBuck (or similar) constant-current LED driver, for optogenetic stimulation
@@ -36,7 +36,13 @@ uv sync
 sudo apt-get install -y build-essential libzmq3-dev ffmpeg
 ```
 
-Install the [XIMEA SDK](https://www.ximea.com/support/wiki/apis/XIMEA_Linux_Software_Package) separately; it's not a Python package. Full prerequisite list, including the conda/mamba alternative to `uv`: [setup reference](#installation-reference) below.
+Install the XIMEA SDK separately; it's not a Python package:
+
+```bash
+sudo scripts/install_ximea_driver.sh
+```
+
+This downloads and installs the current XIMEA Linux PCIe driver, skipping the download if it already matches what's installed, and reminds you to reboot afterward: the PCIe driver won't take effect until you do. Full prerequisite list, including the conda/mamba alternative to `uv`: [setup reference](#installation-reference) below.
 
 ## 2. Calibrate each tracking camera's intrinsics
 
@@ -127,7 +133,11 @@ sudo apt-get install -y \
 
 **XIMEA SDK** (for camera support)
 
-Install from [ximea.com/support/wiki/apis/XIMEA_Linux_Software_Package](https://www.ximea.com/support/wiki/apis/XIMEA_Linux_Software_Package).
+```bash
+sudo scripts/install_ximea_driver.sh
+```
+
+Downloads and installs the current [XIMEA Linux PCIe driver](https://www.ximea.com/support/wiki/apis/XIMEA_Linux_Software_Package). Safe to re-run: it skips the download if the installed version already matches. Reboot afterward for the PCIe driver to take effect.
 
 ## Configuration Reference
 
