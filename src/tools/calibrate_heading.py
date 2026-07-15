@@ -158,32 +158,35 @@ def fit_calibration(
     if len(measurements) < 2:
         raise ValueError("Need at least 2 calibration points.")
 
-    best: tuple[float, bool, float] | None = None
+    # Must match tracking.py's heading formula, math.atan2(yvel, xvel), exactly:
+    # atan2(y, x), not atan2(x, y). The two argument orders differ by a fixed
+    # 90 degree rotation plus a reflection, so fitting the wrong one still looks
+    # perfect at the 4 calibration points (offset/flip absorb the difference
+    # there), but produces a heading-dependent error at runtime — 0 degrees at
+    # headings resembling the calibration points, +-90 or 180 degrees
+    # elsewhere — since only tracking.py's convention is ever evaluated outside
+    # those 4 points. Do not search over argument order here.
+    braid_angles = [math.atan2(by, bx) for _, (bx, by) in measurements]
 
-    # Try atan2(x,y) (compass-like) and atan2(y,x) (math-like)
-    for compass_order in (True, False):
-        braid_angles = [
-            math.atan2(bx, by) if compass_order else math.atan2(by, bx)
-            for _, (bx, by) in measurements
+    best: tuple[float, bool, float] | None = None
+    for flip in (False, True):
+        sign = -1.0 if flip else 1.0
+        # world = (braid_angle - offset) * sign
+        # → offset = braid_angle - world * sign
+        offsets = [
+            _wrap(ba - world * sign)
+            for (world, _), ba in zip(measurements, braid_angles)
         ]
-        for flip in (False, True):
-            sign = -1.0 if flip else 1.0
-            # world = (braid_angle - offset) * sign
-            # → offset = braid_angle - world * sign
-            offsets = [
-                _wrap(ba - world * sign)
-                for (world, _), ba in zip(measurements, braid_angles)
-            ]
-            offset = _circ_mean(offsets)
-            residuals = [
-                _wrap(_wrap((ba - offset) * sign) - world)
-                for (world, _), ba in zip(measurements, braid_angles)
-            ]
-            rms_deg = math.degrees(
-                math.sqrt(sum(r**2 for r in residuals) / len(residuals))
-            )
-            if best is None or rms_deg < best[2]:
-                best = (offset, flip, rms_deg)
+        offset = _circ_mean(offsets)
+        residuals = [
+            _wrap(_wrap((ba - offset) * sign) - world)
+            for (world, _), ba in zip(measurements, braid_angles)
+        ]
+        rms_deg = math.degrees(
+            math.sqrt(sum(r**2 for r in residuals) / len(residuals))
+        )
+        if best is None or rms_deg < best[2]:
+            best = (offset, flip, rms_deg)
 
     assert best is not None
     return best
@@ -406,7 +409,7 @@ class HeadingCalibrationApp:
 
         print(
             f"{len(samples)} samples → mean ({mean_x:.4f}, {mean_y:.4f}) m  "
-            f"[atan2(x,y) = {math.degrees(math.atan2(mean_x, mean_y)):.1f}°]"
+            f"[atan2(y,x) = {math.degrees(math.atan2(mean_y, mean_x)):.1f}°]"
         )
         self._collect_done.set()
 
