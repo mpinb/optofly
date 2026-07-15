@@ -596,7 +596,7 @@ dev = [
 [[package]]
 name = "optotune-lens"
 version = "0.1.0"
-source = { git = "ssh://git@github.com/elhananby/optotune-lens.git#f4b922784040c369a4dcf4544322dfe3ebf2fc6d" }
+source = { git = "ssh://git@github.com/elhananby/optotune-lens.git#a65870a932b2c568f6f2a75e472a16b4b689de41" }
 dependencies = [
     { name = "pyserial" },
 ]

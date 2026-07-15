@@ -13,7 +13,7 @@ from src.utils.config import AppConfig
 from src.utils.csv_writer import CSVWriter
 from src.utils.trigger_timing import extract_trigger_timing
 from src.utils.worker import WorkerProcess
-from optotune_lens import Lens as LensDriver
+from optotune_lens import ICC1C as LensDriver
 
 
 VALID_CALIBRATION_MODELS = ("linear", "quadratic", "power", "inverse")
