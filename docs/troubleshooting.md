@@ -93,7 +93,7 @@ ffmpeg -encoders | grep nvenc
 
 **Liquid lens not responding:**
 ```bash
-ls -l /dev/optotune_ld        # udev symlink present? (see configs/config.example.toml)
+ls -l /dev/optotune_icc1c     # udev symlink present? (see configs/config.example.toml)
 ls -l /dev/ttyUSB*            # ...and what it should point at
 groups | grep -q dialout && echo "in dialout group"
 ls calibrations/liquid_lens.csv
@@ -111,6 +111,20 @@ The lens also fails to start on a bad calibration file. `calibrations/liquid_len
 must have exactly two columns named `z` and `dpt`. The
 [`liquid-lens-calibration`](https://github.com/elhananby/liquid-lens-calibration)
 repo emits a `diopter` column instead — rename it to `dpt` before use.
+
+**ICC-1C-specific setup notes** (controller as of the `icc-1c` branch):
+- Power the controller from the dedicated barrel supply connector, or a USB-C
+  port rated for >3A power delivery, not a random USB port. Current spikes
+  during lens actuation can exceed what a typical USB port supplies.
+- The FPC flex cable (Extension Board) is **not** hot-pluggable — always
+  power off the controller before connecting/disconnecting it, or risk
+  EEPROM corruption/damage. The Hirose connector is safe to hot-plug.
+- If focal power mode won't engage, confirm the connected lens has EEPROM
+  calibration data — lenses without it only support current mode
+  (`ICC1C.to_focal_power_mode()` raises `LensCommandError` in that case).
+- Smart Step (faster lens settling time) is **not** controlled by this
+  driver — it must be configured once via Optotune Cockpit and saved as the
+  startup snapshot on the controller itself.
 
 ## Performance
 
