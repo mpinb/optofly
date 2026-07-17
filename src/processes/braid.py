@@ -401,6 +401,17 @@ class BraidPublisher(WorkerProcess):
                             )
                         last_boundary = now
 
+            except requests.exceptions.ReadTimeout:
+                # No events arrived within `timeout` seconds — expected when no
+                # fly is currently tracked. Not a connection failure, so just
+                # reopen the stream without the warning/backoff below.
+                if self.stop_event.is_set():
+                    break
+                connection_attempts = 0
+                self.logger.debug(
+                    f"No events in {self.config.timeout}s (idle); reconnecting stream..."
+                )
+
             except (requests.RequestException, ConnectionError) as e:
                 if self.stop_event.is_set():
                     break
