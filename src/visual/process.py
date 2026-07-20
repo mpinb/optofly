@@ -256,7 +256,11 @@ class VisualProcess(WorkerProcess):
                     "Error in stimulus %s on_trigger", type(stim).__name__
                 )
 
-        if self._csv_writer:
+        # Only log a row (and thus only create stim.csv) when a stimulus
+        # actually displayed something this trigger — e.g. BackgroundStimulus
+        # is always-on and never returns params, so a background-only setup
+        # produces no rows and no file, mirroring opto.csv's active gating.
+        if self._csv_writer and stim_params:
             self._csv_writer.append(
                 {
                     "timestamp": data.get("timestamp", time.time()),
