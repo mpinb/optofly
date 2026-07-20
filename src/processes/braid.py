@@ -380,7 +380,11 @@ class BraidPublisher(WorkerProcess):
 
                 self.logger.debug("Connected to event stream, processing events...")
 
-                last_boundary = time.monotonic()
+                # None until the first event of this connection lands — the gap
+                # from "connection opened" to "first event" is idle wait time
+                # (no fly tracked yet), not a stall in a live stream, so it's
+                # excluded from the boundary-gap check below.
+                last_boundary: Optional[float] = None
 
                 for event_type, data_str in iter_sse_events(
                     _iter_lines_quickack(response)
@@ -393,12 +397,13 @@ class BraidPublisher(WorkerProcess):
                         self._dispatch_event(data_str)
 
                         now = time.monotonic()
-                        gap = now - last_boundary
-                        if gap > BOUNDARY_GAP_WARN_S:
-                            self.logger.warning(
-                                f"SSE boundary gap {gap * 1000:.1f} ms "
-                                f"(>{BOUNDARY_GAP_WARN_S * 1000:.0f} ms)"
-                            )
+                        if last_boundary is not None:
+                            gap = now - last_boundary
+                            if gap > BOUNDARY_GAP_WARN_S:
+                                self.logger.warning(
+                                    f"SSE boundary gap {gap * 1000:.1f} ms "
+                                    f"(>{BOUNDARY_GAP_WARN_S * 1000:.0f} ms)"
+                                )
                         last_boundary = now
 
             except requests.exceptions.ReadTimeout:
@@ -415,6 +420,19 @@ class BraidPublisher(WorkerProcess):
             except (requests.RequestException, ConnectionError) as e:
                 if self.stop_event.is_set():
                     break
+
+                # A read timeout that happens mid-stream (waiting on the next
+                # SSE line, e.g. no fly currently tracked) surfaces here as a
+                # ConnectionError/ChunkedEncodingError rather than
+                # requests.exceptions.ReadTimeout — requests only raises the
+                # latter for the initial response, not for lazy iteration.
+                # Treat it the same as the idle case above: quiet, no backoff.
+                if "read timed out" in str(e).lower():
+                    connection_attempts = 0
+                    self.logger.debug(
+                        f"No events in {self.config.timeout}s (idle); reconnecting stream..."
+                    )
+                    continue
 
                 connection_attempts += 1
                 retry_delay = min(self.config.reconnect_delay * connection_attempts, 30)

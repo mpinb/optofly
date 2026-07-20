@@ -253,6 +253,9 @@ class TriggerHandler(WorkerProcess):
         # Dictionary to track objects: {obj_id: TrackedObject}
         self.tracked_objects = {}
 
+        # Count of ZONE_ENTER events emitted this run
+        self._zone_enter_count = 0
+
         # ZMQ connections
         self.context = None
         self.subscriber = None
@@ -509,10 +512,10 @@ class TriggerHandler(WorkerProcess):
             topic = self.config.zmq.zone_enter_topic.encode("utf-8")
             self.publisher.send_multipart([topic, message.encode("utf-8")])
             self._last_zone_enter_time = now
-            self.logger.debug(
-                f"ZONE_ENTER obj={tracked_obj.obj_id} "
-                f"pos=({tracked_obj.current_x:.3f}, {tracked_obj.current_y:.3f}, {tracked_obj.current_z:.3f}) "
-                f"heading={mean_heading}"
+            self._zone_enter_count += 1
+            self.logger.info(
+                f"ZONE_ENTER #{self._zone_enter_count} obj={tracked_obj.obj_id} "
+                f"pos=({tracked_obj.current_x:.3f}, {tracked_obj.current_y:.3f}, {tracked_obj.current_z:.3f})"
             )
         except Exception as e:
             self.logger.error(f"Error sending ZONE_ENTER: {e}")
@@ -537,7 +540,7 @@ class TriggerHandler(WorkerProcess):
             message = json.dumps(message_data)
             topic = self.config.zmq.zone_exit_topic.encode("utf-8")
             self.publisher.send_multipart([topic, message.encode("utf-8")])
-            self.logger.debug(
+            self.logger.info(
                 f"ZONE_EXIT obj={tracked_obj.obj_id} reason={reason} "
                 f"duration={duration:.2f}s"
             )
@@ -603,7 +606,7 @@ class TriggerHandler(WorkerProcess):
         except KeyboardInterrupt:
             pass
 
-        self.logger.info("Stopping TriggerHandler")
+        self.logger.info(f"Stopping TriggerHandler ({self._zone_enter_count} trigger(s) this run)")
         self._cleanup()
 
     def _cleanup(self) -> None:
