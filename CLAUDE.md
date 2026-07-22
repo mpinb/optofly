@@ -136,9 +136,7 @@ The legacy pyglet pipeline (`src/stimuli/`) is still present for the `--calibrat
 
 ### Camera
 
-`RustCameraProcess` (`src/processes/camera.py`) launches the `optofly-camera` Rust binary (`optofly-camera/`) as a subprocess. The binary captures frames via the XIMEA SDK (`xiapi` crate) into a linear double-buffer and pipes raw frames to ffmpeg for H.264 encoding (NVENC with x264 fallback). On shutdown, the Python wrapper sends a ZMQ `kill` message for graceful exit. Requires `ffmpeg` on PATH and the XIMEA SDK. Build: `cd optofly-camera && cargo build --release`. `main.py` imports this class under the alias `CameraProcess`.
-
-`src/processes/camera.py` also defines a separate pure-Python `CameraProcess` class that drives the camera directly through `ximea-py` instead of the Rust binary. `main.py` does not use it. `tests/test_camera_integration.py` does; that test exercises the Python path, not `RustCameraProcess`.
+`RustCameraProcess` (`src/processes/camera.py`) launches the `optofly-camera` Rust binary (`optofly-camera/`) as a subprocess. The binary captures frames via the XIMEA SDK (`xiapi` crate) into a linear double-buffer and pipes raw frames to ffmpeg for H.264 encoding (NVENC with x264 fallback). On shutdown, the Python wrapper sends SIGTERM to the subprocess for graceful exit (the binary also subscribes to a ZMQ `kill` topic, but nothing in this codebase currently publishes to it). Requires `ffmpeg` on PATH and the XIMEA SDK. Build: `cd optofly-camera && cargo build --release`. `main.py` imports this class under the alias `CameraProcess`.
 
 State machine (Rust binary):
 - **IDLE + `ZONE_ENTER`** → start recording; `trigger_frame_idx = 0`
