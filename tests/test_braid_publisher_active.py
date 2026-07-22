@@ -186,24 +186,50 @@ def test_zone_enter_seeds_active_last_seen(monkeypatch):
 
 
 def test_reentry_after_prior_trial_is_not_immediately_expired(monkeypatch):
-    """Regression: a new active object must not inherit the previous
-    trial's stale _active_last_seen. Before the fix, obj B's ZONE_ENTER
-    only set _active_obj_id, leaving _active_last_seen at whatever it was
-    from trial A -- since cooldown_period is typically well above
-    zone_timeout, the very next _drain_trigger_events() call would see
-    `age > zone_timeout` and immediately clear B before any Update for it
-    ever arrived."""
+    """Regression: a new active object's own _active_last_seen -- not the
+    previous trial's -- must determine whether it survives the staleness
+    check in _drain_trigger_events.
+
+    Trial A (obj 1) enters and gets one real Update, which plants a
+    genuine nonzero _active_last_seen (1.0) via the matching-Update path
+    in _dispatch_event -- the only pre-fix path that ever sets it to a
+    real value. Trial A then ends without a ZONE_EXIT (e.g. the tracker
+    lost it), and trial B (obj 2) enters shortly after.
+
+    Before the fix, obj B's ZONE_ENTER only set _active_obj_id, leaving
+    _active_last_seen at trial A's stale value (1.0). By clock 4.5 --
+    less than zone_timeout since B actually started, but more than
+    zone_timeout since A's last real Update -- the staleness check would
+    wrongly expire B. Post-fix, B's own _active_last_seen (2.0, set on
+    its ZONE_ENTER) keeps it alive."""
     pub = make_publisher()
     pub.config.zone_timeout = 3.0
     clock = {"t": 0.0}
     monkeypatch.setattr("src.processes.braid.time.monotonic", lambda: clock["t"])
 
+    # Trial A: object 1 enters and receives one real Update -- the only
+    # pre-fix path that ever sets _active_last_seen to a genuine nonzero
+    # value.
     pub._handle_trigger_message("ZONE_ENTER", {"obj_id": 1})
-    clock["t"] = 20.0  # well past zone_timeout and typical cooldown_period
+    clock["t"] = 1.0
+    pub._dispatch_event(json.dumps({"msg": {"Update": {"obj_id": 1, "x": 0, "y": 0, "z": 0}}}))
+    assert pub._active_last_seen == 1.0  # sanity: trial A's clock is real
 
+    # Trial A ends without a ZONE_EXIT (e.g. tracker lost it) and, after
+    # the typical cooldown, trial B's ZONE_ENTER arrives.
+    clock["t"] = 2.0
     pub.trigger_socket.messages = [
         [b"ZONE_ENTER", json.dumps({"obj_id": 2}).encode("utf-8")],
     ]
+    pub._drain_trigger_events()
+    assert pub._active_obj_id == 2
+
+    # Later -- less than zone_timeout since B actually started, but more
+    # than zone_timeout since A's last real Update -- drain again.
+    # Pre-fix, B inherited A's stale _active_last_seen (1.0) and is
+    # wrongly expired here; post-fix, B's own last_seen (2.0) keeps it
+    # alive.
+    clock["t"] = 4.5
     pub._drain_trigger_events()
 
     assert pub._active_obj_id == 2
