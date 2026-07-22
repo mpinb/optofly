@@ -41,7 +41,9 @@ def create_app(
     app.config["MONITOR_STATE"] = monitor_state
     app.config["MONITOR_STOP_EVENT"] = threading.Event()
     if config_path:
-        start_monitor_thread(config_path, monitor_state, app.config["MONITOR_STOP_EVENT"])
+        start_monitor_thread(
+            config_path, app.config["EXPERIMENT"], monitor_state, app.config["MONITOR_STOP_EVENT"]
+        )
     monitor_routes.register(app)
 
     return app
