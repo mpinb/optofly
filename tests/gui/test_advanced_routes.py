@@ -14,79 +14,59 @@ def client():
 
 
 @pytest.fixture
-def backup_config():
-    """Backup and restore configs/config.toml before/after test."""
-    config_path = Path("configs/config.toml")
-    backup_path = Path("configs/config.toml.backup")
-
-    # Create from example if it doesn't exist
-    if not config_path.exists():
-        shutil.copy("configs/config.example.toml", config_path)
-
-    # Backup before test
-    if config_path.exists():
-        shutil.copy(config_path, backup_path)
-
-    yield config_path
-
-    # Restore after test
-    if backup_path.exists():
-        shutil.copy(backup_path, config_path)
-        backup_path.unlink()
-    elif config_path.exists():
-        config_path.unlink()
+def config_copy(tmp_path):
+    """Copy config.example.toml to isolated tmp_path for testing."""
+    dest = tmp_path / "config.toml"
+    shutil.copy("configs/config.example.toml", dest)
+    return dest
 
 
 @pytest.fixture
-def backup_visual_stimuli():
-    """Backup and restore configs/visual_stimuli.toml before/after test."""
-    config_path = Path("configs/visual_stimuli.toml")
-    backup_path = Path("configs/visual_stimuli.toml.backup")
-
-    # Create from example if it doesn't exist
-    if not config_path.exists():
-        shutil.copy("configs/visual_stimuli.example.toml", config_path)
-
-    # Backup before test
-    if config_path.exists():
-        shutil.copy(config_path, backup_path)
-
-    yield config_path
-
-    # Restore after test
-    if backup_path.exists():
-        shutil.copy(backup_path, config_path)
-        backup_path.unlink()
-    elif config_path.exists():
-        config_path.unlink()
+def visual_stimuli_copy(tmp_path):
+    """Copy visual_stimuli.example.toml to isolated tmp_path for testing."""
+    dest = tmp_path / "visual_stimuli.toml"
+    shutil.copy("configs/visual_stimuli.example.toml", dest)
+    return dest
 
 
-def test_get_advanced_page_shows_file_contents(client, backup_config):
-    response = client.get("/advanced?path=configs/config.toml")
+def test_get_advanced_page_shows_file_contents(client, config_copy, monkeypatch):
+    """Test GET /advanced works with ALLOWED path (monkeypatched to tmp_path)."""
+    path_str = str(config_copy)
+    monkeypatch.setattr("src.gui.advanced_routes.ALLOWED_PATHS", {path_str})
+
+    response = client.get(f"/advanced?path={path_str}")
     assert response.status_code == 200
     assert b"opto_trigger" in response.data
 
 
-def test_save_valid_toml_writes_file(client, backup_config):
-    original_text = backup_config.read_text()
+def test_save_valid_toml_writes_file(client, config_copy, monkeypatch):
+    """Test POST /advanced/save with valid TOML writes to tmp_path file."""
+    path_str = str(config_copy)
+    monkeypatch.setattr("src.gui.advanced_routes.ALLOWED_PATHS", {path_str})
+
+    original_text = config_copy.read_text()
     new_text = original_text + '\n[extra]\nkey = "value"\n'
 
-    response = client.post("/advanced/save", data={"path": "configs/config.toml", "content": new_text})
+    response = client.post("/advanced/save", data={"path": path_str, "content": new_text})
 
     assert response.status_code == 200
-    assert 'key = "value"' in backup_config.read_text()
+    assert 'key = "value"' in config_copy.read_text()
 
 
-def test_save_invalid_toml_rejected_without_writing(client, backup_config):
-    original_text = backup_config.read_text()
+def test_save_invalid_toml_rejected_without_writing(client, config_copy, monkeypatch):
+    """Test POST /advanced/save rejects invalid TOML and leaves file untouched."""
+    path_str = str(config_copy)
+    monkeypatch.setattr("src.gui.advanced_routes.ALLOWED_PATHS", {path_str})
+
+    original_text = config_copy.read_text()
 
     response = client.post(
-        "/advanced/save", data={"path": "configs/config.toml", "content": "this is not [valid toml"}
+        "/advanced/save", data={"path": path_str, "content": "this is not [valid toml"}
     )
 
     assert response.status_code == 422
     assert "error" in response.get_json()
-    assert backup_config.read_text() == original_text  # untouched
+    assert config_copy.read_text() == original_text  # untouched
 
 
 def test_get_advanced_disallows_arbitrary_paths(client):
