@@ -298,7 +298,16 @@ class LiquidLens(WorkerProcess):
                 break
 
     def _get_latest_active_update(self):
-        """Drain active-object updates and return the newest payload."""
+        """Drain active-object updates and return the newest payload for the
+        object this LiquidLens instance is currently tracking.
+
+        BraidPublisher broadcasts whichever object most recently triggered
+        ZONE_ENTER, but LiquidLens ignores ZONE_ENTER while a trial is
+        already active. If a second object triggers before the first
+        trial ends, the two processes would otherwise disagree about
+        which object is "active" -- filtering by obj_id here keeps
+        current_tracked_obj authoritative.
+        """
         latest = None
 
         while True:
@@ -306,7 +315,9 @@ class LiquidLens(WorkerProcess):
                 _, raw = self.active_braid_socket.recv_multipart(flags=zmq.NOBLOCK)
             except zmq.Again:
                 break
-            latest = json.loads(raw)
+            payload = json.loads(raw)
+            if payload.get("obj_id") == self.current_tracked_obj:
+                latest = payload
 
         return latest
 

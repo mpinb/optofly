@@ -84,3 +84,23 @@ def test_zone_enter_payload_becomes_pending_first_update(lens):
         "y": 0.2,
         "z": 0.3,
     }
+
+
+def test_get_latest_active_update_ignores_other_object_ids(lens):
+    """BraidPublisher switches its active-object broadcast to whichever
+    object most recently triggered ZONE_ENTER, but LiquidLens ignores
+    ZONE_ENTER while a trial is already in progress -- if a second object
+    triggers before the first trial ends, the two processes disagree
+    about which object is 'active'. Filtering by obj_id here keeps
+    current_tracked_obj authoritative regardless of what BraidPublisher
+    is currently broadcasting."""
+    lens.current_tracked_obj = 7
+    lens.active_braid_socket = FakeSocket(
+        [
+            make_active_message({"obj_id": 8, "frame": 1, "z": 0.9}),
+            make_active_message({"obj_id": 7, "frame": 11, "z": 0.1}),
+            make_active_message({"obj_id": 8, "frame": 2, "z": 0.9}),
+        ]
+    )
+
+    assert lens._get_latest_active_update() == {"obj_id": 7, "frame": 11, "z": 0.1}
