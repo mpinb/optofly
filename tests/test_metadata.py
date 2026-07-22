@@ -1,5 +1,5 @@
 from datetime import datetime
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from src.utils.metadata import metadata_from_form, collect_metadata
 
