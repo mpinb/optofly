@@ -9,10 +9,15 @@ from flask import Blueprint, jsonify, render_template, request
 
 advanced_bp = Blueprint("advanced", __name__)
 
+# Only allow editing these two config files through the Advanced tab
+ALLOWED_PATHS = {"configs/config.toml", "configs/visual_stimuli.toml"}
+
 
 @advanced_bp.route("/advanced")
 def advanced_page():
     path = request.args.get("path", "configs/config.toml")
+    if path not in ALLOWED_PATHS:
+        return jsonify({"error": "Path not allowed"}), 404
     try:
         with open(path, "r") as f:
             content = f.read()
@@ -25,6 +30,9 @@ def advanced_page():
 def advanced_save():
     path = request.form["path"]
     content = request.form["content"]
+
+    if path not in ALLOWED_PATHS:
+        return jsonify({"error": "Path not allowed"}), 422
 
     try:
         tomllib.loads(content)
