@@ -208,6 +208,27 @@ def copy_config_to_braid_folder(config_path: str, braid_folder: str):
         print(f"  WARNING: Failed to copy {config_path}: {e}")
 
 
+def handle_metadata_cancellation(braid_proxy) -> None:
+    """Stop Braid recording (if this run started it) and print a clean
+    cancellation message.
+
+    Called when collect_metadata() raises UserCancelledError. This must
+    run before sys.exit(0) -- collect_metadata() is called before main()'s
+    experiment try/finally block begins, so nothing else in main() will
+    stop a recording that check_braid_folder_exists(auto_start_recording=
+    True) already started.
+    """
+    print("\nMetadata collection cancelled by user.")
+    if braid_proxy is not None:
+        print("Stopping Braid recording...")
+        try:
+            braid_proxy.stop_csv_recording()
+            print("✓ Recording stopped")
+        except Exception as e:
+            print(f"WARNING: Failed to stop recording: {e}")
+    print("Exiting.")
+
+
 def main():
     """Launch OptoFly experiment with config-driven process selection."""
 
@@ -259,7 +280,11 @@ def main():
     # Collect experiment metadata (after Braid folder is confirmed)
     metadata = None
     if not args.skip_metadata:
-        metadata = collect_metadata()
+        try:
+            metadata = collect_metadata()
+        except UserCancelledError:
+            handle_metadata_cancellation(braid_proxy)
+            sys.exit(0)
         experiment_duration = float(metadata.get("experiment_duration", 24))
     else:
         experiment_duration = 24.0
@@ -433,10 +458,6 @@ def main():
                 print("\n\nExperiment duration reached, shutting down...")
                 stop_event.set()
             time.sleep(0.1)
-
-    except UserCancelledError:
-        print("\nMetadata collection cancelled by user. Exiting.")
-        sys.exit(0)
 
     except KeyboardInterrupt:
         print("\n\nReceived keyboard interrupt, shutting down...")

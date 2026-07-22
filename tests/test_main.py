@@ -1,4 +1,8 @@
-from main import check_critical_processes_alive, check_recording_time_sufficient
+from main import (
+    check_critical_processes_alive,
+    check_recording_time_sufficient,
+    handle_metadata_cancellation,
+)
 
 
 class _FakeAliveProcess:
@@ -110,3 +114,38 @@ def test_no_warning_when_recording_time_sufficient():
         "trigger_handler": {"zone_timeout": 3.0},
     }
     assert check_recording_time_sufficient(config) is None
+
+
+class _FakeBraidProxy:
+    def __init__(self, raise_on_stop=False):
+        self.stopped = False
+        self.raise_on_stop = raise_on_stop
+
+    def stop_csv_recording(self):
+        if self.raise_on_stop:
+            raise RuntimeError("connection lost")
+        self.stopped = True
+
+
+def test_handle_metadata_cancellation_stops_recording_when_proxy_present(capsys):
+    proxy = _FakeBraidProxy()
+    handle_metadata_cancellation(proxy)
+    assert proxy.stopped is True
+    out = capsys.readouterr().out
+    assert "cancelled" in out.lower()
+    assert "stopped" in out.lower()
+
+
+def test_handle_metadata_cancellation_no_stop_call_when_proxy_is_none(capsys):
+    """braid_proxy is None whenever the folder already existed (recording
+    was not auto-started by this run) -- must not try to stop anything."""
+    handle_metadata_cancellation(None)  # must not raise
+    out = capsys.readouterr().out
+    assert "cancelled" in out.lower()
+
+
+def test_handle_metadata_cancellation_stop_failure_is_reported_not_raised(capsys):
+    proxy = _FakeBraidProxy(raise_on_stop=True)
+    handle_metadata_cancellation(proxy)  # must not raise
+    out = capsys.readouterr().out
+    assert "warning" in out.lower()
