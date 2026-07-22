@@ -345,6 +345,7 @@ class BraidPublisher(WorkerProcess):
         death_obj_id = msg.get("Death")
         if death_obj_id == self._active_obj_id:
             self._active_obj_id = None
+            self._active_last_seen = 0.0
 
         update = msg.get("Update")
         if (

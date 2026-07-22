@@ -150,6 +150,17 @@ def test_death_for_active_object_clears_active_state():
     assert pub._active_obj_id is None
 
 
+def test_death_for_active_object_clears_active_last_seen():
+    pub = make_publisher()
+    pub._active_obj_id = 7
+    pub._active_last_seen = 123.0
+
+    pub._dispatch_event(json.dumps({"msg": {"Death": 7}}))
+
+    assert pub._active_obj_id is None
+    assert pub._active_last_seen == 0.0
+
+
 def make_uninitialized_publisher(event):
     """A BraidPublisher that never got past __init__ / never connected —
     matching the state close() must handle when called from initialize()'s
