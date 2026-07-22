@@ -146,3 +146,41 @@ def test_not_rate_limited_before_any_command_sent():
         )
         is False
     )
+
+
+def test_not_rate_limited_before_any_command_when_elapsed_time_would_otherwise_trigger():
+    """Distinguishes the last_cmd_time > 0 guard from the elapsed-time
+    check itself -- at now_monotonic=0.01 (10ms), elapsed would be within
+    the 25ms window if last_cmd_time were treated as a real prior command
+    time of 0.0, so only the explicit `last_cmd_time > 0` guard (not the
+    elapsed-time arithmetic) is what makes this return False."""
+    assert (
+        _is_lens_rate_limited(
+            pending_first_update=None, last_cmd_time=0.0, now_monotonic=0.01
+        )
+        is False
+    )
+
+
+def test_rate_limited_at_exact_25ms_boundary_is_not_rate_limited():
+    """25ms elapsed exactly should NOT be rate-limited (the check is a
+    strict less-than: `< 0.025`, not `<= 0.025`) -- catches a boundary
+    off-by-one between < and <=.
+
+    last_cmd_time=0.001 and now_monotonic=last_cmd_time + 0.025 are chosen
+    so that now_monotonic - last_cmd_time floating-point-evaluates to
+    exactly 0.025. Round-number choices like last_cmd_time=100.0,
+    now_monotonic=100.025 don't work: 100.025 - 100.0 rounds to
+    0.025000000000005684 (slightly ABOVE 0.025), which is False under
+    both `<` and `<=` and fails to discriminate the boundary bug."""
+    last_cmd_time = 0.001
+    now_monotonic = last_cmd_time + 0.025
+    assert (now_monotonic - last_cmd_time) == 0.025  # sanity: exact fp boundary
+    assert (
+        _is_lens_rate_limited(
+            pending_first_update=None,
+            last_cmd_time=last_cmd_time,
+            now_monotonic=now_monotonic,
+        )
+        is False
+    )
