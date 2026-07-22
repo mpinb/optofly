@@ -133,6 +133,37 @@ def print_experiment_config(config: dict, active_processes: list):
     print("=" * 70 + "\n")
 
 
+# Processes that exit immediately and unrecoverably on their own init
+# failure (bad serial port, unreachable Braid server, ZMQ bind conflict)
+# rather than retrying in the background — safe to treat as fatal right
+# after the startup grace period. Each gets its own diagnostic hint so a
+# BraidPublisher connectivity failure is never misattributed to the lens
+# or opto hardware.
+_CRITICAL_INIT_HINTS = {
+    "LiquidLens": "Check hardware connection and the relevant port in config.toml.",
+    "OptoTriggerWorker": "Check hardware connection and the relevant port in config.toml.",
+    "BraidPublisher": "Check that Braid is running and reachable at the configured host/port in config.toml.",
+}
+
+
+def check_critical_processes_alive(processes: list) -> list[str]:
+    """Return one FATAL message per critical process that died during init.
+
+    `processes` is a list of (name, process) tuples, matching main()'s own
+    `processes` list. Only names in _CRITICAL_INIT_HINTS are checked —
+    everything else (Monitoring Server, VisualProcess, CameraProcess,
+    TriggerHandler) dying during init is not treated as fatal here.
+    """
+    messages = []
+    for name, proc in processes:
+        if name in _CRITICAL_INIT_HINTS and not proc.is_alive():
+            messages.append(
+                f"{name} process exited during initialization. "
+                f"{_CRITICAL_INIT_HINTS[name]}"
+            )
+    return messages
+
+
 def copy_config_to_braid_folder(config_path: str, braid_folder: str):
     """Copy config file to braid folder for record-keeping.
 
@@ -351,19 +382,17 @@ def main():
         # Allow child processes to finish their initialization
         time.sleep(1)
 
-        # Verify critical hardware processes are still alive after init.
-        # They exit immediately on serial connection failure — catch that here
-        # rather than running a silent experiment with no autofocus or backlight.
-        _critical = {"LiquidLens": None, "OptoTriggerWorker": None}
-        for name, proc in processes:
-            if name in _critical:
-                _critical[name] = proc
-        for name, proc in _critical.items():
-            if proc is not None and not proc.is_alive():
-                print(f"\nFATAL: {name} process exited during initialization.")
-                print("  Check hardware connection and the relevant port in config.toml.")
-                stop_event.set()
-                sys.exit(1)
+        # Verify critical processes are still alive after init. Each of
+        # these exits immediately and unrecoverably on its own init failure
+        # (bad serial port, unreachable Braid server, ZMQ bind conflict)
+        # rather than retrying — catch that here rather than running a
+        # silent experiment with no autofocus, no backlight, or no tracking.
+        fatal_messages = check_critical_processes_alive(processes)
+        if fatal_messages:
+            for message in fatal_messages:
+                print(f"\nFATAL: {message}")
+            stop_event.set()
+            sys.exit(1)
 
         # Print experiment summary
         print_experiment_config(config, active_process_names)
