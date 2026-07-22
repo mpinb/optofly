@@ -268,11 +268,19 @@ class BraidPublisher(WorkerProcess):
             obj_id = payload.get("obj_id")
             if obj_id is not None:
                 self._active_obj_id = obj_id
+                # Seed the staleness clock at ZONE_ENTER, not just on the
+                # first matching Update. Without this, a fresh active
+                # object is judged against the *previous* trial's
+                # last-seen time (cooldown_period is typically well above
+                # zone_timeout) and gets cleared before a single Update
+                # for it ever arrives.
+                self._active_last_seen = time.monotonic()
         elif (
             topic == self.config.zmq.zone_exit_topic
             and payload.get("obj_id") == self._active_obj_id
         ):
             self._active_obj_id = None
+            self._active_last_seen = 0.0
 
     def _drain_trigger_events(self) -> None:
         if self.trigger_socket is None:

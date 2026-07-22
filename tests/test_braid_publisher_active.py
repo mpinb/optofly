@@ -35,10 +35,12 @@ def make_publisher():
     pub._topic_bytes = b"BRAID"
     pub._active_topic_bytes = b"ACTIVE_BRAID"
     pub._active_obj_id = None
+    pub._active_last_seen = 0.0
     pub.config = type(
         "Config",
         (),
         {
+            "zone_timeout": 3.0,
             "zmq": type(
                 "ZMQ",
                 (),
@@ -52,7 +54,11 @@ def make_publisher():
     pub.logger = type(
         "Logger",
         (),
-        {"debug": lambda *args, **kwargs: None, "error": lambda *args, **kwargs: None},
+        {
+            "debug": lambda *args, **kwargs: None,
+            "error": lambda *args, **kwargs: None,
+            "warning": lambda *args, **kwargs: None,
+        },
     )()
     return pub
 
@@ -167,6 +173,51 @@ def make_uninitialized_publisher(event):
         },
     )()
     return pub
+
+
+def test_zone_enter_seeds_active_last_seen(monkeypatch):
+    pub = make_publisher()
+    monkeypatch.setattr("src.processes.braid.time.monotonic", lambda: 500.0)
+
+    pub._handle_trigger_message("ZONE_ENTER", {"obj_id": 9})
+
+    assert pub._active_obj_id == 9
+    assert pub._active_last_seen == 500.0
+
+
+def test_reentry_after_prior_trial_is_not_immediately_expired(monkeypatch):
+    """Regression: a new active object must not inherit the previous
+    trial's stale _active_last_seen. Before the fix, obj B's ZONE_ENTER
+    only set _active_obj_id, leaving _active_last_seen at whatever it was
+    from trial A -- since cooldown_period is typically well above
+    zone_timeout, the very next _drain_trigger_events() call would see
+    `age > zone_timeout` and immediately clear B before any Update for it
+    ever arrived."""
+    pub = make_publisher()
+    pub.config.zone_timeout = 3.0
+    clock = {"t": 0.0}
+    monkeypatch.setattr("src.processes.braid.time.monotonic", lambda: clock["t"])
+
+    pub._handle_trigger_message("ZONE_ENTER", {"obj_id": 1})
+    clock["t"] = 20.0  # well past zone_timeout and typical cooldown_period
+
+    pub.trigger_socket.messages = [
+        [b"ZONE_ENTER", json.dumps({"obj_id": 2}).encode("utf-8")],
+    ]
+    pub._drain_trigger_events()
+
+    assert pub._active_obj_id == 2
+
+
+def test_zone_exit_clears_active_last_seen():
+    pub = make_publisher()
+    pub._active_obj_id = 7
+    pub._active_last_seen = 123.0
+
+    pub._handle_trigger_message("ZONE_EXIT", {"obj_id": 7})
+
+    assert pub._active_obj_id is None
+    assert pub._active_last_seen == 0.0
 
 
 def test_close_does_not_set_shared_stop_event():
