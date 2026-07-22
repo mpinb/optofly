@@ -265,6 +265,25 @@ With `--skip-metadata`, `experiment_duration` defaults to 24 hours. The launcher
 
 Note that `OptoTriggerWorker` starts even when `[opto_trigger] active = false` (it drives the arena backlight). A missing Arduino is then survivable — the run continues without the backlight; with `active = true` it aborts startup instead.
 
+## Web GUI
+
+As an alternative to the CLI, `uv run python -m src.gui` starts a local
+browser-based control panel at http://localhost:5050 covering:
+
+- **Run** — experiment metadata form and Start/Stop (replaces the terminal
+  prompts and Ctrl+C).
+- **Config** — form fields for the config values researchers change most
+  often between experiments (opto parameters, active-process toggles,
+  visual stimuli enable flags).
+- **Advanced** — a raw TOML editor for everything else (hardware ports,
+  calibration paths, Kalman filter constants).
+- **Monitor** — process health and a live trigger feed enriched with
+  opto/stimulus parameters per trial.
+
+The GUI is local-only (same machine as the hardware processes) and is not
+meant to be exposed beyond the control PC. `uv run python main.py` still
+works unchanged for headless/scripted runs.
+
 ## Development
 
 ```bash
