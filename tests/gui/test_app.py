@@ -3,7 +3,7 @@ from src.orchestration import Experiment
 
 
 def test_api_status_reports_not_running():
-    app = create_app(Experiment())
+    app = create_app(Experiment(), config_path=None)
     client = app.test_client()
 
     response = client.get("/api/status")
@@ -15,7 +15,7 @@ def test_api_status_reports_not_running():
 
 
 def test_root_redirects_to_run():
-    app = create_app(Experiment())
+    app = create_app(Experiment(), config_path=None)
     client = app.test_client()
 
     response = client.get("/", follow_redirects=False)

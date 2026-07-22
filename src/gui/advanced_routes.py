@@ -28,8 +28,11 @@ def advanced_page():
 
 @advanced_bp.route("/advanced/save", methods=["POST"])
 def advanced_save():
-    path = request.form["path"]
-    content = request.form["content"]
+    path = request.form.get("path")
+    content = request.form.get("content")
+
+    if path is None or content is None:
+        return jsonify({"error": "Missing required field: 'path' and 'content' are required"}), 422
 
     if path not in ALLOWED_PATHS:
         return jsonify({"error": "Path not allowed"}), 422

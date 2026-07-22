@@ -4,6 +4,7 @@ the exact field list — everything else stays on the Advanced tab)."""
 
 from flask import Blueprint, jsonify, render_template, request
 
+from src.gui import advanced_routes
 from src.gui.config_editor import (
     CONFIG_TOML_FIELDS,
     VISUAL_STIMULI_TOML_FIELDS,
@@ -25,6 +26,8 @@ def config_page():
     kind = request.args.get("kind", "config")
     fields, default_path = _FIELD_SETS[kind]
     path = request.args.get("path", default_path)
+    if path not in advanced_routes.ALLOWED_PATHS:
+        return jsonify({"error": "Path not allowed"}), 404
 
     try:
         values = load_fields(path, fields)
@@ -44,6 +47,8 @@ def config_save():
     kind = request.form.get("kind", "config")
     fields, default_path = _FIELD_SETS[kind]
     path = request.form.get("path", default_path)
+    if path not in advanced_routes.ALLOWED_PATHS:
+        return jsonify({"error": "Path not allowed"}), 422
 
     try:
         updates = {}
@@ -53,7 +58,7 @@ def config_save():
             updates[dotted] = coerce_form_value(raw, field_type)
 
         save_fields(path, fields, updates)
-    except (FileNotFoundError, ValueError, TypeError) as e:
+    except (FileNotFoundError, ValueError, TypeError, KeyError) as e:
         return jsonify({"error": str(e)}), 422
 
     return jsonify({"status": "saved"})

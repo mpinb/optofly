@@ -13,7 +13,7 @@ def experiment():
 
 @pytest.fixture
 def client(experiment):
-    app = create_app(experiment)
+    app = create_app(experiment, config_path=None)
     return app.test_client()
 
 

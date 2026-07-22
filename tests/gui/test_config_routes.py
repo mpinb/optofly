@@ -15,17 +15,26 @@ def config_copy(tmp_path):
 
 @pytest.fixture
 def client():
-    app = create_app(Experiment())
+    app = create_app(Experiment(), config_path=None)
     return app.test_client()
 
 
-def test_get_config_page_renders(client):
+def test_get_config_page_renders(client, monkeypatch):
+    monkeypatch.setattr(
+        "src.gui.advanced_routes.ALLOWED_PATHS", {"configs/config.example.toml"}
+    )
     response = client.get("/config?path=configs/config.example.toml&kind=config")
     assert response.status_code == 200
     assert b"opto_trigger" in response.data or b"color" in response.data
 
 
-def test_save_updates_file(client, config_copy):
+def test_get_config_disallows_arbitrary_paths(client):
+    response = client.get("/config?path=/etc/passwd&kind=config")
+    assert response.status_code == 404
+
+
+def test_save_updates_file(client, config_copy, monkeypatch):
+    monkeypatch.setattr("src.gui.advanced_routes.ALLOWED_PATHS", {str(config_copy)})
     response = client.post(
         "/config/save",
         data={

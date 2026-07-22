@@ -9,7 +9,7 @@ from src.orchestration import Experiment
 
 @pytest.fixture
 def client():
-    app = create_app(Experiment())
+    app = create_app(Experiment(), config_path=None)
     return app.test_client()
 
 

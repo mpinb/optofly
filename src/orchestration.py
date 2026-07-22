@@ -171,9 +171,9 @@ class Experiment:
         actually join/terminate processes and reset state.
 
         The CLI (main.py) always calls experiment.stop() in a finally block,
-        so a mid-run crash there still gets cleaned up. A future long-running
-        front-end has no such wrapper; callers should poll this and call
-        stop() when it goes True.
+        so a mid-run crash there still gets cleaned up. The GUI has no such
+        wrapper around the long-lived process; callers (e.g. the monitor
+        thread's loop) should poll this and call stop() when it goes True.
         """
         return self._stop_event is not None and self._stop_event.is_set()
 

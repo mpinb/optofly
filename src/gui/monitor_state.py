@@ -28,6 +28,13 @@ class MonitorState:
                 "opto": None,
                 "stim": None,
             }
+            if len(self._events) == self._events.maxlen:
+                # appendleft() below will silently evict the oldest event
+                # (the rightmost entry) — drop its _index entry too, or
+                # _index grows unbounded for the life of the process.
+                evicted = self._events[-1]
+                evicted_key = (str(evicted["obj_id"]), str(evicted["frame"]))
+                self._index.pop(evicted_key, None)
             self._events.appendleft(event)
             key = (str(event["obj_id"]), str(event["frame"]))
             self._index[key] = event

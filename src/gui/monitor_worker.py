@@ -45,6 +45,13 @@ def monitor_loop(
             except zmq.Again:
                 pass
 
+            if experiment.needs_cleanup():
+                # The shared stop event was set by something other than a
+                # normal stop() call (e.g. a worker process crashed mid-run).
+                # Nothing else joins/terminates processes for the GUI the way
+                # main.py's finally block does for the CLI, so do it here.
+                experiment.stop()
+
             braid_folder = experiment.status().get("braid_folder")
             if braid_folder != current_braid_folder:
                 current_braid_folder = braid_folder
