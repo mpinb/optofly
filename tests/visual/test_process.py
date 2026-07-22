@@ -66,3 +66,57 @@ def test_zmq_poll_task_uses_configured_zone_enter_topic_not_literal():
     proc._zmq_poll_task(task=None)
 
     assert handled == [{"obj_id": 3}]
+
+
+class FakeLatencySocket:
+    def __init__(self):
+        self.sent = []
+
+    def send(self, raw):
+        self.sent.append(json.loads(raw))
+
+
+def test_handle_zone_enter_publishes_latency_with_sham_true_when_no_stimulus_fires():
+    proc = _make_process(zone_enter_topic="ZONE_ENTER")
+    proc._stimuli = []  # no registered stimulus -> stim_params stays empty
+    proc._csv_writer = None
+    proc._offset_rad = 0.0
+    proc._flip = False
+    proc._latency_socket = FakeLatencySocket()
+
+    proc._handle_zone_enter(
+        {"obj_id": 7, "frame": 100, "braid_timestamp": 500.0, "handler_timestamp": 500.01}
+    )
+
+    sent = proc._latency_socket.sent
+    assert len(sent) == 1
+    assert sent[0]["system"] == "visual"
+    assert sent[0]["sham"] is True
+    assert sent[0]["activation_timestamp"] is None
+    assert sent[0]["braid_timestamp"] == 500.0
+    assert sent[0]["trigger_timestamp"] == 500.01
+
+
+def test_handle_zone_enter_publishes_latency_with_real_activation_when_a_stimulus_fires(
+    monkeypatch,
+):
+    proc = _make_process(zone_enter_topic="ZONE_ENTER")
+
+    class _AlwaysFiresStimulus:
+        def on_trigger(self, heading_deg, trigger_data):
+            return {"looming_sham": False}
+
+    proc._stimuli = [_AlwaysFiresStimulus()]
+    proc._csv_writer = None
+    proc._offset_rad = 0.0
+    proc._flip = False
+    proc._latency_socket = FakeLatencySocket()
+    monkeypatch.setattr("src.visual.process.time.time", lambda: 999.0)
+
+    proc._handle_zone_enter(
+        {"obj_id": 7, "frame": 100, "braid_timestamp": 500.0, "handler_timestamp": 500.01}
+    )
+
+    sent = proc._latency_socket.sent
+    assert sent[0]["sham"] is False
+    assert sent[0]["activation_timestamp"] == 999.0

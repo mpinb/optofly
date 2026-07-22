@@ -17,6 +17,7 @@ from direct.task import Task
 
 from src.utils.worker import WorkerProcess
 from src.utils.csv_writer import CSVWriter
+from src.utils.trigger_timing import extract_trigger_timing
 from src.visual.scene import ArenaScene, DIRECTION_TO_HEADING
 from src.visual.stimuli.background import BackgroundStimulus
 from src.visual.stimuli.looming import LoomingStimulus
@@ -148,6 +149,7 @@ class VisualProcess(WorkerProcess):
     def _setup_zmq(self) -> None:
         self._zmq_context = None
         self._zmq_socket = None
+        self._latency_socket = None
         self._zone_enter_topic = "ZONE_ENTER"
         if self.standalone:
             self.logger.info("Standalone mode — skipping ZMQ setup")
@@ -166,6 +168,12 @@ class VisualProcess(WorkerProcess):
         self._zmq_socket = self._zmq_context.socket(zmq.SUB)
         self._zmq_socket.connect(address)
         self._zmq_socket.setsockopt_string(zmq.SUBSCRIBE, zmq_cfg.zone_enter_topic)
+
+        # LATENCY reporting: PUSH connects to LatencyLogger's bound PULL socket.
+        self._latency_socket = self._zmq_context.socket(zmq.PUSH)
+        self._latency_socket.connect(
+            zmq_cfg.get_subscriber_address(zmq_cfg.latency_port)
+        )
 
     def _setup_csv(self, cfg: dict) -> Optional[CSVWriter]:
         log_file = cfg.get("log_file", "stim.csv")
@@ -258,11 +266,13 @@ class VisualProcess(WorkerProcess):
                     "Error in stimulus %s on_trigger", type(stim).__name__
                 )
 
+        activated = bool(stim_params)
+
         # Only log a row (and thus only create stim.csv) when a stimulus
         # actually displayed something this trigger — e.g. BackgroundStimulus
         # is always-on and never returns params, so a background-only setup
         # produces no rows and no file, mirroring opto.csv's active gating.
-        if self._csv_writer and stim_params:
+        if self._csv_writer and activated:
             self._csv_writer.append(
                 {
                     "timestamp": data.get("timestamp", time.time()),
@@ -273,3 +283,30 @@ class VisualProcess(WorkerProcess):
                     **stim_params,
                 }
             )
+
+        self._publish_latency(data, activated)
+
+    def _publish_latency(self, data: dict, activated: bool) -> None:
+        """Publish one LATENCY message for the methods-paper latency log.
+
+        activation_timestamp is stamped right after the on_trigger()
+        dispatch loop above, not a true frame-presentation callback -- the
+        render+vsync gap (roughly one frame) is not measured directly here;
+        document it as an estimated constant in the paper instead.
+        """
+        if self._latency_socket is None:
+            return
+        timing = extract_trigger_timing(data)
+        message = {
+            "system": "visual",
+            "obj_id": data.get("obj_id"),
+            "frame": data.get("frame"),
+            "braid_timestamp": timing.braid_timestamp,
+            "trigger_timestamp": timing.handler_timestamp,
+            "activation_timestamp": time.time() if activated else None,
+            "sham": not activated,
+        }
+        try:
+            self._latency_socket.send(json.dumps(message).encode("utf-8"))
+        except Exception:
+            self.logger.exception("Error publishing LATENCY message")
