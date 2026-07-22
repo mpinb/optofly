@@ -72,6 +72,13 @@ class TrackedObject:
     in_zone: bool = False  # ZONE_ENTER has been emitted for this object
     zone_enter_time: Optional[float] = None  # when ZONE_ENTER was emitted
 
+    # Braid's own detection timestamp for the most recent Update/Birth, kept
+    # separate from the receipt-time clock used everywhere else on this
+    # object (current_timestamp, last_check_time, first_timestamp) -- those
+    # must keep using TriggerHandler's own clock or age/cooldown/velocity
+    # math breaks if Braid's clock isn't synced to the local machine.
+    current_braid_timestamp: Optional[float] = None
+
     # Track last time this object was checked
     last_check_time: float = field(default_factory=time.time)
 
@@ -386,6 +393,7 @@ class TriggerHandler(WorkerProcess):
                 min_velocity=self.config.min_velocity,
             )
 
+            tracked_obj.current_braid_timestamp = data.get("braid_timestamp")
             self.tracked_objects[obj_id] = tracked_obj
             self.logger.debug(
                 f"Started tracking object {obj_id} at position "
@@ -423,6 +431,7 @@ class TriggerHandler(WorkerProcess):
                 )
 
             tracked_obj = self.tracked_objects[obj_id]
+            tracked_obj.current_braid_timestamp = data.get("braid_timestamp")
             self._evaluate_zone_transitions(tracked_obj, now)
 
         except KeyError as e:
@@ -515,6 +524,8 @@ class TriggerHandler(WorkerProcess):
                 "obj_id": tracked_obj.obj_id,
                 "frame": tracked_obj.current_frame,
                 "timestamp": now,
+                "braid_timestamp": tracked_obj.current_braid_timestamp,
+                "handler_timestamp": now,
                 "x": tracked_obj.current_x,
                 "y": tracked_obj.current_y,
                 "z": tracked_obj.current_z,

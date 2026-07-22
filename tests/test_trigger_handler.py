@@ -90,8 +90,9 @@ def make_track(
     xvel=0.2,
     yvel=0.0,
     zvel=0.0,
+    braid_timestamp=None,
 ):
-    return {
+    track = {
         "obj_id": obj_id,
         "frame": frame,
         "x": x,
@@ -101,6 +102,9 @@ def make_track(
         "yvel": yvel,
         "zvel": zvel,
     }
+    if braid_timestamp is not None:
+        track["braid_timestamp"] = braid_timestamp
+    return track
 
 
 def make_birth(**kwargs):
@@ -312,3 +316,38 @@ def test_should_run_cleanup_every_iteration_when_object_in_zone():
 
 def test_should_run_cleanup_with_no_tracked_objects():
     assert _should_run_cleanup({}, elapsed_since_last=1.0) is False
+
+
+def test_zone_enter_preserves_braid_timestamp_and_adds_handler_timestamp(
+    handler, fake_clock
+):
+    handler.process_message(
+        make_birth(x=0.08, frame=99, xvel=-0.2, braid_timestamp=500.0)
+    )
+    fake_clock.advance(0.05)
+    handler.process_message(
+        make_update(x=0.05, frame=100, xvel=-0.2, braid_timestamp=500.05)
+    )
+
+    messages = zone_messages(handler.publisher)
+    assert [topic for topic, _ in messages] == ["ZONE_ENTER"]
+    payload = messages[0][1]
+    assert payload["braid_timestamp"] == 500.05
+    assert payload["handler_timestamp"] == fake_clock.now
+    assert payload["timestamp"] == fake_clock.now  # existing field unchanged
+
+
+def test_velocity_and_age_bookkeeping_still_use_receipt_clock_not_braid_timestamp(
+    handler, fake_clock
+):
+    """Regression guard: Braid's own timestamp must never leak into
+    TriggerHandler's internal age/cooldown/velocity math, which relies on
+    its own receipt-time clock and would break if Braid's clock isn't
+    synced to the local machine."""
+    handler.process_message(
+        make_birth(frame=1, x=0.08, xvel=-0.2, braid_timestamp=1_000_000.0)
+    )
+
+    tracked = handler.tracked_objects[7]
+    assert tracked.get_tracking_duration(fake_clock.now) == 0.0
+    assert tracked.current_braid_timestamp == 1_000_000.0
