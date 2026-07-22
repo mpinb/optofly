@@ -40,6 +40,9 @@ optotune-lens = { git = "ssh://git@github.com/elhananby/optotune-lens.git" }
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+markers = [
+    "display: requires a usable display (DISPLAY env var) to run",
+]
 
 [tool.pyright]
 typeCheckingMode = "off"
