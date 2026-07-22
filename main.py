@@ -20,6 +20,7 @@ from src.visual.process import VisualProcess
 from src.processes.led import OptoTriggerWorker
 from src.processes.camera import RustCameraProcess as CameraProcess
 from src.processes.lens import LiquidLens
+from src.processes.latency_logger import LatencyLogger
 from src.utils.braid import check_braid_folder_exists, verify_csv_files_in_braid
 from src.utils.logger import configure_process_logging
 from src.utils.metadata import (
@@ -191,6 +192,22 @@ def check_critical_processes_alive(processes: list) -> list[str]:
     return messages
 
 
+def check_latency_logger_alive(latency_logger) -> str | None:
+    """Return a warning message if LatencyLogger died during init, or None
+    if it's alive.
+
+    Non-fatal by design -- unlike the processes in _CRITICAL_INIT_HINTS, a
+    dead LatencyLogger should not abort the experiment, only lose latency
+    logging for this run.
+    """
+    if not latency_logger.is_alive():
+        return (
+            "LatencyLogger process exited during initialization. "
+            "Latency data will not be recorded for this run."
+        )
+    return None
+
+
 def copy_config_to_braid_folder(config_path: str, braid_folder: str):
     """Copy config file to braid folder for record-keeping.
 
@@ -351,10 +368,23 @@ def main():
         active_process_names.append("TriggerHandler")
         time.sleep(0.5)  # Allow ZMQ publisher to bind
 
+        # 3. LatencyLogger - always-on, writes latency.csv. Non-critical: a
+        # failure here loses latency logging for this run, not the whole
+        # experiment (see check_latency_logger_alive below).
+        print("  ✓ LatencyLogger")
+        latency_logger = LatencyLogger(
+            config_path=config_path, event=stop_event, braid_folder=braid_folder,
+            log_path=log_path, log_level=log_level_str,
+        )
+        latency_logger.start()
+        processes.append(("LatencyLogger", latency_logger))
+        active_process_names.append("LatencyLogger")
+        time.sleep(0.5)  # Allow ZMQ PULL socket to bind
+
         # Optional processes (based on config)
         print("\nStarting optional processes...")
 
-        # 3. Monitoring Server - web dashboard for trigger visualization
+        # 4. Monitoring Server - web dashboard for trigger visualization
         if config.get("monitoring", {}).get("active", False):
             print("  ✓ Monitoring Server")
             monitoring_config = config.get("monitoring", {})
@@ -376,7 +406,7 @@ def main():
             active_process_names.append("Monitoring Server")
             print(f"    Dashboard: http://{monitoring_host}:{monitoring_port}")
 
-        # 4. VisualProcess - Panda3D visual stimuli
+        # 5. VisualProcess - Panda3D visual stimuli
         if config.get("visual_stimuli", {}).get("active", False):
             print("  ✓ VisualProcess (Panda3D)")
             visual_process = VisualProcess(
@@ -390,7 +420,7 @@ def main():
             processes.append(("VisualProcess", visual_process))
             active_process_names.append("VisualProcess")
 
-        # 5. CameraProcess + LiquidLens (lens always accompanies camera)
+        # 6. CameraProcess + LiquidLens (lens always accompanies camera)
         if config.get("camera", {}).get("active", False):
             print("  ✓ CameraProcess")
             # Save videos alongside experiment data: /mnt/data/videos/<braid_name>/
@@ -425,7 +455,7 @@ def main():
             processes.append(("LiquidLens", liquid_lens))
             active_process_names.append("LiquidLens")
 
-        # 6. OptoTriggerWorker - always started for backlight; stimulation gated by active flag
+        # 7. OptoTriggerWorker - always started for backlight; stimulation gated by active flag
         print("  ✓ OptoTriggerWorker")
         opto_trigger = OptoTriggerWorker(
             event=stop_event,
@@ -452,6 +482,10 @@ def main():
                 print(f"\nFATAL: {message}")
             stop_event.set()
             sys.exit(1)
+
+        latency_logger_warning = check_latency_logger_alive(latency_logger)
+        if latency_logger_warning:
+            print(f"\nWARNING: {latency_logger_warning}")
 
         # Print experiment summary
         print_experiment_config(config, active_process_names)

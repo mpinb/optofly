@@ -1,5 +1,6 @@
 from main import (
     check_critical_processes_alive,
+    check_latency_logger_alive,
     check_recording_time_sufficient,
     handle_metadata_cancellation,
 )
@@ -162,3 +163,13 @@ def test_handle_metadata_cancellation_stop_failure_is_reported_not_raised(capsys
     handle_metadata_cancellation(proxy)  # must not raise
     out = capsys.readouterr().out
     assert "warning" in out.lower()
+
+
+def test_check_latency_logger_alive_returns_none_when_alive():
+    assert check_latency_logger_alive(_FakeAliveProcess()) is None
+
+
+def test_check_latency_logger_alive_returns_warning_when_dead():
+    warning = check_latency_logger_alive(_FakeDeadProcess())
+    assert warning is not None
+    assert "LatencyLogger" in warning
