@@ -58,7 +58,6 @@ def test_zmq_config_has_latency_port_with_default():
 def test_zmq_config_rejects_latency_port_colliding_with_another_port(tmp_path):
     import tomli_w
     import tomllib
-    from pathlib import Path as _Path
 
     with open("configs/config.example.toml", "rb") as f:
         data = tomllib.load(f)
