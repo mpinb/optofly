@@ -8,6 +8,7 @@ app.config["EXPERIMENT"], shared by every blueprint registered here.
 from flask import Flask, jsonify, redirect
 
 from src.orchestration import Experiment
+from src.gui import run_routes
 
 
 def create_app(experiment: Experiment | None = None) -> Flask:
@@ -21,5 +22,7 @@ def create_app(experiment: Experiment | None = None) -> Flask:
     @app.route("/api/status")
     def api_status():
         return jsonify(app.config["EXPERIMENT"].status())
+
+    run_routes.register(app)
 
     return app
