@@ -14,6 +14,7 @@ dependencies = [
     "pyzmq>=26.4.0",            # all inter-process messaging
     "requests>=2.32.3",         # Braid HTTP SSE + callback API
     "scipy>=1.15.3",            # lens calibration curve fitting
+    "tomlkit>=0.15.1",          # comment-preserving TOML editor (src/gui/config_editor.py)
 
     # --- src/tools/ only: calibration and offline analysis, never the runtime ---
     # These are easy to mistake for dead weight. Each is imported lazily by the
@@ -34,7 +35,7 @@ dev = [
     "optofly",
     "pytest>=8.4.2",
     "ruff",
-    "tomli-w>=1.1.0",
+    "tomli-w>=1.1.0",           # TOML writer for test fixtures (tests/test_liquid_lens_config.py)
 ]
 
 [tool.uv.sources]
