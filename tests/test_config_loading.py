@@ -3,7 +3,7 @@ import tomllib
 import pytest
 
 from src.utils import config as config_module
-from src.utils.config import CameraConfig, LiquidLensConfig, TriggerHandlerConfig
+from src.utils.config import CameraConfig, LiquidLensConfig, TriggerHandlerConfig, ZMQConfig
 
 
 @pytest.fixture(autouse=True)
@@ -48,3 +48,23 @@ def test_trigger_handler_config_still_gets_fov_from_camera_config():
     camera_cfg = CameraConfig("configs/config.example.toml")
     assert trigger_cfg.fov_x_min == camera_cfg.fov_x_min
     assert trigger_cfg.fov_x_max == camera_cfg.fov_x_max
+
+
+def test_zmq_config_has_latency_port_with_default():
+    cfg = ZMQConfig("configs/config.example.toml")
+    assert cfg.latency_port == 5558
+
+
+def test_zmq_config_rejects_latency_port_colliding_with_another_port(tmp_path):
+    import tomli_w
+    import tomllib
+    from pathlib import Path as _Path
+
+    with open("configs/config.example.toml", "rb") as f:
+        data = tomllib.load(f)
+    data["zmq"]["latency_port"] = data["zmq"]["trigger_port"]
+    out = tmp_path / "config.toml"
+    out.write_bytes(tomli_w.dumps(data).encode("utf-8"))
+
+    with pytest.raises(ValueError, match="port"):
+        ZMQConfig(str(out))

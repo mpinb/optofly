@@ -12,6 +12,9 @@
 braid_port = 5555
 trigger_port = 5556
 active_braid_port = 5557
+# LatencyLogger's PULL bind port; OptoTriggerWorker/VisualProcess/LiquidLens
+# each PUSH their LATENCY messages here (many-producer, one-consumer fan-in).
+latency_port = 5558
 
 braid_topic = "BRAID"
 zone_enter_topic = "ZONE_ENTER"

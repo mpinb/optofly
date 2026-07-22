@@ -222,6 +222,12 @@ class ZMQConfig(ConfigBase):
                 "  Example: trigger_port = 5556"
             )
         self.active_braid_port: int = int(config.get("active_braid_port", 5557))
+        # Bound by LatencyLogger (zmq.PULL); OptoTriggerWorker, VisualProcess,
+        # and LiquidLens each connect a zmq.PUSH socket to it. One port
+        # covers all three producers -- see plan Global Constraints for why
+        # this is PUSH/PULL rather than the PUB/SUB pattern used everywhere
+        # else in this file.
+        self.latency_port: int = int(config.get("latency_port", 5558))
 
         # Topics
         try:
@@ -251,9 +257,16 @@ class ZMQConfig(ConfigBase):
 
     def _validate_config(self):
         """Validate the ZMQ configuration."""
-        ports = {self.braid_port, self.trigger_port, self.active_braid_port}
-        if len(ports) != 3:
-            raise ValueError("Braid, trigger, and active braid ports must be different")
+        ports = {
+            self.braid_port,
+            self.trigger_port,
+            self.active_braid_port,
+            self.latency_port,
+        }
+        if len(ports) != 4:
+            raise ValueError(
+                "Braid, trigger, active braid, and latency ports must be different"
+            )
         if self.braid_pub_hwm <= 0:
             raise ValueError("zmq.braid_pub_hwm must be positive")
 
