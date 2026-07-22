@@ -17,6 +17,7 @@ from src.utils.config import OptoTriggerConfig, ZMQConfig
 from src.utils.worker import WorkerProcess
 from src.hardware.led import OptoTrigger
 from src.utils.csv_writer import CSVWriter
+from src.utils.trigger_timing import TriggerTiming, extract_trigger_timing
 
 
 class OptoTriggerWorker(WorkerProcess):
@@ -72,6 +73,7 @@ class OptoTriggerWorker(WorkerProcess):
         self.opto_trigger = None
         self.csv_writer = None
         self.trigger_socket = None
+        self.latency_socket = None
         self.context = None
 
         # Check if it's enabled
@@ -103,7 +105,7 @@ class OptoTriggerWorker(WorkerProcess):
         self.logger.info("OptoTriggerWorker process initialized.")
 
     def _initialize_zmq(self):
-        """Initialize ZMQ socket for receiving ZONE_ENTER messages."""
+        """Initialize ZMQ sockets: SUB for ZONE_ENTER, PUSH for LATENCY."""
         try:
             self.context = zmq.Context()
             self.trigger_socket = self.context.socket(zmq.SUB)
@@ -116,6 +118,16 @@ class OptoTriggerWorker(WorkerProcess):
             self.logger.debug(
                 f"Connected to TriggerHandler on port {self.zmq_config.trigger_port} "
                 f"(topic: {self.zmq_config.zone_enter_topic})"
+            )
+
+            # LATENCY reporting: PUSH connects to LatencyLogger's bound PULL
+            # socket (many-producer, one-consumer fan-in).
+            self.latency_socket = self.context.socket(zmq.PUSH)
+            self.latency_socket.connect(
+                self.zmq_config.get_subscriber_address(self.zmq_config.latency_port)
+            )
+            self.logger.debug(
+                f"Connected LATENCY publisher to port {self.zmq_config.latency_port}"
             )
         except Exception as e:
             self.logger.error(f"Error connecting to ZMQ socket: {e}")
@@ -187,17 +199,7 @@ class OptoTriggerWorker(WorkerProcess):
             # Extract trigger information
             obj_id = trigger_data.get("obj_id")
             frame = trigger_data.get("frame")
-
-            # Get both timestamps (with backward compatibility fallback)
-            braid_timestamp = trigger_data.get("braid_timestamp")
-            trigger_timestamp = trigger_data.get("trigger_timestamp")
-
-            # Fallback to old 'timestamp' field if new fields not present
-            if braid_timestamp is None:
-                braid_timestamp = trigger_data.get("timestamp")
-            if trigger_timestamp is None:
-                trigger_timestamp = trigger_data.get("timestamp")
-
+            timing = extract_trigger_timing(trigger_data)
             mean_heading = trigger_data.get("mean_heading")
 
             if obj_id is None or frame is None:
@@ -210,15 +212,17 @@ class OptoTriggerWorker(WorkerProcess):
             )
 
             # Trigger the hardware (it will determine sham based on probability)
-            success, was_sham = self.opto_trigger.trigger(sham=None)
+            success, was_sham, activation_timestamp = self.opto_trigger.trigger(
+                sham=None
+            )
 
             # Prepare CSV row
             # Use values from the hardware controller (which has the randomly selected parameters)
             row = {
                 "obj_id": obj_id,
                 "frame": frame,
-                "braid_timestamp": braid_timestamp,
-                "trigger_timestamp": trigger_timestamp,
+                "braid_timestamp": timing.braid_timestamp,
+                "trigger_timestamp": timing.handler_timestamp,
                 "mean_heading": mean_heading,
                 "duration": self.opto_trigger.config.duration,
                 "intensity": self.opto_trigger.config.intensity,
@@ -231,11 +235,36 @@ class OptoTriggerWorker(WorkerProcess):
             self.csv_writer.append(row)
             self.logger.debug(f"Logged trigger event to CSV: {row}")
 
+            self._publish_latency(obj_id, frame, timing, activation_timestamp, was_sham)
+
             return success
 
         except Exception as e:
             self.logger.error(f"Error handling trigger: {e}")
             return False
+
+    def _publish_latency(
+        self,
+        obj_id,
+        frame,
+        timing: TriggerTiming,
+        activation_timestamp,
+        sham: bool,
+    ) -> None:
+        """Publish one LATENCY message for the methods-paper latency log."""
+        try:
+            message = {
+                "system": "opto",
+                "obj_id": obj_id,
+                "frame": frame,
+                "braid_timestamp": timing.braid_timestamp,
+                "trigger_timestamp": timing.handler_timestamp,
+                "activation_timestamp": activation_timestamp,
+                "sham": sham,
+            }
+            self.latency_socket.send(json.dumps(message).encode("utf-8"))
+        except Exception as e:
+            self.logger.error(f"Error publishing LATENCY message: {e}")
 
     def _run(self):
         """Main process loop."""
@@ -299,13 +328,15 @@ class OptoTriggerWorker(WorkerProcess):
             except Exception as e:
                 self.logger.error(f"Error closing CSV writer: {e}")
 
-        # Close ZMQ socket
-        if self.trigger_socket:
-            try:
-                self.trigger_socket.close()
-                self.logger.debug("Trigger socket closed successfully")
-            except Exception as e:
-                self.logger.error(f"Error closing trigger socket: {e}")
+        # Close ZMQ sockets
+        for sock_attr in ("trigger_socket", "latency_socket"):
+            sock = getattr(self, sock_attr, None)
+            if sock:
+                try:
+                    sock.close()
+                    self.logger.debug(f"{sock_attr} closed successfully")
+                except Exception as e:
+                    self.logger.error(f"Error closing {sock_attr}: {e}")
 
         # Terminate ZMQ context
         if self.context:
