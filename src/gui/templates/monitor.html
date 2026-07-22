@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Monitor</h1>
+
+<h2>Process health</h2>
+<div id="processes"></div>
+
+<h2>Triggers (<span id="trigger-count">0</span>)</h2>
+<div id="trigger-log" style="height:400px;overflow-y:auto;border:1px solid #555;padding:10px;"></div>
+
+<script>
+const eventSource = new EventSource("/monitor/stream");
+eventSource.onmessage = function(event) {
+    const data = JSON.parse(event.data);
+    const logDiv = document.getElementById("trigger-log");
+    const entry = document.createElement("div");
+    entry.textContent = JSON.stringify(data);
+    logDiv.insertBefore(entry, logDiv.firstChild);
+};
+
+async function pollStatus() {
+    const resp = await fetch("/api/status");
+    const data = await resp.json();
+    document.getElementById("trigger-count").textContent = "";
+    const processesDiv = document.getElementById("processes");
+    processesDiv.innerHTML = Object.entries(data.processes)
+        .map(([name, info]) => `<div>${info.alive ? "🟢" : "🔴"} ${name} ${info.failed_reason || ""} ${info.shutdown || ""}</div>`)
+        .join("");
+}
+setInterval(pollStatus, 1000);
+pollStatus();
+</script>
+{% endblock %}
