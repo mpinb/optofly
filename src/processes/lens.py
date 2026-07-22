@@ -18,6 +18,22 @@ from optotune_lens import Lens as LensDriver
 VALID_CALIBRATION_MODELS = ("linear", "quadratic", "power", "inverse")
 
 
+def _is_lens_rate_limited(
+    pending_first_update: Optional[dict], last_cmd_time: float, now_monotonic: float
+) -> bool:
+    """True if this iteration should be skipped without reading from the
+    active-feed socket or running the predictor, because we are still
+    inside the lens's 25ms hardware floor.
+
+    Never true for the pending first-update-post-ZONE_ENTER path -- that
+    command must always be evaluated. The late rate-limit check right
+    before the actual serial write still enforces the floor for it.
+    """
+    if pending_first_update is not None:
+        return False
+    return last_cmd_time > 0 and (now_monotonic - last_cmd_time) < 0.025
+
+
 class LensCalibration:
     """Maps z position (m) -> diopter via a fitted model.
 
@@ -103,7 +119,9 @@ class LensCalibration:
                 ),
             ]:
                 try:
-                    popt, _ = curve_fit(_inv, z, dpt, p0=p0, bounds=bounds, maxfev=10_000)
+                    popt, _ = curve_fit(
+                        _inv, z, dpt, p0=p0, bounds=bounds, maxfev=10_000
+                    )
                     resid = float(np.sum((dpt - _inv(z, *popt)) ** 2))
                     if resid < best_resid:
                         best_resid = resid
@@ -390,6 +408,20 @@ class LiquidLens(WorkerProcess):
                 if not self.is_tracking:
                     if self.active_braid_socket in socks:
                         self._drain_active_braid_idle()
+                    continue
+
+                # Rate-limit before doing any predictor work: the linear
+                # predictor is stateless (no filter state to keep "warm"
+                # between commands), so a measurement received while still
+                # inside the hardware's 25ms floor will simply be
+                # superseded by BraidPublisher's next update ~10ms later --
+                # nothing is lost by skipping it early. Never applies to
+                # the pending first-update-post-ZONE_ENTER command, which
+                # must always be processed; the late check further below
+                # still enforces the floor for that path.
+                if _is_lens_rate_limited(
+                    self._pending_first_update, self._last_cmd_time, time.monotonic()
+                ):
                     continue
 
                 if self._pending_first_update is not None:

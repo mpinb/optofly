@@ -3,7 +3,7 @@ import json
 import pytest
 import zmq
 
-from src.processes.lens import LiquidLens
+from src.processes.lens import LiquidLens, _is_lens_rate_limited
 
 
 class FakeSocket:
@@ -104,3 +104,45 @@ def test_get_latest_active_update_ignores_other_object_ids(lens):
     )
 
     assert lens._get_latest_active_update() == {"obj_id": 7, "frame": 11, "z": 0.1}
+
+
+def test_rate_limited_when_recent_command_and_no_pending_first_update():
+    assert (
+        _is_lens_rate_limited(
+            pending_first_update=None, last_cmd_time=100.0, now_monotonic=100.01
+        )
+        is True
+    )
+
+
+def test_not_rate_limited_once_25ms_have_elapsed():
+    assert (
+        _is_lens_rate_limited(
+            pending_first_update=None, last_cmd_time=100.0, now_monotonic=100.03
+        )
+        is False
+    )
+
+
+def test_never_rate_limited_for_pending_first_update_even_if_recent():
+    """The first command after ZONE_ENTER must always be evaluated -- the
+    late rate-limit check right before the serial write still enforces the
+    25ms floor for this path, so it's safe (and necessary, to avoid
+    dropping the trial-onset command) to skip the early check here."""
+    assert (
+        _is_lens_rate_limited(
+            pending_first_update={"obj_id": 7},
+            last_cmd_time=100.0,
+            now_monotonic=100.001,
+        )
+        is False
+    )
+
+
+def test_not_rate_limited_before_any_command_sent():
+    assert (
+        _is_lens_rate_limited(
+            pending_first_update=None, last_cmd_time=0.0, now_monotonic=5.0
+        )
+        is False
+    )
