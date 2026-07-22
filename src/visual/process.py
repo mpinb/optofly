@@ -171,6 +171,14 @@ class VisualProcess(WorkerProcess):
 
         # LATENCY reporting: PUSH connects to LatencyLogger's bound PULL socket.
         self._latency_socket = self._zmq_context.socket(zmq.PUSH)
+        # Without these, a dead/slow LatencyLogger fills the default
+        # SNDHWM=1000 queue and the next .send() blocks forever, freezing
+        # this process's stimulus-rendering loop while is_alive() still
+        # reports it as running. SNDTIMEO=0 makes .send() raise zmq.Again
+        # instead (already caught below); LINGER=0 keeps context.term()
+        # from hanging on shutdown to flush a backlog.
+        self._latency_socket.setsockopt(zmq.SNDTIMEO, 0)
+        self._latency_socket.setsockopt(zmq.LINGER, 0)
         self._latency_socket.connect(
             zmq_cfg.get_subscriber_address(zmq_cfg.latency_port)
         )

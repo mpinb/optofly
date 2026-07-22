@@ -1,6 +1,9 @@
 import json
 
+import zmq
+
 from src.processes.led import OptoTriggerWorker
+from src.utils.config import ZMQConfig
 
 
 class FakeLatencySocket:
@@ -110,3 +113,28 @@ def test_handle_trigger_publishes_latency_with_none_activation_for_sham():
     sent = worker.latency_socket.sent
     assert sent[0]["sham"] is True
     assert sent[0]["activation_timestamp"] is None
+
+
+def test_initialize_zmq_configures_latency_socket_as_non_blocking():
+    """A dead/slow LatencyLogger must never be able to block this process's
+    opto-trigger loop. Without SNDTIMEO=0/LINGER=0, a full SNDHWM=1000 queue
+    makes the next latency_socket.send() hang forever. Exercises the real
+    _initialize_zmq() setup path (not a fake socket) against the checked-in
+    example config, so getsockopt reflects genuine zmq behavior."""
+    worker = object.__new__(OptoTriggerWorker)
+    worker.zmq_config = ZMQConfig("configs/config.example.toml")
+    worker.logger = type(
+        "Logger",
+        (),
+        {"debug": lambda *a, **k: None, "error": lambda *a, **k: None},
+    )()
+
+    worker._initialize_zmq()
+
+    try:
+        assert worker.latency_socket.getsockopt(zmq.SNDTIMEO) == 0
+        assert worker.latency_socket.getsockopt(zmq.LINGER) == 0
+    finally:
+        worker.latency_socket.close()
+        worker.trigger_socket.close()
+        worker.context.term()

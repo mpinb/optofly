@@ -1,6 +1,8 @@
 import json
 import math
 
+import zmq
+
 from src.visual.process import VisualProcess, braid_to_world_heading
 
 
@@ -120,3 +122,30 @@ def test_handle_zone_enter_publishes_latency_with_real_activation_when_a_stimulu
     sent = proc._latency_socket.sent
     assert sent[0]["sham"] is False
     assert sent[0]["activation_timestamp"] == 999.0
+
+
+def test_setup_zmq_configures_latency_socket_as_non_blocking():
+    """A dead/slow LatencyLogger must never be able to block this process's
+    stimulus-rendering loop. Without SNDTIMEO=0/LINGER=0, a full
+    SNDHWM=1000 queue makes the next _latency_socket.send() hang forever.
+    Exercises the real _setup_zmq() setup path (not a fake socket) against
+    the checked-in example config, so getsockopt reflects genuine zmq
+    behavior."""
+    proc = object.__new__(VisualProcess)
+    proc.standalone = False
+    proc._config_path = "configs/config.example.toml"
+    proc.logger = type(
+        "Logger",
+        (),
+        {"info": lambda *a, **k: None, "debug": lambda *a, **k: None},
+    )()
+
+    proc._setup_zmq()
+
+    try:
+        assert proc._latency_socket.getsockopt(zmq.SNDTIMEO) == 0
+        assert proc._latency_socket.getsockopt(zmq.LINGER) == 0
+    finally:
+        proc._latency_socket.close()
+        proc._zmq_socket.close()
+        proc._zmq_context.term()

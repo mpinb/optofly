@@ -123,6 +123,14 @@ class OptoTriggerWorker(WorkerProcess):
             # LATENCY reporting: PUSH connects to LatencyLogger's bound PULL
             # socket (many-producer, one-consumer fan-in).
             self.latency_socket = self.context.socket(zmq.PUSH)
+            # Without these, a dead/slow LatencyLogger fills the default
+            # SNDHWM=1000 queue and the next .send() blocks forever,
+            # freezing this process's opto-trigger loop while is_alive()
+            # still reports it as running. SNDTIMEO=0 makes .send() raise
+            # zmq.Again instead (already caught below); LINGER=0 keeps
+            # context.term() from hanging on shutdown to flush a backlog.
+            self.latency_socket.setsockopt(zmq.SNDTIMEO, 0)
+            self.latency_socket.setsockopt(zmq.LINGER, 0)
             self.latency_socket.connect(
                 self.zmq_config.get_subscriber_address(self.zmq_config.latency_port)
             )

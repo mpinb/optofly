@@ -252,3 +252,29 @@ def test_publish_latency_sends_lens_system_message_never_sham(lens):
         "activation_timestamp": 500.02,
         "sham": False,
     }
+
+
+def test_latency_socket_setsockopt_technique_makes_send_non_blocking():
+    """A dead/slow LatencyLogger must never be able to block LiquidLens's
+    focus loop. Without SNDTIMEO=0/LINGER=0, a full SNDHWM=1000 queue makes
+    the next latency_socket.send() hang forever.
+
+    This is a technique-level test, not an exercise of LiquidLens.initialize()
+    itself: that method also loads lens calibration from a CSV and opens a
+    real serial connection to the lens hardware (LensDriver), neither of
+    which exist in a test environment, so driving it end-to-end isn't
+    proportionate here. Instead this proves the exact two setsockopt calls
+    used at the real call site (src/processes/lens.py, in initialize())
+    against a real zmq.Context()/zmq.PUSH socket, confirming getsockopt
+    reports back what was set."""
+    context = zmq.Context()
+    socket = context.socket(zmq.PUSH)
+    try:
+        socket.setsockopt(zmq.SNDTIMEO, 0)
+        socket.setsockopt(zmq.LINGER, 0)
+
+        assert socket.getsockopt(zmq.SNDTIMEO) == 0
+        assert socket.getsockopt(zmq.LINGER) == 0
+    finally:
+        socket.close()
+        context.term()
