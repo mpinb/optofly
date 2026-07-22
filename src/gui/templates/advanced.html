@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Advanced (raw TOML)</h1>
+
+<form id="advanced-form">
+    <input type="hidden" name="path" value="{{ path }}">
+    <textarea name="content" rows="30" cols="100">{{ content }}</textarea><br>
+    <button type="submit">Save</button>
+</form>
+<div id="advanced-error"></div>
+
+<script>
+document.getElementById("advanced-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const resp = await fetch("/advanced/save", {
+        method: "POST",
+        body: new URLSearchParams(new FormData(event.target)),
+    });
+    const data = await resp.json();
+    document.getElementById("advanced-error").textContent = data.error || "Saved.";
+});
+</script>
+{% endblock %}

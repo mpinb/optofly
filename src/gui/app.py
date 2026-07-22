@@ -8,7 +8,7 @@ app.config["EXPERIMENT"], shared by every blueprint registered here.
 from flask import Flask, jsonify, redirect
 
 from src.orchestration import Experiment
-from src.gui import run_routes, config_routes
+from src.gui import run_routes, config_routes, advanced_routes
 
 
 def create_app(experiment: Experiment | None = None) -> Flask:
@@ -25,5 +25,6 @@ def create_app(experiment: Experiment | None = None) -> Flask:
 
     run_routes.register(app)
     config_routes.register(app)
+    advanced_routes.register(app)
 
     return app
