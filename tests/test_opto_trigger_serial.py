@@ -1,3 +1,4 @@
+import random
 import time
 
 from src.hardware.led import OptoTrigger
@@ -71,3 +72,86 @@ def test_falls_back_to_full_timeout_when_arduino_never_responds():
 
     assert lines == []
     assert elapsed >= 0.2
+
+
+class _FakeSerialForTrigger:
+    def __init__(self):
+        self.written = []
+        self.in_waiting = 0
+
+    def write(self, data):
+        self.written.append(data)
+
+    def flush(self):
+        pass
+
+    def read(self, n):
+        return b""
+
+
+def _make_trigger_for_write_test(sham_probability=0.0):
+    trigger = object.__new__(OptoTrigger)
+    trigger.is_initialized = True
+    trigger.serial_conn = _FakeSerialForTrigger()
+    trigger.config = type(
+        "Config",
+        (),
+        {
+            "sham_probability": sham_probability,
+            "color": "white",
+            "duration": 100,
+            "intensity": 255,
+            "frequency": 0,
+            "get_trigger_command": lambda self: "<100,255,0,white>",
+        },
+    )()
+    trigger.logger = type(
+        "Logger",
+        (),
+        {
+            "info": lambda *a, **k: None,
+            "debug": lambda *a, **k: None,
+            "warning": lambda *a, **k: None,
+            "error": lambda *a, **k: None,
+        },
+    )()
+    trigger._parameter_combinations = [(100, 255, 0)]
+    trigger.combination_counts = {(100, 255, 0): 0}
+    return trigger
+
+
+def test_trigger_returns_activation_timestamp_immediately_after_serial_write(
+    monkeypatch,
+):
+    trigger = _make_trigger_for_write_test()
+    monkeypatch.setattr(random, "random", lambda: 1.0)  # never sham
+    monkeypatch.setattr(
+        "src.hardware.led.time.time", lambda: 42.0
+    )
+
+    success, was_sham, activation_timestamp = trigger.trigger(sham=None)
+
+    assert success is True
+    assert was_sham is False
+    assert activation_timestamp == 42.0
+
+
+def test_trigger_returns_none_activation_timestamp_for_sham():
+    trigger = _make_trigger_for_write_test()
+
+    success, was_sham, activation_timestamp = trigger.trigger(sham=True)
+
+    assert success is True
+    assert was_sham is True
+    assert activation_timestamp is None
+
+
+def test_trigger_returns_none_activation_timestamp_when_not_initialized():
+    trigger = object.__new__(OptoTrigger)
+    trigger.is_initialized = False
+    trigger.logger = type("Logger", (), {"error": lambda *a, **k: None})()
+
+    success, was_sham, activation_timestamp = trigger.trigger(sham=None)
+
+    assert success is False
+    assert activation_timestamp is None

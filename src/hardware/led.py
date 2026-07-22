@@ -131,7 +131,7 @@ class OptoTrigger:
             self.logger.error(f"Failed to initialize OptoTrigger: {e}")
             return False
 
-    def trigger(self, sham: Optional[bool] = None) -> tuple[bool, bool]:
+    def trigger(self, sham: Optional[bool] = None) -> tuple[bool, bool, Optional[float]]:
         """
         Send trigger command to the Arduino.
 
@@ -139,15 +139,19 @@ class OptoTrigger:
             sham: Override sham setting. If None, uses probability from config.
 
         Returns:
-            Tuple of (success, was_sham):
+            Tuple of (success, was_sham, activation_timestamp):
                 - success: True if command was sent/processed successfully
                 - was_sham: True if this was a sham stimulation (no signal sent)
+                - activation_timestamp: wall-clock time (time.time()) captured
+                  immediately after the serial write completes -- excludes
+                  parameter-selection overhead beforehand and the Arduino
+                  response-wait afterward. None for sham or any failure path.
         """
 
         # Check if the trigger is initialized
         if not self.is_initialized:
             self.logger.error("OptoTrigger not initialized. Call initialize() first.")
-            return (False, False)
+            return (False, False, None)
 
         # Determine if this should be a sham stimulation
         if sham is None:
@@ -157,7 +161,7 @@ class OptoTrigger:
             self.logger.info(
                 f"Executing sham stimulation (no signal sent) for color {self.config.color}"
             )
-            return (True, True)
+            return (True, True, None)
 
         # Select parameters using balanced randomization
         params = self._select_balanced_parameters()
@@ -177,9 +181,10 @@ class OptoTrigger:
                 # Use \r\n line ending to match Arduino IDE serial monitor behavior
                 self.serial_conn.write((command + "\r\n").encode("utf-8"))
                 self.serial_conn.flush()  # Ensure data is sent immediately
+                activation_timestamp = time.time()
             else:
                 self.logger.error("Serial connection is not established.")
-                return (False, False)
+                return (False, False, None)
 
             # Wait for Arduino output without blocking on readline timeouts
             response_lines = self._collect_serial_output()
@@ -199,10 +204,10 @@ class OptoTrigger:
             else:
                 self.logger.warning("No response received from Arduino")
 
-            return (True, False)
+            return (True, False, activation_timestamp)
         except Exception as e:
             self.logger.error(f"Error triggering stimulation: {e}")
-            return (False, False)
+            return (False, False, None)
 
     def _generate_combinations(self) -> list[tuple[int, ...]]:
         """Generate all possible parameter combinations for balanced selection.
@@ -372,22 +377,26 @@ class OptoTrigger:
             return []
 
         buffer = bytearray()
-        start = time.time()
+        # Use the monotonic clock for elapsed-time bookkeeping here (rather
+        # than time.time(), which trigger() uses for activation_timestamp)
+        # so this loop's timeout is immune to wall-clock adjustments/mocking
+        # of time.time() elsewhere.
+        start = time.monotonic()
         quiet_since: Optional[float] = None
 
-        while time.time() - start < timeout:
+        while time.monotonic() - start < timeout:
             waiting = getattr(self.serial_conn, "in_waiting", 0)
             if waiting:
                 chunk = self.serial_conn.read(waiting)
                 if chunk:
                     buffer.extend(chunk)
-                    start = time.time()
+                    start = time.monotonic()
                     quiet_since = None
                     continue
 
             if quiet_since is None:
-                quiet_since = time.time()
-            elif b"\n" in buffer and time.time() - quiet_since >= poll_interval:
+                quiet_since = time.monotonic()
+            elif b"\n" in buffer and time.monotonic() - quiet_since >= poll_interval:
                 break
 
             time.sleep(poll_interval)
@@ -508,7 +517,9 @@ if __name__ == "__main__":
             print(f"Using custom parameters: {trigger.config.get_trigger_command()}")
 
         # Trigger the stimulation
-        success, was_sham = trigger.trigger(sham=args.sham if args.sham else None)
+        success, was_sham, _activation_timestamp = trigger.trigger(
+            sham=args.sham if args.sham else None
+        )
 
         if success:
             if was_sham:
