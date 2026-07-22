@@ -1,4 +1,4 @@
-from main import check_critical_processes_alive
+from main import check_critical_processes_alive, check_recording_time_sufficient
 
 
 class _FakeAliveProcess:
@@ -83,3 +83,30 @@ def test_multiple_dead_critical_processes_each_produce_a_message():
     joined = " ".join(messages)
     assert "BraidPublisher" in joined
     assert "LiquidLens" in joined
+
+
+def test_warns_when_max_recording_time_less_than_zone_timeout():
+    config = {
+        "camera": {"active": True, "max_recording_time": 1.0},
+        "trigger_handler": {"zone_timeout": 3.0},
+    }
+    warning = check_recording_time_sufficient(config)
+    assert warning is not None
+    assert "1.0" in warning
+    assert "3.0" in warning
+
+
+def test_no_warning_when_camera_inactive():
+    config = {
+        "camera": {"active": False, "max_recording_time": 1.0},
+        "trigger_handler": {"zone_timeout": 3.0},
+    }
+    assert check_recording_time_sufficient(config) is None
+
+
+def test_no_warning_when_recording_time_sufficient():
+    config = {
+        "camera": {"active": True, "max_recording_time": 5.0},
+        "trigger_handler": {"zone_timeout": 3.0},
+    }
+    assert check_recording_time_sufficient(config) is None

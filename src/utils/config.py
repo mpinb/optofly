@@ -10,9 +10,30 @@ import tomllib
 # Setup custom logger for this module
 import logging
 import math
+import os
 from typing import ClassVar, Iterable
 
 logger = logging.getLogger(__name__)
+
+
+# Every `*Config` class re-parses the same TOML file per process, and
+# several classes construct sibling config classes for shared values
+# (e.g. LiquidLensConfig -> TriggerHandlerConfig -> CameraConfig), so a
+# single process can otherwise open one file hundreds of times just to
+# build one config object. Caching by (path, mtime) keeps repeated
+# construction cheap while still picking up on-disk edits.
+_TOML_CACHE: dict[str, tuple[float, dict]] = {}
+
+
+def _load_toml_cached(config_path: str) -> dict:
+    mtime = os.stat(config_path).st_mtime
+    cached = _TOML_CACHE.get(config_path)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+    with open(config_path, "rb") as f:
+        data = tomllib.load(f)
+    _TOML_CACHE[config_path] = (mtime, data)
+    return data
 
 
 class ConfigBase:
@@ -31,8 +52,7 @@ class ConfigBase:
     def _load_config(self):
         """Load configuration from file."""
         try:
-            with open(self.config_path, "rb") as f:
-                config = tomllib.load(f)
+            config = _load_toml_cached(self.config_path)
 
             if self.section is not None:
                 if self.section not in config:
@@ -493,20 +513,6 @@ class CameraConfig(ConfigBase):
         self.braid_ximea_calibration_file: str | None = config.get(
             "braid_ximea_calibration_file", None
         )
-
-        # Cross-validate: recording must be long enough to cover the zone timeout.
-        try:
-            _zt = TriggerHandlerConfig(config_path).zone_timeout
-            if self.max_recording_time < _zt:
-                import warnings
-                warnings.warn(
-                    f"camera.max_recording_time ({self.max_recording_time}s) is less than "
-                    f"trigger_handler.zone_timeout ({_zt}s). Every recording will be "
-                    "truncated before the fly exits the zone.",
-                    stacklevel=2,
-                )
-        except Exception:
-            pass
 
     def __str__(self):
         """Return a string representation of the configuration."""

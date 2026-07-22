@@ -52,6 +52,32 @@ def load_config(config_path: str) -> dict:
         sys.exit(1)
 
 
+def check_recording_time_sufficient(config: dict) -> str | None:
+    """Return a warning message if camera.max_recording_time is shorter
+    than trigger_handler.zone_timeout, or None if camera is inactive or
+    the durations are sufficient.
+
+    Every recording would otherwise be truncated before the fly exits the
+    trigger zone. This check previously lived inside CameraConfig's
+    constructor (which built a TriggerHandlerConfig just to read
+    zone_timeout) -- that made CameraConfig and TriggerHandlerConfig
+    mutually recursive. Doing it here, once, against the raw config dict
+    main() already has, keeps the check without the cycle.
+    """
+    camera_cfg = config.get("camera", {})
+    if not camera_cfg.get("active", False):
+        return None
+    max_recording_time = float(camera_cfg.get("max_recording_time", 3.0))
+    zone_timeout = float(config.get("trigger_handler", {}).get("zone_timeout", 2.0))
+    if max_recording_time < zone_timeout:
+        return (
+            f"camera.max_recording_time ({max_recording_time}s) is less than "
+            f"trigger_handler.zone_timeout ({zone_timeout}s). Every recording "
+            "will be truncated before the fly exits the zone."
+        )
+    return None
+
+
 def print_experiment_config(config: dict, active_processes: list):
     """Print experiment configuration summary.
 
@@ -207,6 +233,10 @@ def main():
     config = load_config(config_path)
     log_level_str = config.get("logging", {}).get("level", "INFO").upper()
     log_level_int = getattr(logging, log_level_str, logging.INFO)
+
+    recording_time_warning = check_recording_time_sufficient(config)
+    if recording_time_warning:
+        print(f"WARNING: {recording_time_warning}")
 
     # Initialize variables for cleanup
     braid_folder = None
