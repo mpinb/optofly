@@ -112,14 +112,10 @@ Key parameters (all in `configs/config.toml`):
 
 | Section | Key | Default | Purpose |
 |---|---|---|---|
-| `[liquid_lens]` | `predictor` | `"none"` | `"none"` uses raw Braid z; `"linear"` extrapolates `z + vz * (system_latency + prediction_horizon)`; `"kalman"` runs the 2-state filter below |
+| `[liquid_lens]` | `predictor` | `"none"` | `"none"` uses raw Braid z; `"linear"` extrapolates `z + vz * (system_latency + prediction_horizon)` |
 | `[liquid_lens]` | `max_diopter_step` | `0.0` | Per-update slew-rate limit on commanded diopter; `0.0` disables it. Ramps large jumps (esp. trial onset) so the lens's ~400 Hz resonance isn't excited |
-| `[liquid_lens.kalman]` | `system_latency` | `0.05` | Measured message + serial write delay (seconds); calibrate with `lens_latency_analyze` |
+| `[liquid_lens.kalman]` | `system_latency` | `0.05` | Measured message + serial write delay (seconds); calibrate with `lens_latency_analyze`. Section name is legacy (predates removal of a Kalman-filter predictor mode) — still used by the `linear` predictor |
 | `[liquid_lens.kalman]` | `prediction_horizon` | `0.05` | Additional lookahead beyond `system_latency` (seconds) |
-| `[liquid_lens.kalman]` | `process_noise` | `0.01` | (Kalman only) How quickly velocity can change |
-| `[liquid_lens.kalman]` | `measurement_noise` | `0.1` | (Kalman only) Trust in Braid position measurements |
-| `[liquid_lens.kalman]` | `initial_covariance` | `1.0` | (Kalman only) Uncertainty in the initial state |
-| `[liquid_lens.kalman]` | `velocity_noise` | `1.0` | (Kalman only) Trust in Braid velocity estimates fed into the filter |
 
 `LiquidLens` also enforces a hardware floor of 25ms between serial commands regardless of `predictor` or `max_diopter_step` (~40 Hz max update rate).
 
@@ -157,6 +153,4 @@ Output files per trial (all in `camera.save_folder`):
 
 ### Liquid Lens
 
-`LiquidLens` (`src/processes/lens.py`) responds to `ZONE_ENTER` and subscribes to the `ACTIVE_BRAID` feed, calling `LensDriver.set_diopter()` while tracking. Three filters gate each command: the `predictor` mode picks the target z, `max_diopter_step` optionally slew-limits the jump from the last commanded diopter, and a command is dropped outright if it arrives less than 25ms after the last one or changes the diopter by under `1e-5`.
-
-**Kalman filter** (`src/utils/kalman_filter.py`): 2-state `[z, vz]`. x/y are intentionally excluded, since the liquid lens only needs z and the states are decoupled under the constant-velocity (DWNA) model anyway. When `predictor = "kalman"`, `KalmanFilter.predict()` projects z forward `system_latency + prediction_horizon` seconds to compensate for lens settling time. Velocity from Braid is fused as a proper sequential measurement update (controlled by `velocity_noise`) rather than overwriting the state, which keeps the covariance matrix consistent. Covariance updates use the Joseph form for numerical stability.
+`LiquidLens` (`src/processes/lens.py`) responds to `ZONE_ENTER` and subscribes to the `ACTIVE_BRAID` feed, calling `LensDriver.set_diopter()` while tracking. Three filters gate each command: the `predictor` mode (`"none"` or `"linear"`) picks the target z, `max_diopter_step` optionally slew-limits the jump from the last commanded diopter, and a command is dropped outright if it arrives less than 25ms after the last one or changes the diopter by under `1e-5`.

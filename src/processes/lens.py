@@ -12,7 +12,6 @@ import json
 from src.utils.config import LiquidLensConfig, ZMQConfig, CameraConfig
 from src.utils.csv_writer import CSVWriter
 from src.utils.worker import WorkerProcess
-from src.utils.kalman_filter import KalmanFilter
 from optotune_lens import Lens as LensDriver
 
 
@@ -169,7 +168,6 @@ class LiquidLens(WorkerProcess):
         self.braid_folder = braid_folder
         self.video_folder = video_folder
         self.csv_writer = None
-        self.kalman: Optional[KalmanFilter] = None
 
         # Last diopter actually commanded to the lens, for slew-rate limiting.
         # Persists across trials so the onset jump is ramped from the lens's
@@ -239,14 +237,7 @@ class LiquidLens(WorkerProcess):
         self.logger.info(f"CSV logging to: {csv_path}")
 
         mode = self.lens_config.predictor
-        if mode == "kalman":
-            self.logger.info(
-                f"Predictor: kalman (process_noise={self.lens_config.process_noise}, "
-                f"measurement_noise={self.lens_config.measurement_noise}, "
-                f"system_latency={self.lens_config.system_latency}s, "
-                f"prediction_horizon={self.lens_config.prediction_horizon}s)"
-            )
-        elif mode == "linear":
+        if mode == "linear":
             self.logger.info(
                 f"Predictor: linear (system_latency={self.lens_config.system_latency}s, "
                 f"prediction_horizon={self.lens_config.prediction_horizon}s)"
@@ -294,7 +285,6 @@ class LiquidLens(WorkerProcess):
 
     def _stop_tracking(self):
         self._flush_timing_csv()
-        self.kalman = None
         self.is_tracking = False
         self.current_tracked_obj = None
         self._pending_first_update = None
@@ -340,7 +330,6 @@ class LiquidLens(WorkerProcess):
                     self._timing_rows = []
                     self._recording_obj_id = obj_id
                     self._recording_frame = msg.get("frame")
-                    self.kalman = None
                     self._pending_first_update = {
                         key: msg[key]
                         for key in (
@@ -411,19 +400,7 @@ class LiquidLens(WorkerProcess):
 
                 # Pick the focus depth according to predictor mode.
                 predictor = self.lens_config.predictor
-                if predictor == "kalman":
-                    if self.kalman is None:
-                        self.kalman = KalmanFilter(
-                            process_noise=self.lens_config.process_noise,
-                            measurement_noise=self.lens_config.measurement_noise,
-                            initial_covariance=self.lens_config.initial_covariance,
-                            velocity_noise=self.lens_config.velocity_noise,
-                        )
-                        self.kalman.init(z, vz, timestamp)
-                    else:
-                        self.kalman.update(z, vz, timestamp)
-                    focus_z = self.kalman.predict(self._prediction_time)
-                elif predictor == "linear":
+                if predictor == "linear":
                     focus_z = z + vz * self._prediction_time
                 else:
                     focus_z = z

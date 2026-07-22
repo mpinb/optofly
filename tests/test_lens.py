@@ -58,7 +58,6 @@ def test_zone_enter_payload_becomes_pending_first_update(lens):
     lens.is_tracking = False
     lens.current_tracked_obj = None
     lens._timing_rows = ["stale"]
-    lens.kalman = "stale"
     lens._recording_obj_id = None
     lens._recording_frame = None
     lens._log_csv = lambda *args, **kwargs: None

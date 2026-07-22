@@ -179,24 +179,20 @@ class LiquidLensConfig(ConfigBase):
         self.fov_y_min = camera_config.fov_y_min
         self.fov_y_max = camera_config.fov_y_max
 
-        # Predictor mode: "none", "linear", or "kalman"
+        # Predictor mode: "none" or "linear"
         predictor = config.get("predictor", "none")
-        if predictor not in ("none", "linear", "kalman"):
+        if predictor not in ("none", "linear"):
             raise ValueError(
-                f"liquid_lens.predictor must be 'none', 'linear', or 'kalman', got '{predictor}'"
+                f"liquid_lens.predictor must be 'none' or 'linear', got '{predictor}'"
             )
         self.predictor: str = predictor
 
-        # Prediction parameters (used by "linear" and "kalman" modes)
+        # Prediction parameters (used by "linear" mode). Section name is
+        # kept as [liquid_lens.kalman] for config-file compatibility even
+        # though the Kalman predictor itself was removed.
         kalman_config = config.get("kalman", {})
         self.system_latency: float = kalman_config.get("system_latency", 0.05)
         self.prediction_horizon: float = kalman_config.get("prediction_horizon", 0.05)
-
-        # Kalman-only parameters
-        self.process_noise: float = kalman_config.get("process_noise", 0.01)
-        self.measurement_noise: float = kalman_config.get("measurement_noise", 0.1)
-        self.initial_covariance: float = kalman_config.get("initial_covariance", 1.0)
-        self.velocity_noise: float = kalman_config.get("velocity_noise", 1.0)
 
         # ZMQ configuration
         self.zmq = ZMQConfig(config_path)
