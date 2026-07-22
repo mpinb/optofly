@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 import src.processes.tracking as tracking_module
-from src.processes.tracking import TriggerHandler
+from src.processes.tracking import TrackedObject, TriggerHandler, _should_run_cleanup
 
 
 class FakePublisher:
@@ -293,3 +293,22 @@ def test_frustum_inside_box_but_outside_frustum_at_mid_z_rejected(frustum_handle
     # At z=0.20 the FOV is ±0.045; x=0.05 is inside the old flat box
     # (±0.05) but outside the frustum.
     assert not frustum_handler.is_in_trigger_zone(0.05, 0.0, 0.20)
+
+
+def test_should_run_cleanup_throttled_when_nothing_in_zone():
+    objects = {1: TrackedObject(obj_id=1, first_timestamp=0.0)}
+    assert _should_run_cleanup(objects, elapsed_since_last=1.0) is False
+    assert _should_run_cleanup(objects, elapsed_since_last=5.1) is True
+
+
+def test_should_run_cleanup_every_iteration_when_object_in_zone():
+    """A fly that vanishes mid-trial should trigger ZONE_EXIT close to
+    zone_timeout, not up to `interval` seconds later on top of it."""
+    obj = TrackedObject(obj_id=1, first_timestamp=0.0)
+    obj.in_zone = True
+    objects = {1: obj}
+    assert _should_run_cleanup(objects, elapsed_since_last=0.01) is True
+
+
+def test_should_run_cleanup_with_no_tracked_objects():
+    assert _should_run_cleanup({}, elapsed_since_last=1.0) is False

@@ -28,6 +28,22 @@ DEFAULT_HEADING_THRESHOLD = np.deg2rad(
 MAX_OBJECT_AGE = 10.0  # Maximum time in seconds to keep an object without updates
 
 
+def _should_run_cleanup(
+    tracked_objects: dict, elapsed_since_last: float, interval: float = 5.0
+) -> bool:
+    """Decide whether _cleanup_stale_objects() should run this iteration.
+
+    Runs every iteration while any object is in_zone (a timed-out in-zone
+    object should trigger ZONE_EXIT close to zone_timeout, not up to
+    `interval` seconds later on top of it); otherwise throttled to
+    `interval` seconds, matching the original cadence for the common
+    no-active-trial case.
+    """
+    if any(obj.in_zone for obj in tracked_objects.values()):
+        return True
+    return elapsed_since_last > interval
+
+
 @dataclass
 class TrackedObject:
     """Class to maintain tracking data for a single object."""
@@ -599,7 +615,7 @@ class TriggerHandler(WorkerProcess):
 
                 # Periodically clean up stale objects
                 current_time = time.time()
-                if current_time - cleanup_timer > 5.0:
+                if _should_run_cleanup(self.tracked_objects, current_time - cleanup_timer):
                     self._cleanup_stale_objects()
                     cleanup_timer = current_time
 
