@@ -359,13 +359,16 @@ def main():
             print("  ✓ Monitoring Server")
             monitoring_config = config.get("monitoring", {})
             zmq_trigger_port = config.get("zmq", {}).get("trigger_port", 5556)
+            zone_enter_topic = config.get("zmq", {}).get(
+                "zone_enter_topic", "ZONE_ENTER"
+            )
             monitoring_host = monitoring_config.get("host", "0.0.0.0")
             monitoring_port = monitoring_config.get("port", 5000)
             zmq_address = f"tcp://localhost:{zmq_trigger_port}"
 
             monitoring_process = mp.Process(
                 target=run_server,
-                args=(zmq_address, monitoring_host, monitoring_port),
+                args=(zmq_address, monitoring_host, monitoring_port, zone_enter_topic),
                 daemon=True,
             )
             monitoring_process.start()

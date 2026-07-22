@@ -23,19 +23,19 @@ trigger_lock = threading.Lock()
 trigger_queue = queue.Queue()
 
 
-def zmq_listener(zmq_address="tcp://localhost:23456"):
+def zmq_listener(zmq_address="tcp://localhost:23456", zone_enter_topic="ZONE_ENTER"):
     """Listen for ZONE_ENTER messages over ZMQ and update trigger_data."""
     context = zmq.Context()
     subscriber = context.socket(zmq.SUB)
     subscriber.connect(zmq_address)
-    subscriber.setsockopt_string(zmq.SUBSCRIBE, "ZONE_ENTER")
+    subscriber.setsockopt_string(zmq.SUBSCRIBE, zone_enter_topic)
 
     while True:
         topic, message = subscriber.recv_multipart()
         topic = topic.decode("utf-8")
         json_data = message.decode("utf-8")
 
-        if topic == "ZONE_ENTER":
+        if topic == zone_enter_topic:
             data = json.loads(json_data)
 
             with trigger_lock:
@@ -85,8 +85,15 @@ def stream():
     return Response(event_stream(), mimetype="text/event-stream")
 
 
-def run_server(zmq_address="tcp://localhost:23456", host="0.0.0.0", port=5000):
-    zmq_thread = threading.Thread(target=zmq_listener, args=(zmq_address,), daemon=True)
+def run_server(
+    zmq_address="tcp://localhost:23456",
+    host="0.0.0.0",
+    port=5000,
+    zone_enter_topic="ZONE_ENTER",
+):
+    zmq_thread = threading.Thread(
+        target=zmq_listener, args=(zmq_address, zone_enter_topic), daemon=True
+    )
     zmq_thread.start()
 
     app.run(host=host, port=port, debug=False, threaded=True)

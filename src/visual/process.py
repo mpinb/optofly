@@ -148,6 +148,7 @@ class VisualProcess(WorkerProcess):
     def _setup_zmq(self) -> None:
         self._zmq_context = None
         self._zmq_socket = None
+        self._zone_enter_topic = "ZONE_ENTER"
         if self.standalone:
             self.logger.info("Standalone mode — skipping ZMQ setup")
             return
@@ -155,6 +156,7 @@ class VisualProcess(WorkerProcess):
 
         zmq_cfg = ZMQConfig(self._config_path)
         address = zmq_cfg.get_subscriber_address(zmq_cfg.trigger_port)
+        self._zone_enter_topic = zmq_cfg.zone_enter_topic
         self.logger.info(
             "Connecting to %s messages at %s",
             zmq_cfg.zone_enter_topic,
@@ -215,7 +217,7 @@ class VisualProcess(WorkerProcess):
                     break
                 topic = parts[0].decode()
                 data = json.loads(parts[1])
-                if topic == "ZONE_ENTER":
+                if topic == self._zone_enter_topic:
                     self._handle_zone_enter(data)
         except Exception:
             self.logger.exception("Error in ZMQ poll task")
