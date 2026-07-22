@@ -1,4 +1,5 @@
 import json
+import multiprocessing as mp
 
 import zmq
 
@@ -141,3 +142,43 @@ def test_death_for_active_object_clears_active_state():
     pub._dispatch_event(json.dumps({"msg": {"Death": 7}}))
 
     assert pub._active_obj_id is None
+
+
+def make_uninitialized_publisher(event):
+    """A BraidPublisher that never got past __init__ / never connected —
+    matching the state close() must handle when called from initialize()'s
+    failure path, where nothing has been set up yet."""
+    pub = object.__new__(BraidPublisher)
+    pub.stop_event = event
+    pub.stream_thread = None
+    pub.zmq_socket = None
+    pub.active_braid_socket = None
+    pub.trigger_socket = None
+    pub.zmq_context = None
+    pub.session = None
+    pub.is_connected = False
+    pub.logger = type(
+        "Logger",
+        (),
+        {
+            "debug": lambda *a, **k: None,
+            "info": lambda *a, **k: None,
+            "error": lambda *a, **k: None,
+        },
+    )()
+    return pub
+
+
+def test_close_does_not_set_shared_stop_event():
+    """close() must not cascade a stop signal to sibling processes: it runs
+    both after a normal shutdown (the shared event is already set by
+    whoever requested the stop) and from initialize()'s failure path,
+    where forcing every other worker to shut down too would misattribute
+    a BraidPublisher-only failure to whichever critical process happens
+    to be checked first."""
+    event = mp.Event()
+    pub = make_uninitialized_publisher(event)
+
+    assert not event.is_set()
+    pub.close()
+    assert not event.is_set()

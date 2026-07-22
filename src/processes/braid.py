@@ -474,11 +474,18 @@ class BraidPublisher(WorkerProcess):
         self.close()
 
     def close(self) -> None:
-        """Clean up resources and connections."""
-        self.logger.debug("Closing BraidSubscriber...")
+        """Clean up resources and connections.
 
-        # Set stop event to signal threads to exit
-        self.stop_event.set()
+        Deliberately does not touch self.stop_event: it's the shared event
+        every sibling worker process also holds. When close() runs after a
+        normal shutdown (_run()'s stop loop already exited) the event is
+        already set by whoever requested the stop. When close() runs from
+        initialize()'s failure path, setting it here would force every
+        other process to shut down too — cascading a BraidPublisher-only
+        connectivity failure into a full experiment stop and misattributing
+        it to whichever critical process happens to be checked first.
+        """
+        self.logger.debug("Closing BraidSubscriber...")
 
         # Wait for stream thread to exit before closing sockets it uses.
         if self.stream_thread and self.stream_thread.is_alive():
