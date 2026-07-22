@@ -11,6 +11,7 @@ import json
 
 from src.utils.config import LiquidLensConfig, ZMQConfig, CameraConfig
 from src.utils.csv_writer import CSVWriter
+from src.utils.trigger_timing import extract_trigger_timing
 from src.utils.worker import WorkerProcess
 from optotune_lens import Lens as LensDriver
 
@@ -227,6 +228,12 @@ class LiquidLens(WorkerProcess):
             self.trigger_socket.setsockopt_string(zmq.SUBSCRIBE, topic)
         self.logger.debug("Connected to BraidPublisher active feed and TriggerHandler.")
 
+        # LATENCY reporting: PUSH connects to LatencyLogger's bound PULL socket.
+        self.latency_socket = self.context.socket(zmq.PUSH)
+        self.latency_socket.connect(
+            self.zmq_config.get_subscriber_address(self.zmq_config.latency_port)
+        )
+
         # Calibration
         self.lens_calibration = setup_lens_calibration(
             self.lens_config.calibration_file,
@@ -372,6 +379,8 @@ class LiquidLens(WorkerProcess):
                             "zvel",
                             "timestamp",
                             "t_relay",
+                            "braid_timestamp",
+                            "handler_timestamp",
                         )
                         if key in msg
                     }
@@ -388,6 +397,25 @@ class LiquidLens(WorkerProcess):
                         reason=reason,
                     )
                     self._stop_tracking()
+
+    def _publish_latency(self, update: dict, activation_timestamp: float) -> None:
+        """Publish one LATENCY message for the first post-ZONE_ENTER
+        command only -- lens is never sham (it always focuses while
+        tracking)."""
+        try:
+            timing = extract_trigger_timing(update)
+            message = {
+                "system": "lens",
+                "obj_id": update.get("obj_id"),
+                "frame": update.get("frame"),
+                "braid_timestamp": timing.braid_timestamp,
+                "trigger_timestamp": timing.handler_timestamp,
+                "activation_timestamp": activation_timestamp,
+                "sham": False,
+            }
+            self.latency_socket.send(json.dumps(message).encode("utf-8"))
+        except Exception as e:
+            self.logger.error(f"Error publishing LATENCY message: {e}")
 
     def _run(self):
         self.initialize()
@@ -425,9 +453,11 @@ class LiquidLens(WorkerProcess):
                     continue
 
                 if self._pending_first_update is not None:
+                    is_first_command = True
                     update = self._pending_first_update
                     self._pending_first_update = None
                 elif self.active_braid_socket in socks:
+                    is_first_command = False
                     update = self._get_latest_active_update()
                 else:
                     continue
@@ -501,6 +531,8 @@ class LiquidLens(WorkerProcess):
                             "predictor": self.lens_config.predictor,
                         }
                     )
+                    if is_first_command:
+                        self._publish_latency(update, t_diopter_sent)
                 except Exception as e:
                     self.logger.error(f"Error adjusting lens: {e}")
 
@@ -524,7 +556,7 @@ class LiquidLens(WorkerProcess):
                 self.lens_driver.close()
             except Exception:
                 pass
-        for sock_attr in ("active_braid_socket", "trigger_socket"):
+        for sock_attr in ("active_braid_socket", "trigger_socket", "latency_socket"):
             sock = getattr(self, sock_attr, None)
             if sock:
                 try:

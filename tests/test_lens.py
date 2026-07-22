@@ -184,3 +184,71 @@ def test_rate_limited_at_exact_25ms_boundary_is_not_rate_limited():
         )
         is False
     )
+
+
+def test_pending_first_update_carries_braid_and_handler_timestamp(lens):
+    lens.zmq_config = type("Config", (), {"zone_enter_topic": "ZONE_ENTER"})()
+    lens.is_tracking = False
+    lens.current_tracked_obj = None
+    lens._timing_rows = []
+    lens._recording_obj_id = None
+    lens._recording_frame = None
+    lens._log_csv = lambda *args, **kwargs: None
+    lens.logger = type("Logger", (), {"info": lambda *args, **kwargs: None})()
+    lens.trigger_socket = FakeSocket(
+        [
+            [
+                b"ZONE_ENTER",
+                json.dumps(
+                    {
+                        "obj_id": 7,
+                        "frame": 12,
+                        "x": 0.1,
+                        "y": 0.2,
+                        "z": 0.3,
+                        "braid_timestamp": 500.0,
+                        "handler_timestamp": 500.01,
+                    }
+                ).encode("utf-8"),
+            ]
+        ]
+    )
+
+    lens._drain_trigger_socket()
+
+    assert lens._pending_first_update["braid_timestamp"] == 500.0
+    assert lens._pending_first_update["handler_timestamp"] == 500.01
+
+
+class FakeLatencySocket:
+    def __init__(self):
+        self.sent = []
+
+    def send(self, raw):
+        self.sent.append(json.loads(raw))
+
+
+def test_publish_latency_sends_lens_system_message_never_sham(lens):
+    lens.latency_socket = FakeLatencySocket()
+    lens.logger = type("Logger", (), {"error": lambda *a, **k: None})()
+
+    lens._publish_latency(
+        {
+            "obj_id": 7,
+            "frame": 12,
+            "braid_timestamp": 500.0,
+            "handler_timestamp": 500.01,
+        },
+        activation_timestamp=500.02,
+    )
+
+    sent = lens.latency_socket.sent
+    assert sent[0] == {
+        "system": "lens",
+        "obj_id": 7,
+        "frame": 12,
+        "braid_timestamp": 500.0,
+        "trigger_timestamp": 500.01,
+        "activation_timestamp": 500.02,
+        "sham": False,
+    }
