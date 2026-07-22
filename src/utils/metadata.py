@@ -60,6 +60,28 @@ def extract_config_columns(config_path: str) -> dict[str, Any]:
     return columns
 
 
+def _coerce_int_field(raw: str) -> Any:
+    """Coerce a raw string to int, "N/A" on empty/invalid input (matches collect_metadata())."""
+    raw = raw.strip()
+    if not raw:
+        return "N/A"
+    try:
+        return int(raw)
+    except ValueError:
+        return "N/A"
+
+
+def _coerce_float_field(raw: str, default: float) -> float:
+    """Coerce a raw string to float, `default` on empty/invalid input (matches collect_metadata())."""
+    raw = raw.strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
 def collect_metadata() -> dict[str, Any]:
     """
     Interactively prompt the user for experiment metadata.
@@ -96,25 +118,15 @@ def collect_metadata() -> dict[str, Any]:
 
     # Numeric field: n_flies
     user_input = input("Number of flies:................................ ").strip()
-    if user_input:
-        try:
-            metadata["n_flies"] = int(user_input)
-        except ValueError:
-            print("  ⚠ Invalid integer, storing as N/A")
-            metadata["n_flies"] = "N/A"
-    else:
-        metadata["n_flies"] = "N/A"
+    metadata["n_flies"] = _coerce_int_field(user_input)
+    if metadata["n_flies"] == "N/A" and user_input:
+        print("  ⚠ Invalid integer, storing as N/A")
 
     # Numeric field: experiment_duration (default 24)
     user_input = input("Experiment duration (hours) [24]:............. ").strip()
-    if user_input:
-        try:
-            metadata["experiment_duration"] = float(user_input)
-        except ValueError:
-            print("  ⚠ Invalid number, using default 24")
-            metadata["experiment_duration"] = 24.0
-    else:
-        metadata["experiment_duration"] = 24.0
+    metadata["experiment_duration"] = _coerce_float_field(user_input, 24.0)
+    if metadata["experiment_duration"] == 24.0 and user_input:
+        print("  ⚠ Invalid number, using default 24")
 
     # Notes (can be multi-line, but for simplicity accept single line)
     user_input = input("Notes (brief notes about this experiment):.... ").strip()
@@ -134,6 +146,37 @@ def collect_metadata() -> dict[str, Any]:
         raise UserCancelledError("User cancelled metadata collection")
 
     print()
+    return metadata
+
+
+def metadata_from_form(form: dict[str, str]) -> dict[str, Any]:
+    """
+    Build the same metadata dict collect_metadata() produces, from a plain
+    dict of raw form strings (e.g. Flask's request.form) instead of
+    blocking terminal input().
+
+    Expected keys (all optional/blank-tolerant, same as collect_metadata()):
+    experimenter, cross, cross_date, f1_date, atr_date, experiment_date,
+    n_flies, experiment_duration, notes.
+    """
+    metadata: dict[str, Any] = {}
+
+    for key in ("experimenter", "cross", "cross_date", "f1_date", "atr_date"):
+        value = form.get(key, "").strip()
+        metadata[key] = value if value else "N/A"
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    experiment_date = form.get("experiment_date", "").strip()
+    metadata["experiment_date"] = experiment_date if experiment_date else today
+
+    metadata["n_flies"] = _coerce_int_field(form.get("n_flies", ""))
+    metadata["experiment_duration"] = _coerce_float_field(
+        form.get("experiment_duration", ""), 24.0
+    )
+
+    notes = form.get("notes", "").strip()
+    metadata["notes"] = notes if notes else "N/A"
+
     return metadata
 
 
