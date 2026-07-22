@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OptoFly</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 0;
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+        }
+        nav {
+            background-color: #252526;
+            padding: 12px 20px;
+            border-bottom: 1px solid #444;
+        }
+        nav a {
+            color: #d4d4d4;
+            text-decoration: none;
+            margin-right: 20px;
+            font-weight: bold;
+        }
+        nav a:hover {
+            color: #ffffff;
+        }
+        main {
+            padding: 20px;
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="/run">Run</a>
+        <a href="/config">Config</a>
+        <a href="/advanced">Advanced</a>
+        <a href="/monitor">Monitor</a>
+    </nav>
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>
