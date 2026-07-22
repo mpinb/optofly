@@ -1,3 +1,4 @@
+use std::io::Read;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
@@ -79,6 +80,22 @@ fn try_encode(job: &EncodeJob, video_path: &str, use_nvenc: bool) -> bool {
         }
     };
 
+    // Drain stderr on a separate thread while we write stdin below --
+    // ffmpeg's stderr pipe has a small OS buffer (~64KB on Linux); if it
+    // fills while we're still blocked writing multi-GB of frame data to
+    // stdin, ffmpeg blocks writing stderr and we block writing stdin,
+    // deadlocking both processes. Mirrors what Command::wait_with_output
+    // does internally, but we can't use that here since we also need to
+    // write to stdin ourselves.
+    let mut stderr_pipe = proc.stderr.take();
+    let stderr_thread = thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(ref mut stderr) = stderr_pipe {
+            let _ = stderr.read_to_end(&mut buf);
+        }
+        buf
+    });
+
     if let Some(ref mut stdin) = proc.stdin {
         if let Err(e) = job.buffer.write_to(stdin) {
             log::error!("Pipe write error: {}", e);
@@ -86,11 +103,13 @@ fn try_encode(job: &EncodeJob, video_path: &str, use_nvenc: bool) -> bool {
     }
     drop(proc.stdin.take());
 
-    match proc.wait_with_output() {
-        Ok(output) => {
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                log::error!("ffmpeg exited {}: {}", output.status, stderr.trim());
+    let stderr_bytes = stderr_thread.join().unwrap_or_default();
+
+    match proc.wait() {
+        Ok(status) => {
+            if !status.success() {
+                let stderr = String::from_utf8_lossy(&stderr_bytes);
+                log::error!("ffmpeg exited {}: {}", status, stderr.trim());
                 false
             } else {
                 true
@@ -165,4 +184,61 @@ pub fn spawn() -> (mpsc::SyncSender<EncodeJob>, mpsc::Receiver<FrameBuffer>) {
         .expect("Failed to spawn encoder thread");
 
     (tx, buf_return_rx)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Read, Write};
+    use std::process::{Command, Stdio};
+    use std::thread;
+
+    /// Demonstrates the deadlock class fixed in try_encode: writing a large
+    /// stdin payload to a child process before draining its stderr hangs
+    /// once the child's stderr pipe buffer fills (~64KB on Linux) and the
+    /// child blocks writing more stderr, no longer reading stdin. Uses a
+    /// shell one-liner as a stand-in for ffmpeg so this test needs no
+    /// hardware or real ffmpeg binary. If this test hangs (no output after
+    /// ~10s), the concurrent-drain pattern below is broken -- Ctrl-C and
+    /// investigate; do not add a timeout wrapper, external crates are out
+    /// of scope for this fix.
+    #[test]
+    fn concurrent_stderr_drain_avoids_deadlock_on_large_stdin_and_stderr() {
+        // Child: dump >64KB to stderr via the pipeline, then read+count stdin.
+        let script = "yes X | head -c 200000 1>&2; wc -c";
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg(script)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("failed to spawn sh");
+
+        // Drain stderr concurrently, same pattern as the try_encode fix.
+        let mut stderr_pipe = child.stderr.take();
+        let stderr_thread = thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(ref mut stderr) = stderr_pipe {
+                let _ = stderr.read_to_end(&mut buf);
+            }
+            buf
+        });
+
+        // Write a payload past the pipe-buffer threshold to stdin.
+        let payload = vec![b'a'; 200_000];
+        if let Some(ref mut stdin) = child.stdin {
+            stdin
+                .write_all(&payload)
+                .expect("stdin write must not block forever");
+        }
+        drop(child.stdin.take());
+
+        let stderr_bytes = stderr_thread
+            .join()
+            .expect("stderr-draining thread must not panic");
+        assert!(stderr_bytes.len() >= 200_000);
+
+        let status = child.wait().expect("child must exit, not hang");
+        assert!(status.success());
+    }
 }
