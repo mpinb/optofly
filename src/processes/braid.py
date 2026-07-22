@@ -4,6 +4,7 @@ Braid Server subscriber that connects to a Braid server and publishes events to 
 
 import json
 import logging
+import math
 import multiprocessing as mp
 import signal
 import socket as _socket
@@ -329,14 +330,30 @@ class BraidPublisher(WorkerProcess):
             return
 
         # Inject relay wall-clock into the inner payload (Update/Birth) so
-        # consumers can read t_relay alongside the other fields. Death is a
+        # consumers can read t_relay alongside the other fields. Also
+        # forward Braid's own detection timestamp -- the SSE envelope's
+        # trigger_timestamp, a triggerbox-clock-model value computed by
+        # Braid itself, NOT the same thing as TriggerHandler's own
+        # decision-time field (which is called handler_timestamp downstream
+        # specifically to avoid colliding with this name) -- as
+        # braid_timestamp, so TriggerHandler can preserve it into
+        # ZONE_ENTER. Braid serializes an unset/uncalibrated envelope value
+        # as the JSON token NaN, not null; json.loads parses that to
+        # float('nan'), not None, so it must be checked explicitly rather
+        # than relying on an `is not None` check downstream. Death is a
         # scalar obj_id, skip it.
         msg = data["msg"]
         t_relay = time.time()
+        braid_trigger_timestamp = data.get("trigger_timestamp")
+        if isinstance(braid_trigger_timestamp, float) and math.isnan(
+            braid_trigger_timestamp
+        ):
+            braid_trigger_timestamp = None
         for key in ("Update", "Birth"):
             inner = msg.get(key)
             if isinstance(inner, dict):
                 inner["t_relay"] = t_relay
+                inner["braid_timestamp"] = braid_trigger_timestamp
                 break
 
         message = json.dumps(msg)

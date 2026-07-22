@@ -112,6 +112,7 @@ def test_matching_update_is_published_to_full_and_active_feeds(monkeypatch):
                     "y": 0.2,
                     "z": 0.3,
                     "t_relay": 123.0,
+                    "braid_timestamp": None,
                 }
             },
         )
@@ -126,6 +127,7 @@ def test_matching_update_is_published_to_full_and_active_feeds(monkeypatch):
                 "y": 0.2,
                 "z": 0.3,
                 "t_relay": 123.0,
+                "braid_timestamp": None,
             },
         )
     ]
@@ -270,3 +272,54 @@ def test_close_does_not_set_shared_stop_event():
     assert not event.is_set()
     pub.close()
     assert not event.is_set()
+
+
+def test_dispatch_event_injects_braid_timestamp_from_envelope(monkeypatch):
+    pub = make_publisher()
+    monkeypatch.setattr("src.processes.braid.time.time", lambda: 123.0)
+
+    pub._dispatch_event(
+        json.dumps(
+            {
+                "trigger_timestamp": 999.5,
+                "msg": {
+                    "Update": {"obj_id": 7, "frame": 12, "x": 0.1, "y": 0.2, "z": 0.3}
+                },
+            }
+        )
+    )
+
+    sent = sent_payloads(pub.zmq_socket)
+    assert sent[0][1]["Update"]["braid_timestamp"] == 999.5
+    assert sent[0][1]["Update"]["t_relay"] == 123.0
+
+
+def test_dispatch_event_treats_nan_trigger_timestamp_as_none():
+    pub = make_publisher()
+
+    pub._dispatch_event(
+        json.dumps(
+            {
+                "trigger_timestamp": float("nan"),
+                "msg": {
+                    "Update": {"obj_id": 7, "frame": 12, "x": 0.1, "y": 0.2, "z": 0.3}
+                },
+            }
+        )
+    )
+
+    sent = sent_payloads(pub.zmq_socket)
+    assert sent[0][1]["Update"]["braid_timestamp"] is None
+
+
+def test_dispatch_event_missing_trigger_timestamp_injects_none():
+    pub = make_publisher()
+
+    pub._dispatch_event(
+        json.dumps(
+            {"msg": {"Update": {"obj_id": 7, "frame": 12, "x": 0.1, "y": 0.2, "z": 0.3}}}
+        )
+    )
+
+    sent = sent_payloads(pub.zmq_socket)
+    assert sent[0][1]["Update"]["braid_timestamp"] is None
