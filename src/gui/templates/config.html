@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Config</h1>
+
+<form method="POST" action="/config/save">
+    <input type="hidden" name="path" value="{{ path }}">
+    <input type="hidden" name="kind" value="{{ kind }}">
+
+    {% for dotted_path, value, field_type in fields %}
+        <label>
+            {{ dotted_path }}
+            {% if field_type == "bool" %}
+                <input type="checkbox" name="{{ dotted_path }}" {% if value %}checked{% endif %}>
+            {% elif field_type == "list" %}
+                <input type="text" name="{{ dotted_path }}" value="{{ value|join(',') if value else '' }}">
+            {% else %}
+                <input type="text" name="{{ dotted_path }}" value="{{ value if value is not none else '' }}">
+            {% endif %}
+        </label><br>
+    {% endfor %}
+
+    <button type="submit">Save</button>
+</form>
+{% endblock %}
