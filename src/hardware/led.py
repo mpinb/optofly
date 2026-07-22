@@ -359,9 +359,13 @@ class OptoTrigger:
     ) -> list[str]:
         """Return non-empty lines read from the serial buffer.
 
-        This drains available bytes without blocking on serial timeouts and
-        stops once no new data arrives within the poll interval or the timeout
-        is exceeded.
+        Drains available bytes without blocking on serial timeouts and
+        exits once a complete line has arrived and the buffer has gone
+        quiet for one poll interval -- previously this always blocked the
+        full `timeout` even when the Arduino (which typically responds
+        within a few ms) had already finished, adding needless per-trigger
+        latency. Still falls back to `timeout` if the Arduino never
+        responds at all.
         """
 
         if not self.serial_conn:
@@ -369,6 +373,7 @@ class OptoTrigger:
 
         buffer = bytearray()
         start = time.time()
+        quiet_since: Optional[float] = None
 
         while time.time() - start < timeout:
             waiting = getattr(self.serial_conn, "in_waiting", 0)
@@ -377,7 +382,14 @@ class OptoTrigger:
                 if chunk:
                     buffer.extend(chunk)
                     start = time.time()
+                    quiet_since = None
                     continue
+
+            if quiet_since is None:
+                quiet_since = time.time()
+            elif b"\n" in buffer and time.time() - quiet_since >= poll_interval:
+                break
+
             time.sleep(poll_interval)
 
         if not buffer:
