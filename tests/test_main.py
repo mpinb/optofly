@@ -62,17 +62,30 @@ def test_all_alive_produces_no_messages():
 
 
 def test_non_critical_process_death_is_ignored():
-    """A dead Monitoring Server/VisualProcess/CameraProcess/TriggerHandler
-    must not abort the whole experiment — only the three processes known
-    to fail fast and unrecoverably during their own init are critical."""
+    """A dead Monitoring Server/VisualProcess/CameraProcess must not abort
+    the whole experiment — only processes known to fail fast and
+    unrecoverably during their own init are critical."""
     processes = [
         ("Monitoring Server", _FakeDeadProcess()),
         ("VisualProcess", _FakeDeadProcess()),
         ("CameraProcess", _FakeDeadProcess()),
-        ("TriggerHandler", _FakeDeadProcess()),
     ]
 
     assert check_critical_processes_alive(processes) == []
+
+
+def test_dead_trigger_handler_produces_its_own_message():
+    """TriggerHandler binds its own ZMQ publisher socket during init and
+    exits unrecoverably if the port is already taken -- the same fail-fast
+    profile as the other critical processes, so its death during init must
+    also be treated as fatal rather than silently running a 24-hour
+    experiment with no tracking, no triggers, no recordings."""
+    processes = [("TriggerHandler", _FakeDeadProcess())]
+
+    messages = check_critical_processes_alive(processes)
+
+    assert len(messages) == 1
+    assert "TriggerHandler" in messages[0]
 
 
 def test_multiple_dead_critical_processes_each_produce_a_message():

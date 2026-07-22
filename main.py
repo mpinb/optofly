@@ -169,6 +169,7 @@ _CRITICAL_INIT_HINTS = {
     "LiquidLens": "Check hardware connection and the relevant port in config.toml.",
     "OptoTriggerWorker": "Check hardware connection and the relevant port in config.toml.",
     "BraidPublisher": "Check that Braid is running and reachable at the configured host/port in config.toml.",
+    "TriggerHandler": "Check that the ZMQ trigger_port in config.toml is not already in use by another process.",
 }
 
 
@@ -177,8 +178,8 @@ def check_critical_processes_alive(processes: list) -> list[str]:
 
     `processes` is a list of (name, process) tuples, matching main()'s own
     `processes` list. Only names in _CRITICAL_INIT_HINTS are checked —
-    everything else (Monitoring Server, VisualProcess, CameraProcess,
-    TriggerHandler) dying during init is not treated as fatal here.
+    everything else (Monitoring Server, VisualProcess, CameraProcess) dying
+    during init is not treated as fatal here.
     """
     messages = []
     for name, proc in processes:
@@ -453,10 +454,23 @@ def main():
         print_experiment_config(config, active_process_names)
 
         # Wait for keyboard interrupt or experiment end time
+        last_health_check = time.time()
         while not stop_event.is_set():
             if datetime.now().timestamp() >= experiment_end_time:
                 print("\n\nExperiment duration reached, shutting down...")
                 stop_event.set()
+                break
+
+            now = time.time()
+            if now - last_health_check >= 5.0:
+                fatal_messages = check_critical_processes_alive(processes)
+                if fatal_messages:
+                    for message in fatal_messages:
+                        print(f"\nFATAL: {message} (died during the run)")
+                    stop_event.set()
+                    break
+                last_health_check = now
+
             time.sleep(0.1)
 
     except KeyboardInterrupt:
