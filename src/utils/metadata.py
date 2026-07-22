@@ -125,8 +125,12 @@ def collect_metadata() -> dict[str, Any]:
     # Numeric field: experiment_duration (default 24)
     user_input = input("Experiment duration (hours) [24]:............. ").strip()
     metadata["experiment_duration"] = _coerce_float_field(user_input, 24.0)
-    if metadata["experiment_duration"] == 24.0 and user_input:
-        print("  ⚠ Invalid number, using default 24")
+    if user_input:
+        # Check if the parse actually failed (not just whether result equals default)
+        try:
+            float(user_input)
+        except ValueError:
+            print("  ⚠ Invalid number, using default 24")
 
     # Notes (can be multi-line, but for simplicity accept single line)
     user_input = input("Notes (brief notes about this experiment):.... ").strip()
