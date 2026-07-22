@@ -82,32 +82,33 @@ def check_braid_folder_exists(
     auto_start_recording: bool = True,
 ) -> tuple[str, Optional[BraidProxy]]:
     """
-    Check if a braid folder with today's date exists, or start recording if not.
+    Start a fresh Braid CSV recording and return its folder.
 
-    The function looks for a folder with the structure: YYYYMMDD_HHMMSS.braid
-    where YYYYMMDD matches today's date.
+    When auto_start_recording is True (the only mode main.py uses), this
+    always starts a new recording via the Braid callback API and waits for
+    a genuinely new folder to appear -- it does not reuse any existing
+    same-day folder. A folder existing does not mean Braid is currently
+    recording into it: the process that created it may have already
+    stopped recording on exit, so trusting folder presence alone silently
+    dropped all Braid tracking data on a second run of the same day.
 
-    If no matching folder is found and auto_start_recording is True:
-      1. Connects to Braid UI via HTTP API
-      2. Starts CSV recording
-      3. Waits for .braid folder to be created
-      4. Returns folder path and BraidProxy instance
-
-    If no folder exists and auto_start_recording is False, exits with error.
+    When auto_start_recording is False, this only checks for an existing
+    same-day folder and returns it with no proxy -- unchanged from before.
 
     Parameters:
         root_path: Root path to check for braid folders
         callback_url: URL of Braid UI server (e.g., http://127.0.0.1:12345/)
-        auto_start_recording: If True, automatically start recording if no folder exists
+        auto_start_recording: If True, always start a fresh recording. If
+            False, only look for an existing same-day folder.
 
     Returns:
-        Tuple of (braid_folder_path, braid_proxy_instance)
-        braid_proxy is None if folder already existed
+        Tuple of (braid_folder_path, braid_proxy_instance).
+        braid_proxy is None only when auto_start_recording is False.
 
     Raises:
-        SystemExit: If root_path doesn't exist, connection fails, or recording start fails
+        SystemExit: If root_path doesn't exist, connection fails, or
+            recording start fails.
     """
-    # Check if root path exists
     if not os.path.exists(root_path):
         print(f"\n{'=' * 70}")
         print("ERROR: Braid experiments root path does not exist")
@@ -117,10 +118,7 @@ def check_braid_folder_exists(
         print(f"{'=' * 70}\n")
         sys.exit(1)
 
-    # Get current date in YYYYMMDD format
     today = datetime.now().strftime("%Y%m%d")
-
-    # Create regex pattern to match braid folders with today's date
     pattern = re.compile(f"^{today}_\\d{{6}}\\.braid$")
 
     def find_matching_folders():
@@ -141,25 +139,19 @@ def check_braid_folder_exists(
             sys.exit(1)
         return matching
 
-    # Check if any folder in root_path matches the pattern
-    print(f"Checking for braid folder with date {today} in {root_path}...")
-    matching_folders = find_matching_folders()
-
-    if matching_folders:
-        # Folder already exists - use it
-        if len(matching_folders) > 1:
-            matching_folders.sort(reverse=True)  # Sort by folder name (timestamp)
-            print(
-                f"Multiple braid folders found. Using most recent: {matching_folders[0][0]}"
-            )
-
-        braid_folder = matching_folders[0][1]
-        print(f"✓ Found existing braid folder: {braid_folder}")
-        return braid_folder, None
-
-    # No folder found - try to start recording
     if not auto_start_recording:
-        # Old behavior - exit with error
+        print(f"Checking for braid folder with date {today} in {root_path}...")
+        matching_folders = find_matching_folders()
+        if matching_folders:
+            matching_folders.sort(reverse=True)
+            if len(matching_folders) > 1:
+                print(
+                    f"Multiple braid folders found. Using most recent: {matching_folders[0][0]}"
+                )
+            braid_folder = matching_folders[0][1]
+            print(f"✓ Found existing braid folder: {braid_folder}")
+            return braid_folder, None
+
         print(f"\n{'=' * 70}")
         print("ERROR: No Braid recording folder found for today")
         print(f"{'=' * 70}")
@@ -171,15 +163,16 @@ def check_braid_folder_exists(
 
     if not callback_url:
         print(f"\n{'=' * 70}")
-        print("ERROR: No Braid folder found and no Braid callback URL provided")
+        print("ERROR: No Braid callback URL provided")
         print(f"{'=' * 70}")
         print("Cannot start recording without Braid callback URL.")
         print(f"{'=' * 70}\n")
         sys.exit(1)
 
-    # Attempt to start recording
-    print("\nNo existing recording found. Starting Braid recording...")
+    print("\nStarting Braid recording...")
     print(f"Connecting to Braid at {callback_url}...")
+
+    existing_folders = {full_path for _, full_path in find_matching_folders()}
 
     try:
         braid = BraidProxy(callback_url)
@@ -189,25 +182,29 @@ def check_braid_folder_exists(
         braid.start_csv_recording()
         print("✓ Recording started")
 
-        # Wait for .braid folder to be created
-        print(f"Waiting for .braid folder to appear in {root_path}...")
-        max_wait = 10  # seconds
+        print(f"Waiting for a new .braid folder to appear in {root_path}...")
+        max_wait = 10
         start_time = time.time()
 
         while time.time() - start_time < max_wait:
-            matching_folders = find_matching_folders()
-            if matching_folders:
-                braid_folder = matching_folders[0][1]
+            current_folders = find_matching_folders()
+            new_folders = [
+                (name, path)
+                for name, path in current_folders
+                if path not in existing_folders
+            ]
+            if new_folders:
+                new_folders.sort(reverse=True)
+                braid_folder = new_folders[0][1]
                 print(f"✓ Recording folder created: {braid_folder}")
                 return braid_folder, braid
 
             time.sleep(0.5)
 
-        # Timeout - folder not created
         print(f"\n{'=' * 70}")
-        print("ERROR: Recording started but .braid folder not created")
+        print("ERROR: Recording started but no new .braid folder was created")
         print(f"{'=' * 70}")
-        print(f"Waited {max_wait} seconds for folder to appear in {root_path}")
+        print(f"Waited {max_wait} seconds for a new folder to appear in {root_path}")
         print("The recording may not be working correctly.")
         print(f"{'=' * 70}\n")
         sys.exit(1)
