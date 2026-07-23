@@ -91,8 +91,9 @@ All processes inherit `WorkerProcess` (`src/utils/worker.py`) and run as `multip
 ```json
 {"Birth": {"obj_id": 1, "x": 0.0, "y": 0.0, "z": 0.0, ...}}
 {"Update": {"obj_id": 1, "x": 0.01, "y": -0.02, "z": 0.18, "xvel": ..., ...}}
-{"Death": {"obj_id": 1}}
+{"Death": 1}
 ```
+Death carries the bare obj_id as an integer, not an object.
 
 **ZONE_ENTER** (from TriggerHandler):
 ```json
