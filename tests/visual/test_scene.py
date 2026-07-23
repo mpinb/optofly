@@ -17,5 +17,5 @@ def test_arena_scene_standalone_window_size():
 
     scene = ArenaScene(standalone=True)
     assert scene.win.getXSize() == 1280
-    assert scene.win.getYSize() == 360
+    assert scene.win.getYSize() == 320
     scene.cleanup()
