@@ -91,9 +91,9 @@ Use `stash()`/`unstash()` for repeated show/hide — `removeNode` + `attachNewNo
 - Verify `window_x_offset` in config matches your display setup
 
 **Stimuli appear at wrong positions after calibration:**
-- Re-run `--calibrate-mapping` with the tracked object more carefully positioned
-- Ensure `use_empirical_calibration = true` in config
-- Verify the object was pointing directly at each calibration circle (not just near it)
+- Re-run `uv run python -m src.tools.calibrate_heading` with the tracked object more carefully positioned
+- Verify the object was pointing directly at each calibration screen (not just near it)
+- Check `braid_heading_offset_rad` and `braid_heading_flip` in `[visual_stimuli.arena]`
 
 **Can't see tracking data in Braid:**
 - Confirm cameras are running and calibrated in Braid
