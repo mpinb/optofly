@@ -173,3 +173,15 @@ def test_check_latency_logger_alive_returns_warning_when_dead():
     warning = check_latency_logger_alive(_FakeDeadProcess())
     assert warning is not None
     assert "LatencyLogger" in warning
+
+
+def test_summary_prints_lens_predictor(capsys):
+    from main import print_experiment_config
+
+    config = {"liquid_lens": {"mode": "diopter", "predictor": "linear"}}
+    print_experiment_config(config, ["LiquidLens"])
+    out = capsys.readouterr().out
+    assert "Predictor: linear" in out
+    # The old code printed nothing about the predictor unless the
+    # nonexistent kalman.enabled/prediction.enabled keys were set.
+    assert "Kalman filter (predictive focus)" not in out

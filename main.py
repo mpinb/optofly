@@ -147,14 +147,10 @@ def print_experiment_config(config: dict, active_processes: list):
     if "LiquidLens" in active_processes:
         lens_config = config.get("liquid_lens", {})
         mode = lens_config.get("mode", "diopter")
-        kalman_enabled = lens_config.get("kalman", {}).get("enabled", False)
-        predictive_enabled = lens_config.get("prediction", {}).get("enabled", False)
+        predictor = lens_config.get("predictor", "none")
         print("\nLiquid Lens:")
         print(f"  Mode: {mode}")
-        if kalman_enabled:
-            print("  ✓ Kalman filter (predictive focus)")
-        if predictive_enabled:
-            print("  ✓ Trajectory prediction")
+        print(f"  Predictor: {predictor}")
 
     print("\nPress Ctrl+C to stop the experiment")
     print("=" * 70 + "\n")
