@@ -7,7 +7,6 @@ controls the OptoTrigger hardware, and logs all trigger events to CSV.
 
 import multiprocessing as mp
 import os
-import time
 import json
 from typing import Dict, Optional
 
@@ -291,15 +290,24 @@ class OptoTriggerWorker(WorkerProcess):
                 "OptoTriggerWorker process started (backlight only, stimulation disabled)."
             )
 
+        poller = None
+        if self.is_enabled:
+            poller = zmq.Poller()
+            poller.register(self.trigger_socket, zmq.POLLIN)
+
         try:
             while self.is_running and not self.stop_event.is_set():
                 try:
-                    if self.is_enabled:
-                        trigger_data = self._receive_message()
-                        if trigger_data is not None:
-                            self._handle_trigger(trigger_data)
-
-                    time.sleep(0.001)
+                    if poller is not None:
+                        socks = dict(poller.poll(timeout=100))
+                        if self.trigger_socket in socks:
+                            trigger_data = self._receive_message()
+                            if trigger_data is not None:
+                                self._handle_trigger(trigger_data)
+                    else:
+                        # Backlight-only mode: nothing to receive, just idle
+                        # until shutdown.
+                        self.stop_event.wait(0.1)
 
                 except Exception as e:
                     self.logger.error(f"Error in OptoTriggerWorker main loop: {e}")
