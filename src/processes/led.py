@@ -164,7 +164,7 @@ class OptoTriggerWorker(WorkerProcess):
             if not success:
                 self.logger.error(
                     "OptoTrigger hardware initialization FAILED. "
-                    f"Cannot open serial port — check opto_trigger.port in config. "
+                    "Cannot open serial port — check opto_trigger.port in config. "
                     "Backlight will not turn on. Aborting."
                 )
                 raise RuntimeError("OptoTrigger hardware initialization failed")

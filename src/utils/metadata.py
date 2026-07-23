@@ -7,7 +7,6 @@ and writes them to experiment_data.toml in the braid recording folder.
 
 import csv
 import tomllib
-import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Any
