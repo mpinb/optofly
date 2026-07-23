@@ -21,12 +21,7 @@ uv run ruff check .
 uv run ruff format .
 
 # Visual stimuli (Panda3D) standalone test
-python -m src.processes.visual --standalone          # small 1280×320 window, no hardware/ZMQ
-
-# Legacy pyglet calibration tools (heading → pixel mapping)
-python -m src.processes.visual --calibrate           # identify screens
-python -m src.processes.visual --calibrate-mapping   # heading → pixel mapping (manual x,y input)
-python -m src.processes.visual --test-calibration    # verify with sweeping circle
+uv run python -m src.visual --standalone             # small 1280×320 window, no hardware/ZMQ
 
 # Panda3D heading calibration (fits braid_heading_offset_rad / braid_heading_flip)
 uv run python -m src.tools.calibrate_heading
@@ -128,8 +123,6 @@ Plugin-based pattern in `src/visual/stimuli/`. Included stimuli: `BackgroundStim
 3. Add `[visual_stimuli.my_stimulus]` section to `configs/visual_stimuli.toml`
 
 Coordinate system: fly at origin, North=+Y, East=+X, Z=up, units in cm. Use `angular_to_world_pos` and `angular_size_to_radius` from `src/visual/base.py` for all position/size math. Arena heading alignment is set via `braid_heading_offset_rad` and `braid_heading_flip` in `[visual_stimuli.arena]`.
-
-The legacy pyglet pipeline (`src/stimuli/`) is still present for the `--calibrate*` CLI tools but is not used by `main.py`.
 
 ### Liquid Lens Calibration
 

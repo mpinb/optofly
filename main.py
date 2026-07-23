@@ -563,6 +563,6 @@ def main():
 if __name__ == "__main__":
     # Enable multiprocessing support for OpenGL/GUI processes
     # 'spawn' creates fresh Python interpreter instead of fork()
-    # Required for pyglet/OpenGL contexts to work in child processes
+    # Required for OpenGL contexts to work in child processes
     mp.set_start_method("spawn", force=True)
     main()

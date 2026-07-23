@@ -2,22 +2,9 @@
 
 Developer guide for the Panda3D visual stimulus rendering system (`src/visual/`).
 
-This documents the **Panda3D** pipeline. For the legacy pyglet pipeline, see [visual-stimuli.md](visual-stimuli.md).
-
 ## Overview
 
 The Panda3D pipeline renders visual stimuli in a true 3D panoramic arena. Four perspective cameras split a 7680×1080 window into four 1920×1080 display regions, each covering a 90° quadrant around the fly. The fly is at origin; stimuli are placed on a virtual cylinder wall surrounding it.
-
-**Key differences from the pyglet pipeline:**
-
-| | pyglet (`src/stimuli/`) | Panda3D (`src/visual/`) |
-|---|---|---|
-| Rendering | 2D flat window | 3D scene graph with 4 cameras |
-| Coordinates | Pixels via `GeometryUtils` | Angular degrees (heading, elevation, size) |
-| Per-frame draw | `render(batch)` — shapes added to batch | Scene graph updates — Panda3D handles rendering |
-| Visibility | `is_active()` returns bool | `stash()`/`unstash()` on scene-graph nodes |
-| Setup | `initialize_rendering(batch)` | `setup()` — create geometry once |
-| Timing | pyglet clock | Panda3D `ClockObject.getGlobalClock().getDt()` |
 
 ## Architecture
 

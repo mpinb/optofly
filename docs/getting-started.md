@@ -267,7 +267,7 @@ uv run pytest
 python tests/test_camera_integration.py
 
 # Visual stimuli standalone (no hardware)
-python -m src.processes.visual --standalone
+uv run python -m src.visual --standalone
 
 # Simulate Braid tracking data (development)
 python -m src.tools.braid_simulator
@@ -282,5 +282,4 @@ python -m src.tools.braid_simulator
 | Ximea high-speed camera system | [camera.md](camera.md) |
 | Arduino LED firmware and serial protocol | [opto-trigger.md](opto-trigger.md) |
 | Panda3D visual stimuli, writing new stimuli | [visual-stimuli-panda3d.md](visual-stimuli-panda3d.md) |
-| Legacy pyglet visual stimuli pipeline | [visual-stimuli.md](visual-stimuli.md) |
 | Common issues and fixes | [troubleshooting.md](troubleshooting.md) |

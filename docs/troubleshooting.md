@@ -39,7 +39,7 @@ level = "DEBUG"
 
 **Visual stimuli not appearing:**
 - Verify `enabled = true` in the relevant subsection of `configs/visual_stimuli.toml`
-- Test standalone: `python -m src.processes.visual --standalone` (opens small 1280×320 window)
+- Test standalone: `uv run python -m src.visual --standalone` (opens small 1280×320 window)
 - Check window appears at `window_x_offset` on the correct monitor
 - Verify `"Registered: <StimulusName>"` appears in startup logs
 - For Panda3D: ensure `unstash()` is called in `on_trigger()` — stashed nodes are invisible

@@ -551,7 +551,6 @@ dependencies = [
     { name = "opencv-python" },
     { name = "optotune-lens" },
     { name = "panda3d" },
-    { name = "pyglet" },
     { name = "pyserial" },
     { name = "pyzmq" },
     { name = "requests" },
@@ -577,7 +576,6 @@ requires-dist = [
     { name = "opencv-python", specifier = ">=4.13.0.92" },
     { name = "optotune-lens", git = "ssh://git@github.com/elhananby/optotune-lens.git" },
     { name = "panda3d", specifier = ">=1.10.0" },
-    { name = "pyglet", specifier = ">=2.1.9" },
     { name = "pyserial", specifier = ">=3.5" },
     { name = "pyzmq", specifier = ">=26.4.0" },
     { name = "requests", specifier = ">=2.32.3" },
@@ -790,15 +788,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/1d/b2/31537cf4b1ca988837256c910a668b553fceb8f069bedc4b1c826024b52c/pycparser-2.22.tar.gz", hash = "sha256:491c8be9c040f5390f5bf44a5b07752bd07f56edf992381b05c701439eec10f6", size = 172736, upload-time = "2024-03-30T13:22:22.564Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/13/a3/a812df4e2dd5696d1f351d58b8fe16a405b234ad2886a0dab9183fb78109/pycparser-2.22-py3-none-any.whl", hash = "sha256:c3702b6d3dd8c7abc1afa565d7e63d53a1d0bd86cdc24edd75470f4de499cfcc", size = 117552, upload-time = "2024-03-30T13:22:20.476Z" },
-]
-
-[[package]]
-name = "pyglet"
-version = "2.1.9"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/1a/98/c8c7c8ac2911ba7c547dfb2be3d9ce69ed0fa98b166d0c8a6cf7c01f44cd/pyglet-2.1.9.tar.gz", hash = "sha256:855bb55ffe05d98e95a7e4ad72969cb2ba8d57edbd6a7515db51a0479287f014", size = 6593094, upload-time = "2025-09-21T09:27:05.403Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b8/bf/68770984180ce5974e9f89a266db6a5678ff9c8b31c1116352d04be00b54/pyglet-2.1.9-py3-none-any.whl", hash = "sha256:ddd621c97729f8a344822792b4d51a600a8dd2113cde196d46376bdbcb6f1567", size = 1031866, upload-time = "2025-09-21T09:27:01.026Z" },
 ]
 
 [[package]]

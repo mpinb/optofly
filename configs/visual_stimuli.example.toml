@@ -2,9 +2,6 @@
 # VISUAL STIMULI CONFIGURATION — Panda3D Pipeline
 # ==============================================================================
 # Copy to visual_stimuli.toml and customize for your rig.
-#
-# For the legacy pyglet pipeline, copy from visual_stimuli.pyglet.example.toml
-# and set config_file = "configs/visual_stimuli.pyglet.toml" below.
 
 [visual_stimuli]
 active = true

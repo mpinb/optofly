@@ -14,7 +14,6 @@ Full documentation is in the [`docs/`](docs/) folder:
 - [Calibration](docs/calibration.md) — camera intrinsics, Braid, liquid lens, camera FOV, and arena heading calibration, in depth
 - [Architecture](docs/architecture.md) — system overview, data flow, ZMQ topology
 - [Visual Stimuli — Panda3D](docs/visual-stimuli-panda3d.md) — developer guide for the Panda3D stimulus pipeline
-- [Visual Stimuli — Legacy](docs/visual-stimuli.md) — pyglet pipeline (calibration tools only)
 - [Camera](docs/camera.md) — Ximea high-speed camera system
 - [Opto Trigger](docs/opto-trigger.md) — Arduino LED firmware and protocol
 - [Troubleshooting](docs/troubleshooting.md) — common issues and fixes
