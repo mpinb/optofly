@@ -160,10 +160,8 @@ def read_current_system_latency(config_path: str) -> Optional[float]:
     if not config_path or not os.path.isfile(config_path):
         return None
     try:
-        try:
-            import tomllib  # Python 3.11+
-        except ImportError:  # pragma: no cover
-            import tomli as tomllib  # type: ignore
+        import tomllib
+
         with open(config_path, "rb") as f:
             data = tomllib.load(f)
     except Exception:

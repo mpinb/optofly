@@ -3,26 +3,20 @@ name = "optofly"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "flask>=3.1.2",
-    "loguru>=0.7.3",
     "matplotlib>=3.10.3",
-    "numba>=0.61.2",
     "numpy>=2.2.5",
     "opencv-python>=4.13.0.92",
     "optotune-lens",
     "panda3d>=1.10.0",
-    "pandas>=2.2.3",
     "pyglet>=2.1.9",
     "pyserial>=3.5",
     "pyzmq>=26.4.0",
     "requests>=2.32.3",
     "rerun-sdk>=0.23.2",
-    "scikit-learn>=1.6.1",
     "scipy>=1.15.3",
-    "tomli>=2.2.2",
-    "tomli-w>=1.1.0",
     "ximea @ git+https://github.com/elhananby/ximea-py.git",
 ]
 
@@ -32,6 +26,7 @@ dev = [
     "optofly",
     "pytest>=8.4.2",
     "ruff",
+    "tomli-w>=1.1.0",
 ]
 
 [tool.uv.sources]
