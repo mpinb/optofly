@@ -9,7 +9,7 @@ import numpy as np
 import zmq
 import json
 
-from src.utils.config import LiquidLensConfig, ZMQConfig, CameraConfig
+from src.utils.config import AppConfig
 from src.utils.csv_writer import CSVWriter
 from src.utils.trigger_timing import extract_trigger_timing
 from src.utils.worker import WorkerProcess
@@ -177,9 +177,10 @@ class LiquidLens(WorkerProcess):
             process_name=process_name,
         )
 
-        self.lens_config = LiquidLensConfig(config_path)
-        self.zmq_config = ZMQConfig(config_path)
-        self.camera_config = CameraConfig(config_path)
+        app_config = AppConfig.load(config_path)
+        self.lens_config = app_config.liquid_lens
+        self.zmq_config = app_config.zmq
+        self.camera_config = app_config.camera
         self.stop_event = event
         self.is_running = False
         self.is_tracking = False

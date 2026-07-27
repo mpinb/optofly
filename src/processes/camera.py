@@ -11,7 +11,7 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from src.utils.config import CameraConfig
+from src.utils.config import AppConfig
 from src.utils.worker import WorkerProcess
 
 
@@ -41,7 +41,7 @@ class RustCameraProcess(WorkerProcess):
         )
 
         self.config_path = config_path
-        self.save_folder = save_folder or CameraConfig(config_path).save_folder
+        self.save_folder = save_folder or AppConfig.load(config_path).camera.save_folder
         self.stop_event = event if event is not None else mp.Event()
         self._proc: Optional[subprocess.Popen] = None
 

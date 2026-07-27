@@ -154,9 +154,9 @@ class VisualProcess(WorkerProcess):
         if self.standalone:
             self.logger.info("Standalone mode — skipping ZMQ setup")
             return
-        from src.utils.config import ZMQConfig
+        from src.utils.config import AppConfig
 
-        zmq_cfg = ZMQConfig(self._config_path)
+        zmq_cfg = AppConfig.load(self._config_path).zmq
         address = zmq_cfg.get_subscriber_address(zmq_cfg.trigger_port)
         self._zone_enter_topic = zmq_cfg.zone_enter_topic
         self.logger.info(

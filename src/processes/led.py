@@ -12,7 +12,7 @@ from typing import Dict, Optional
 
 import zmq
 
-from src.utils.config import OptoTriggerConfig, ZMQConfig
+from src.utils.config import AppConfig
 from src.utils.worker import WorkerProcess
 from src.hardware.led import OptoTrigger
 from src.utils.csv_writer import CSVWriter
@@ -63,8 +63,9 @@ class OptoTriggerWorker(WorkerProcess):
         self.config_path = config_path
 
         # Initialize configurations
-        self.opto_config = OptoTriggerConfig(config_path)
-        self.zmq_config = ZMQConfig(config_path)
+        app_config = AppConfig.load(config_path)
+        self.opto_config = app_config.opto_trigger
+        self.zmq_config = app_config.zmq
 
         # Process state
         self.stop_event = event

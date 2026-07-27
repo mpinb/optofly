@@ -15,7 +15,7 @@ from typing import Optional
 
 import zmq
 
-from src.utils.config import ZMQConfig
+from src.utils.config import AppConfig
 from src.utils.csv_writer import CSVWriter
 from src.utils.worker import WorkerProcess
 
@@ -43,7 +43,7 @@ class LatencyLogger(WorkerProcess):
             process_name=process_name,
         )
 
-        self.zmq_config = ZMQConfig(config_path)
+        self.zmq_config = AppConfig.load(config_path).zmq
         self.stop_event = event
         self.braid_folder = braid_folder
         self.csv_writer = None
