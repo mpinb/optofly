@@ -17,12 +17,12 @@ from typing import ClassVar, Iterable
 logger = logging.getLogger(__name__)
 
 
-# Every `*Config` class re-parses the same TOML file per process, and
-# several classes construct sibling config classes for shared values
-# (e.g. LiquidLensConfig -> TriggerHandlerConfig -> CameraConfig), so a
-# single process can otherwise open one file hundreds of times just to
-# build one config object. Caching by (path, mtime) keeps repeated
-# construction cheap while still picking up on-disk edits.
+# AppConfig.load() may be called many times per process -- once per
+# process/tool that needs a config, plus every standalone script under
+# src/tools/ -- and each call re-parses and re-validates all nine config
+# sections. Caching the parsed TOML by (path, mtime) keeps those repeated
+# calls cheap without re-reading the file from disk each time, while still
+# picking up on-disk edits (mtime changes invalidate the cache).
 _TOML_CACHE: dict[str, tuple[float, dict]] = {}
 
 
@@ -423,9 +423,9 @@ class OptoTriggerConfig:
             active=section.get("active", False),
             port=port,
             baudrate=int(section.get("baudrate", 115200)),
-            duration_options=duration_options,
-            intensity_options=intensity_options,
-            frequency_options=frequency_options,
+            duration_options=list(duration_options),
+            intensity_options=list(intensity_options),
+            frequency_options=list(frequency_options),
             duration=int(duration_options[0]),
             intensity=int(intensity_options[0]),
             frequency=int(frequency_options[0]),

@@ -114,6 +114,10 @@ y_max = 0.041
 [opto_trigger]
 # LED optogenetic stimulation
 active = false
+# NOTE: 'port' is required below even when active = false. AppConfig.load()
+# validates every section on every load regardless of its active flag, so
+# this key must stay present (even as a placeholder) or config loading
+# fails for the whole file, not just this subsystem.
 # 'port' must be a udev symlink pointing to the Arduino serial device.
 # Create /etc/udev/rules.d/99-optofly.rules with a line like:
 #   SUBSYSTEM=="tty", ATTRS{idVendor}=="2341", ATTRS{idProduct}=="0043", SYMLINK+="opto_trigger"
@@ -135,7 +139,12 @@ color = "red"                    # LED color
 sham_probability = 0.0           # Probability of sham trials (0.0-1.0)
 
 [liquid_lens]
-# Liquid lens auto-focus system (activates automatically with camera)
+# Liquid lens auto-focus system (activates automatically with camera; no
+# separate active flag of its own)
+# NOTE: 'port' is required below even if camera is inactive/unused.
+# AppConfig.load() validates every section on every load regardless of any
+# other section's active flag, so this key must stay present (even as a
+# placeholder) or config loading fails for the whole file.
 # 'port' must be a udev symlink pointing to the Optotune LD lens controller.
 # Create /etc/udev/rules.d/99-optofly.rules with a line like:
 #   SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", SYMLINK+="optotune_ld"

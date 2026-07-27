@@ -132,14 +132,10 @@ class VisualProcess(WorkerProcess):
             self._zmq_context.term()
 
     def _load_config(self) -> dict:
-        from src.utils.config import ConfigBase
+        from src.utils.config import AppConfig, ConfigBase
 
         main_cfg = ConfigBase(self._config_path)._load_config()
-        vs_path = Path(
-            main_cfg.get("visual_stimuli", {}).get(
-                "config_file", "configs/visual_stimuli.toml"
-            )
-        )
+        vs_path = Path(AppConfig.load(self._config_path).visual_stimuli.config_file)
         if vs_path.exists():
             raw = ConfigBase(str(vs_path))._load_config()
         else:

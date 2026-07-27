@@ -7,16 +7,15 @@ from main import (
 from src.utils.config import AppConfig
 
 
-def _app_config(**toml_overrides):
+def _app_config(tmp_path, **toml_overrides):
     import tomli_w
     import tomllib
-    from pathlib import Path
 
     with open("configs/config.example.toml", "rb") as f:
         data = tomllib.load(f)
     for section, values in toml_overrides.items():
         data.setdefault(section, {}).update(values)
-    out = Path("/tmp") / "test_main_app_config.toml"
+    out = tmp_path / "test_main_app_config.toml"
     out.write_bytes(tomli_w.dumps(data).encode("utf-8"))
     return AppConfig.load(str(out))
 
@@ -118,8 +117,9 @@ def test_multiple_dead_critical_processes_each_produce_a_message():
     assert "LiquidLens" in joined
 
 
-def test_warns_when_max_recording_time_less_than_zone_timeout():
+def test_warns_when_max_recording_time_less_than_zone_timeout(tmp_path):
     app_config = _app_config(
+        tmp_path,
         camera={"active": True, "max_recording_time": 1.0},
         trigger_handler={"zone_timeout": 3.0},
     )
@@ -129,16 +129,18 @@ def test_warns_when_max_recording_time_less_than_zone_timeout():
     assert "3.0" in warning
 
 
-def test_no_warning_when_camera_inactive():
+def test_no_warning_when_camera_inactive(tmp_path):
     app_config = _app_config(
+        tmp_path,
         camera={"active": False, "max_recording_time": 1.0},
         trigger_handler={"zone_timeout": 3.0},
     )
     assert check_recording_time_sufficient(app_config) is None
 
 
-def test_no_warning_when_recording_time_sufficient():
+def test_no_warning_when_recording_time_sufficient(tmp_path):
     app_config = _app_config(
+        tmp_path,
         camera={"active": True, "max_recording_time": 5.0},
         trigger_handler={"zone_timeout": 3.0},
     )
@@ -190,10 +192,12 @@ def test_check_latency_logger_alive_returns_warning_when_dead():
     assert "LatencyLogger" in warning
 
 
-def test_summary_prints_lens_predictor(capsys):
+def test_summary_prints_lens_predictor(capsys, tmp_path):
     from main import print_experiment_config
 
-    app_config = _app_config(liquid_lens={"mode": "diopter", "predictor": "linear"})
+    app_config = _app_config(
+        tmp_path, liquid_lens={"mode": "diopter", "predictor": "linear"}
+    )
     print_experiment_config(app_config, ["LiquidLens"])
     out = capsys.readouterr().out
     assert "Predictor: linear" in out

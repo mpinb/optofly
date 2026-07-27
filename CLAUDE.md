@@ -104,6 +104,8 @@ Death carries the bare obj_id as an integer, not an object.
 
 `src/utils/config.py` has typed config classes (e.g. `LiquidLensConfig`, `ZMQConfig`) that load from TOML sections. Pass `config_path` to each process; don't read TOML directly elsewhere. `trigger_handler.zone_timeout` is the single global timeout used by TriggerHandler, CameraProcess (buffer sizing), and LiquidLens (focus tracking).
 
+Every `*Config` class's path-based constructor routes through `AppConfig.load()`, which builds and validates all nine config sections in one pass — regardless of any given section's own `active` flag. This means `configs/config.toml` must always have valid `[liquid_lens]`, `[opto_trigger]`, etc. sections present (each with its required `port` key) even when that subsystem is disabled via `active = false`, and even if you only ever construct a single config class (e.g. `ZMQConfig(path)`). Standalone tools that only need one section (e.g. `src/tools/braid_visualizer.py`, `src/tools/braid_simulator.py`) still need a fully valid config file for this reason.
+
 Key parameters (all in `configs/config.toml`):
 
 | Section | Key | Default | Purpose |
