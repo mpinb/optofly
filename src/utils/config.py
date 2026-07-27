@@ -11,6 +11,7 @@ import tomllib
 import logging
 import math
 import os
+from dataclasses import dataclass
 from typing import ClassVar, Iterable
 
 logger = logging.getLogger(__name__)
@@ -324,65 +325,94 @@ class BraidPublisherConfig(ConfigBase):
         )
 
 
-class OptoTriggerConfig(ConfigBase):
-    """Configuration for the Arduino-based optical trigger controller."""
+@dataclass
+class OptoTriggerConfig:
+    """Configuration for the Arduino-based optical trigger controller.
+
+    NOT frozen, unlike its siblings: OptoTrigger.set_parameters() mutates
+    duration/intensity/frequency/color at runtime, once per trigger, to
+    record the balanced-randomization-selected trial parameters. See plan
+    Global Constraints for why this is a deliberate exception.
+    """
 
     SUPPORTED_COLORS: ClassVar[tuple[str, ...]] = ("red", "green", "blue", "white")
 
-    def __init__(self, config_path: str = "configs/config.toml"):
-        """Initialize the opto trigger configuration."""
-        super().__init__(config_path, "opto_trigger")
-        config = self._load_config()
+    active: bool
+    port: str
+    baudrate: int
+    duration_options: list
+    intensity_options: list
+    frequency_options: list
+    duration: int
+    intensity: int
+    frequency: int
+    color: str
+    sham_probability: float
 
-        # Activation flag
-        self.active: bool = config.get("active", False)
-
-        # Serial connection details
+    @classmethod
+    def from_section(cls, section: dict) -> "OptoTriggerConfig":
         try:
-            self.port: str = config["port"]
+            port = section["port"]
         except KeyError:
             raise ValueError(
                 "Missing required config key: opto_trigger.port\n"
                 "  Example: port = \"/dev/opto_trigger\""
             )
-        self.baudrate: int = int(config.get("baudrate", 115200))
 
-        # Stimulation parameters - store as option lists
-        self.duration_options: list = self._parse_parameter(
-            config.get("duration", 0), "duration"
-        )
-        self.intensity_options: list = self._parse_parameter(
-            config.get("intensity", 0), "intensity"
-        )
-        self.frequency_options: list = self._parse_parameter(
-            config.get("frequency", 0), "frequency"
-        )
+        duration_options = cls._parse_parameter(section.get("duration", 0), "duration")
+        intensity_options = cls._parse_parameter(section.get("intensity", 0), "intensity")
+        frequency_options = cls._parse_parameter(section.get("frequency", 0), "frequency")
 
-        # Currently selected values (set when triggered)
-        # Initialize with first option for backward compatibility
-        self.duration: int = int(self.duration_options[0])
-        self.intensity: int = int(self.intensity_options[0])
-        self.frequency: int = int(self.frequency_options[0])
-        self.color: str = self._normalize_color(config.get("color", "white"))
-
-        # Sham probability controls how often a stimulation is skipped
-        self.sham_probability: float = float(config.get("sham_probability", 0.0))
-        if not (0.0 <= self.sham_probability <= 1.0):
+        sham_probability = float(section.get("sham_probability", 0.0))
+        if not (0.0 <= sham_probability <= 1.0):
             raise ValueError(
                 f"opto_trigger.sham_probability must be in [0.0, 1.0], "
-                f"got {self.sham_probability}. Use 0.5 for 50% sham trials."
+                f"got {sham_probability}. Use 0.5 for 50% sham trials."
             )
 
-        for v in self.intensity_options:
+        for v in intensity_options:
             if not (0 <= int(v) <= 255):
                 raise ValueError(
                     f"opto_trigger.intensity values must be in [0, 255], got {v}"
                 )
-        for v in self.duration_options:
+        for v in duration_options:
             if int(v) < 0:
-                raise ValueError(
-                    f"opto_trigger.duration values must be >= 0, got {v}"
-                )
+                raise ValueError(f"opto_trigger.duration values must be >= 0, got {v}")
+
+        instance = object.__new__(cls)
+        instance.__dict__.update(
+            active=section.get("active", False),
+            port=port,
+            baudrate=int(section.get("baudrate", 115200)),
+            duration_options=duration_options,
+            intensity_options=intensity_options,
+            frequency_options=frequency_options,
+            duration=int(duration_options[0]),
+            intensity=int(intensity_options[0]),
+            frequency=int(frequency_options[0]),
+            color=cls._normalize_color(section.get("color", "white")),
+            sham_probability=sham_probability,
+        )
+        return instance
+
+    def __init__(self, config_path: str = "configs/config.toml"):
+        """Backward-compatible path-based constructor -- reimplemented in
+        Task 8 to delegate to AppConfig.load(); for now it parses directly
+        so this class is independently usable/testable before AppConfig
+        exists.
+
+        Dataclass note: @dataclass only auto-generates __init__ when a class
+        doesn't define one itself; since this class defines __init__
+        explicitly (for the path-based call form), @dataclass leaves it
+        alone and supplies __repr__/__eq__/field annotations only. That
+        means from_section() above cannot build instances via cls(...) --
+        it would recurse into this path-based __init__, not a field-based
+        one -- so it constructs via object.__new__() + direct __dict__
+        update instead, exactly like this __init__ does for its own case.
+        """
+        section = _load_toml_cached(config_path).get("opto_trigger", {})
+        built = OptoTriggerConfig.from_section(section)
+        self.__dict__.update(built.__dict__)
 
     def get_trigger_command(self) -> str:
         """Return the formatted command string expected by the Arduino firmware."""
@@ -391,10 +421,8 @@ class OptoTriggerConfig(ConfigBase):
     @classmethod
     def _normalize_color(cls, color: str | None) -> str:
         """Return a validated, lower-case color token."""
-
         if color is None:
             return "white"
-
         normalized = color.strip().lower()
         if normalized not in cls.SUPPORTED_COLORS:
             supported = ", ".join(cls.SUPPORTED_COLORS)
@@ -406,34 +434,22 @@ class OptoTriggerConfig(ConfigBase):
     @classmethod
     def valid_colors(cls) -> Iterable[str]:
         """Expose the supported color identifiers for CLI validation."""
-
         return cls.SUPPORTED_COLORS
 
-    def _parse_parameter(self, value, param_name: str):
-        """Parse parameter that can be either a single value or list of options.
-
-        Args:
-            value: Either a single number or a list of numbers
-            param_name: Name of parameter (for error messages)
-
-        Returns:
-            List of possible values (even if input is single value)
-        """
+    @staticmethod
+    def _parse_parameter(value, param_name: str):
+        """Parse parameter that can be either a single value or list of options."""
         if isinstance(value, list):
             if len(value) == 0:
                 raise ValueError(f"{param_name} cannot be an empty list")
             return value
-        else:
-            # Single value - return as single-item list
-            return [value]
+        return [value]
 
     def set_color(self, color: str) -> None:
         """Update the configured color with validation."""
-
         self.color = self._normalize_color(color)
 
     def __str__(self) -> str:
-        """Return a readable summary of the opto trigger configuration."""
         return (
             "OptoTrigger Configuration:\n"
             f"  Active: {self.active}\n"
