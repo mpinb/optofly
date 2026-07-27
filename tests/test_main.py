@@ -4,6 +4,21 @@ from main import (
     check_recording_time_sufficient,
     handle_metadata_cancellation,
 )
+from src.utils.config import AppConfig
+
+
+def _app_config(**toml_overrides):
+    import tomli_w
+    import tomllib
+    from pathlib import Path
+
+    with open("configs/config.example.toml", "rb") as f:
+        data = tomllib.load(f)
+    for section, values in toml_overrides.items():
+        data.setdefault(section, {}).update(values)
+    out = Path("/tmp") / "test_main_app_config.toml"
+    out.write_bytes(tomli_w.dumps(data).encode("utf-8"))
+    return AppConfig.load(str(out))
 
 
 class _FakeAliveProcess:
@@ -104,30 +119,30 @@ def test_multiple_dead_critical_processes_each_produce_a_message():
 
 
 def test_warns_when_max_recording_time_less_than_zone_timeout():
-    config = {
-        "camera": {"active": True, "max_recording_time": 1.0},
-        "trigger_handler": {"zone_timeout": 3.0},
-    }
-    warning = check_recording_time_sufficient(config)
+    app_config = _app_config(
+        camera={"active": True, "max_recording_time": 1.0},
+        trigger_handler={"zone_timeout": 3.0},
+    )
+    warning = check_recording_time_sufficient(app_config)
     assert warning is not None
     assert "1.0" in warning
     assert "3.0" in warning
 
 
 def test_no_warning_when_camera_inactive():
-    config = {
-        "camera": {"active": False, "max_recording_time": 1.0},
-        "trigger_handler": {"zone_timeout": 3.0},
-    }
-    assert check_recording_time_sufficient(config) is None
+    app_config = _app_config(
+        camera={"active": False, "max_recording_time": 1.0},
+        trigger_handler={"zone_timeout": 3.0},
+    )
+    assert check_recording_time_sufficient(app_config) is None
 
 
 def test_no_warning_when_recording_time_sufficient():
-    config = {
-        "camera": {"active": True, "max_recording_time": 5.0},
-        "trigger_handler": {"zone_timeout": 3.0},
-    }
-    assert check_recording_time_sufficient(config) is None
+    app_config = _app_config(
+        camera={"active": True, "max_recording_time": 5.0},
+        trigger_handler={"zone_timeout": 3.0},
+    )
+    assert check_recording_time_sufficient(app_config) is None
 
 
 class _FakeBraidProxy:
@@ -178,8 +193,8 @@ def test_check_latency_logger_alive_returns_warning_when_dead():
 def test_summary_prints_lens_predictor(capsys):
     from main import print_experiment_config
 
-    config = {"liquid_lens": {"mode": "diopter", "predictor": "linear"}}
-    print_experiment_config(config, ["LiquidLens"])
+    app_config = _app_config(liquid_lens={"mode": "diopter", "predictor": "linear"})
+    print_experiment_config(app_config, ["LiquidLens"])
     out = capsys.readouterr().out
     assert "Predictor: linear" in out
     # The old code printed nothing about the predictor unless the

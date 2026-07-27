@@ -6,7 +6,6 @@ Automatically enables/disables processes based on their 'active' flags.
 """
 
 import argparse
-import logging
 import multiprocessing as mp
 import sys
 import time
@@ -22,6 +21,7 @@ from src.processes.camera import RustCameraProcess as CameraProcess
 from src.processes.lens import LiquidLens
 from src.processes.latency_logger import LatencyLogger
 from src.utils.braid import check_braid_folder_exists, verify_csv_files_in_braid
+from src.utils.config import AppConfig
 from src.utils.logger import configure_process_logging
 from src.utils.metadata import (
     UserCancelledError,
@@ -33,18 +33,17 @@ from src.utils.metadata import (
 from src.monitoring.server import run_server
 
 
-def load_config(config_path: str) -> dict:
-    """Load configuration from TOML file.
+def load_config(config_path: str) -> AppConfig:
+    """Load and validate configuration from TOML file.
 
     Args:
         config_path: Path to the configuration file
 
     Returns:
-        Dictionary containing the full configuration
+        The fully assembled, typed configuration tree.
     """
     try:
-        with open(config_path, "rb") as f:
-            return tomllib.load(f)
+        return AppConfig.load(config_path)
     except FileNotFoundError:
         print(f"ERROR: Config file not found: {config_path}")
         sys.exit(1)
@@ -53,39 +52,25 @@ def load_config(config_path: str) -> dict:
         sys.exit(1)
 
 
-def check_recording_time_sufficient(config: dict) -> str | None:
+def check_recording_time_sufficient(app_config: AppConfig) -> str | None:
     """Return a warning message if camera.max_recording_time is shorter
     than trigger_handler.zone_timeout, or None if camera is inactive or
     the durations are sufficient.
-
-    Every recording would otherwise be truncated before the fly exits the
-    trigger zone. This check previously lived inside CameraConfig's
-    constructor (which built a TriggerHandlerConfig just to read
-    zone_timeout) -- that made CameraConfig and TriggerHandlerConfig
-    mutually recursive. Doing it here, once, against the raw config dict
-    main() already has, keeps the check without the cycle.
     """
-    camera_cfg = config.get("camera", {})
-    if not camera_cfg.get("active", False):
+    if not app_config.camera.active:
         return None
-    max_recording_time = float(camera_cfg.get("max_recording_time", 3.0))
-    zone_timeout = float(config.get("trigger_handler", {}).get("zone_timeout", 2.0))
-    if max_recording_time < zone_timeout:
+    if app_config.camera.max_recording_time < app_config.trigger_handler.zone_timeout:
         return (
-            f"camera.max_recording_time ({max_recording_time}s) is less than "
-            f"trigger_handler.zone_timeout ({zone_timeout}s). Every recording "
-            "will be truncated before the fly exits the zone."
+            f"camera.max_recording_time ({app_config.camera.max_recording_time}s) is "
+            f"less than trigger_handler.zone_timeout "
+            f"({app_config.trigger_handler.zone_timeout}s). Every recording will be "
+            "truncated before the fly exits the zone."
         )
     return None
 
 
-def print_experiment_config(config: dict, active_processes: list):
-    """Print experiment configuration summary.
-
-    Args:
-        config: Loaded configuration dictionary
-        active_processes: List of active process names
-    """
+def print_experiment_config(app_config: AppConfig, active_processes: list):
+    """Print experiment configuration summary."""
     print("\n" + "=" * 70)
     print("OptoFly Experiment Configuration")
     print("=" * 70)
@@ -94,23 +79,17 @@ def print_experiment_config(config: dict, active_processes: list):
     for process_name in active_processes:
         print(f"  ✓ {process_name}")
 
-    # Monitoring server details
     if "Monitoring Server" in active_processes:
-        monitoring_config = config.get("monitoring", {})
-        host = monitoring_config.get("host", "0.0.0.0")
-        port = monitoring_config.get("port", 5000)
-        # If host is 0.0.0.0, show localhost for user convenience
-        display_host = "localhost" if host == "0.0.0.0" else host
+        display_host = (
+            "localhost" if app_config.monitoring.host == "0.0.0.0" else app_config.monitoring.host
+        )
         print("\nMonitoring Dashboard:")
-        print(f"  URL: http://{display_host}:{port}")
+        print(f"  URL: http://{display_host}:{app_config.monitoring.port}")
 
-    # Visual stimuli details — read actual enabled flags from the stimuli config file
     if "VisualProcess" in active_processes:
-        vs_cfg = config.get("visual_stimuli", {})
-        vs_config_file = vs_cfg.get("config_file", "configs/visual_stimuli.toml")
         enabled_stimuli = []
         try:
-            with open(vs_config_file, "rb") as f:
+            with open(app_config.visual_stimuli.config_file, "rb") as f:
                 vs_data = tomllib.load(f).get("visual_stimuli", {})
             for section_name, section in vs_data.items():
                 if isinstance(section, dict) and section.get("enabled", False):
@@ -123,34 +102,21 @@ def print_experiment_config(config: dict, active_processes: list):
             for stimulus in enabled_stimuli:
                 print(f"  ✓ {stimulus}")
 
-    # Opto trigger details
     if "OptoTriggerWorker" in active_processes:
-        opto_config = config.get("opto_trigger", {})
-        color = opto_config.get("color", "unknown")
-        intensity = opto_config.get("intensity", "unknown")
-        duration = opto_config.get("duration", "unknown")
         print("\nOpto Trigger:")
-        print(f"  Color: {color}")
-        print(f"  Intensity: {intensity}")
-        print(f"  Duration: {duration} ms")
+        print(f"  Color: {app_config.opto_trigger.color}")
+        print(f"  Intensity: {app_config.opto_trigger.intensity}")
+        print(f"  Duration: {app_config.opto_trigger.duration} ms")
 
-    # Camera details
     if "CameraProcess" in active_processes:
-        camera_config = config.get("camera", {})
-        fps = camera_config.get("fps", "unknown")
-        resolution = camera_config.get("resolution", "unknown")
         print("\nCamera:")
-        print(f"  Resolution: {resolution}")
-        print(f"  FPS: {fps}")
+        print(f"  Resolution: {app_config.camera.resolution}")
+        print(f"  FPS: {app_config.camera.fps}")
 
-    # Liquid lens details
     if "LiquidLens" in active_processes:
-        lens_config = config.get("liquid_lens", {})
-        mode = lens_config.get("mode", "diopter")
-        predictor = lens_config.get("predictor", "none")
         print("\nLiquid Lens:")
-        print(f"  Mode: {mode}")
-        print(f"  Predictor: {predictor}")
+        print(f"  Mode: {app_config.liquid_lens.mode}")
+        print(f"  Predictor: {app_config.liquid_lens.predictor}")
 
     print("\nPress Ctrl+C to stop the experiment")
     print("=" * 70 + "\n")
@@ -265,11 +231,11 @@ def main():
 
     # Load configuration
     print(f"Loading configuration from {config_path}...")
-    config = load_config(config_path)
-    log_level_str = config.get("logging", {}).get("level", "INFO").upper()
-    log_level_int = getattr(logging, log_level_str, logging.INFO)
+    app_config = load_config(config_path)
+    log_level_str = app_config.logging.level
+    log_level_int = app_config.logging.level_int()
 
-    recording_time_warning = check_recording_time_sufficient(config)
+    recording_time_warning = check_recording_time_sufficient(app_config)
     if recording_time_warning:
         print(f"WARNING: {recording_time_warning}")
 
@@ -280,14 +246,10 @@ def main():
     # Confirm Braid is recording BEFORE prompting for metadata — so the
     # researcher sees where data will go before filling in the form, and
     # metadata is never discarded due to a Braid connection failure.
-    experiments_path = config.get("braid_publisher", {}).get(
-        "experiments_path", "/mnt/data/experiments/"
-    )
-    braid_host = config.get("braid_publisher", {}).get("host", "127.0.0.1")
-    braid_callback_port = config.get("braid_publisher", {}).get("callback_port", 12345)
-    callback_url = f"http://{braid_host}:{braid_callback_port}"
     braid_folder, braid_proxy = check_braid_folder_exists(
-        experiments_path, callback_url=callback_url, auto_start_recording=True
+        app_config.braid_publisher.experiments_path,
+        callback_url=app_config.braid_publisher.callback_url,
+        auto_start_recording=True,
     )
     print(f"Experiment data will be saved to: {braid_folder}")
 
@@ -318,13 +280,8 @@ def main():
     # Copy configuration files
     print("\nCopying configuration files...")
     copy_config_to_braid_folder(config_path, braid_folder)
-    if config.get("visual_stimuli", {}).get("active", False):
-        copy_config_to_braid_folder(
-            config.get("visual_stimuli", {}).get(
-                "config_file", "configs/visual_stimuli.toml"
-            ),
-            braid_folder,
-        )
+    if app_config.visual_stimuli.active:
+        copy_config_to_braid_folder(app_config.visual_stimuli.config_file, braid_folder)
 
     # Set up file logging — all processes write to a shared log file
     log_path = str(Path(braid_folder) / "optofly.log")
@@ -381,29 +338,27 @@ def main():
         print("\nStarting optional processes...")
 
         # 4. Monitoring Server - web dashboard for trigger visualization
-        if config.get("monitoring", {}).get("active", False):
+        if app_config.monitoring.active:
             print("  ✓ Monitoring Server")
-            monitoring_config = config.get("monitoring", {})
-            zmq_trigger_port = config.get("zmq", {}).get("trigger_port", 5556)
-            zone_enter_topic = config.get("zmq", {}).get(
-                "zone_enter_topic", "ZONE_ENTER"
-            )
-            monitoring_host = monitoring_config.get("host", "0.0.0.0")
-            monitoring_port = monitoring_config.get("port", 5000)
-            zmq_address = f"tcp://localhost:{zmq_trigger_port}"
+            zmq_address = f"tcp://localhost:{app_config.zmq.trigger_port}"
 
             monitoring_process = mp.Process(
                 target=run_server,
-                args=(zmq_address, monitoring_host, monitoring_port, zone_enter_topic),
+                args=(
+                    zmq_address,
+                    app_config.monitoring.host,
+                    app_config.monitoring.port,
+                    app_config.zmq.zone_enter_topic,
+                ),
                 daemon=True,
             )
             monitoring_process.start()
             processes.append(("Monitoring Server", monitoring_process))
             active_process_names.append("Monitoring Server")
-            print(f"    Dashboard: http://{monitoring_host}:{monitoring_port}")
+            print(f"    Dashboard: http://{app_config.monitoring.host}:{app_config.monitoring.port}")
 
         # 5. VisualProcess - Panda3D visual stimuli
-        if config.get("visual_stimuli", {}).get("active", False):
+        if app_config.visual_stimuli.active:
             print("  ✓ VisualProcess (Panda3D)")
             visual_process = VisualProcess(
                 config_path=config_path,
@@ -417,7 +372,7 @@ def main():
             active_process_names.append("VisualProcess")
 
         # 6. CameraProcess + LiquidLens (lens always accompanies camera)
-        if config.get("camera", {}).get("active", False):
+        if app_config.camera.active:
             print("  ✓ CameraProcess")
             # Save videos alongside experiment data: /mnt/data/videos/<braid_name>/
             video_folder = None
@@ -484,7 +439,7 @@ def main():
             print(f"\nWARNING: {latency_logger_warning}")
 
         # Print experiment summary
-        print_experiment_config(config, active_process_names)
+        print_experiment_config(app_config, active_process_names)
 
         # Wait for keyboard interrupt or experiment end time
         last_health_check = time.time()
