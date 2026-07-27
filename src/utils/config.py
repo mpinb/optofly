@@ -463,87 +463,130 @@ class OptoTriggerConfig:
         )
 
 
-class CameraConfig(ConfigBase):
+@dataclass(frozen=True)
+class CameraConfig:
     """Configuration for the camera and visual field."""
 
-    def __init__(self, config_path: str = "configs/config.toml"):
-        """Initialize camera configuration."""
-        super().__init__(config_path, "camera")
-        config = self._load_config()
+    active: bool
+    sensor_width_px: int
+    sensor_height_px: int
+    resolution: tuple
+    fps: float
+    width: int
+    height: int
+    exposure_time: float
+    max_recording_time: float
+    zmq_address: str
+    zmq_port: str
+    save_folder: str
+    fov_frustum: bool
+    fov_x_min: float
+    fov_x_max: float
+    fov_y_min: float
+    fov_y_max: float
+    fov_near_z: float | None
+    fov_near_x_min: float | None
+    fov_near_x_max: float | None
+    fov_near_y_min: float | None
+    fov_near_y_max: float | None
+    fov_far_z: float | None
+    fov_far_x_min: float | None
+    fov_far_x_max: float | None
+    fov_far_y_min: float | None
+    fov_far_y_max: float | None
+    braid_ximea_calibration_file: str | None
 
-        resolution = config.get("resolution")
+    @classmethod
+    def from_section(cls, section: dict) -> "CameraConfig":
+        resolution = section.get("resolution")
         if not isinstance(resolution, (list, tuple)) or len(resolution) != 2:
             raise ValueError(
                 "camera.resolution must contain two numeric values: width and height"
             )
+        sensor_width_px, sensor_height_px = int(resolution[0]), int(resolution[1])
 
-        self.sensor_width_px, self.sensor_height_px = (
-            int(resolution[0]),
-            int(resolution[1]),
-        )
-        self.resolution = (self.sensor_width_px, self.sensor_height_px)
-
-        if "fps" not in config:
+        if "fps" not in section:
             raise ValueError("camera.fps is required in the configuration")
-        self.fps: float = float(config.get("fps"))
+        fps = float(section.get("fps"))
 
-        self.width: int = self.sensor_width_px
-        self.height: int = self.sensor_height_px
-
-        self.exposure_time: float = float(config.get("exposure_time", 0.0))
-        self.max_recording_time: float = float(config.get("max_recording_time", 3.0))
-
-        # Communication settings
-        self.zmq_address: str = config.get("zmq_address", "127.0.0.1")
-        self.zmq_port: str = config.get("zmq_port", "5556")
-
-        # Storage
-        self.save_folder: str = config.get("save_folder", "camera_videos")
-
-        fov_config = config.get("FOV", {})
+        fov_config = section.get("FOV", {})
         near = fov_config.get("near")
         far = fov_config.get("far")
 
         if near and far:
-            self.fov_frustum: bool = True
-            self.fov_near_z: float = float(near["z"])
-            self.fov_near_x_min: float = float(near["x_min"])
-            self.fov_near_x_max: float = float(near["x_max"])
-            self.fov_near_y_min: float = float(near["y_min"])
-            self.fov_near_y_max: float = float(near["y_max"])
-            self.fov_far_z: float = float(far["z"])
-            self.fov_far_x_min: float = float(far["x_min"])
-            self.fov_far_x_max: float = float(far["x_max"])
-            self.fov_far_y_min: float = float(far["y_min"])
-            self.fov_far_y_max: float = float(far["y_max"])
-            if self.fov_near_z >= self.fov_far_z:
+            fov_frustum = True
+            fov_near_z = float(near["z"])
+            fov_near_x_min = float(near["x_min"])
+            fov_near_x_max = float(near["x_max"])
+            fov_near_y_min = float(near["y_min"])
+            fov_near_y_max = float(near["y_max"])
+            fov_far_z = float(far["z"])
+            fov_far_x_min = float(far["x_min"])
+            fov_far_x_max = float(far["x_max"])
+            fov_far_y_min = float(far["y_min"])
+            fov_far_y_max = float(far["y_max"])
+            if fov_near_z >= fov_far_z:
                 raise ValueError("camera.FOV.near.z must be less than camera.FOV.far.z")
-            # Flat attributes: use far-plane values so other consumers (LiquidLens, etc.) work unchanged
-            self.fov_x_min: float = self.fov_far_x_min
-            self.fov_x_max: float = self.fov_far_x_max
-            self.fov_y_min: float = self.fov_far_y_min
-            self.fov_y_max: float = self.fov_far_y_max
+            fov_x_min, fov_x_max = fov_far_x_min, fov_far_x_max
+            fov_y_min, fov_y_max = fov_far_y_min, fov_far_y_max
         else:
-            self.fov_frustum = False
-            self.fov_x_min: float = float(fov_config.get("x_min", -0.1))
-            self.fov_x_max: float = float(fov_config.get("x_max", 0.1))
-            self.fov_y_min: float = float(fov_config.get("y_min", -0.1))
-            self.fov_y_max: float = float(fov_config.get("y_max", 0.1))
-
-            if self.fov_x_min >= self.fov_x_max:
+            fov_frustum = False
+            fov_near_z = fov_near_x_min = fov_near_x_max = None
+            fov_near_y_min = fov_near_y_max = None
+            fov_far_z = fov_far_x_min = fov_far_x_max = None
+            fov_far_y_min = fov_far_y_max = None
+            fov_x_min = float(fov_config.get("x_min", -0.1))
+            fov_x_max = float(fov_config.get("x_max", 0.1))
+            fov_y_min = float(fov_config.get("y_min", -0.1))
+            fov_y_max = float(fov_config.get("y_max", 0.1))
+            if fov_x_min >= fov_x_max:
                 raise ValueError("camera.FOV.x_min must be less than x_max")
-            if self.fov_y_min >= self.fov_y_max:
+            if fov_y_min >= fov_y_max:
                 raise ValueError("camera.FOV.y_min must be less than y_max")
 
-        self.braid_ximea_calibration_file: str | None = config.get(
-            "braid_ximea_calibration_file", None
-        )
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "__dict__", dict(
+            active=section.get("active", False),
+            sensor_width_px=sensor_width_px,
+            sensor_height_px=sensor_height_px,
+            resolution=(sensor_width_px, sensor_height_px),
+            fps=fps,
+            width=sensor_width_px,
+            height=sensor_height_px,
+            exposure_time=float(section.get("exposure_time", 0.0)),
+            max_recording_time=float(section.get("max_recording_time", 3.0)),
+            zmq_address=section.get("zmq_address", "127.0.0.1"),
+            zmq_port=section.get("zmq_port", "5556"),
+            save_folder=section.get("save_folder", "camera_videos"),
+            fov_frustum=fov_frustum,
+            fov_x_min=fov_x_min,
+            fov_x_max=fov_x_max,
+            fov_y_min=fov_y_min,
+            fov_y_max=fov_y_max,
+            fov_near_z=fov_near_z,
+            fov_near_x_min=fov_near_x_min,
+            fov_near_x_max=fov_near_x_max,
+            fov_near_y_min=fov_near_y_min,
+            fov_near_y_max=fov_near_y_max,
+            fov_far_z=fov_far_z,
+            fov_far_x_min=fov_far_x_min,
+            fov_far_x_max=fov_far_x_max,
+            fov_far_y_min=fov_far_y_min,
+            fov_far_y_max=fov_far_y_max,
+            braid_ximea_calibration_file=section.get("braid_ximea_calibration_file", None),
+        ))
+        return instance
+
+    def __init__(self, config_path: str = "configs/config.toml"):
+        """Backward-compatible path-based constructor; reimplemented in
+        Task 8 to delegate to AppConfig.load()."""
+        section = _load_toml_cached(config_path).get("camera", {})
+        built = CameraConfig.from_section(section)
+        object.__setattr__(self, "__dict__", dict(built.__dict__))
 
     def __str__(self):
-        """Return a string representation of the configuration."""
         fov_width_mm = (self.fov_x_max - self.fov_x_min) * 1000
         fov_height_mm = (self.fov_y_max - self.fov_y_min) * 1000
-
         return (
             "Camera Configuration:\n"
             f"  Resolution: {self.sensor_width_px} x {self.sensor_height_px} px\n"
