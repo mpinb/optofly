@@ -70,60 +70,88 @@ class ConfigBase:
             raise
 
 
-class TriggerHandlerConfig(ConfigBase):
+@dataclass(frozen=True)
+class TriggerHandlerConfig:
     """Configuration helper for the trigger handler process."""
 
-    def __init__(self, config_path: str = "configs/config.toml"):
-        """Load trigger handler specific configuration."""
-        super().__init__(config_path, "trigger_handler")
-        config = self._load_config()
+    zone_timeout: float
+    cooldown_period: float
+    fov_x_min: float
+    fov_x_max: float
+    fov_y_min: float
+    fov_y_max: float
+    fov_frustum: bool
+    fov_near_z: float | None
+    fov_near_x_min: float | None
+    fov_near_x_max: float | None
+    fov_near_y_min: float | None
+    fov_near_y_max: float | None
+    fov_far_z: float | None
+    fov_far_x_min: float | None
+    fov_far_x_max: float | None
+    fov_far_y_min: float | None
+    fov_far_y_max: float | None
+    z_min: float
+    z_max: float
+    heading_cone_deg: float
+    heading_threshold: float
+    min_velocity: float
+    max_velocity: float
+    min_tracking_age: float
+    zmq: "ZMQConfig"
 
-        # Zone timeout: emit ZONE_EXIT if no updates received for this long
-        self.zone_timeout: float = float(config.get("zone_timeout", 2.0))
-
-        # Global cooldown period: suppress ZONE_ENTER for this many seconds
-        # after the last one, regardless of object identity.
-        self.cooldown_period: float = float(config.get("cooldown_period", 10.0))
-
-        # Trigger zone x/y = camera FOV (single source of truth)
-        camera_config = CameraConfig(config_path)
-        self.fov_x_min: float = camera_config.fov_x_min
-        self.fov_x_max: float = camera_config.fov_x_max
-        self.fov_y_min: float = camera_config.fov_y_min
-        self.fov_y_max: float = camera_config.fov_y_max
-        self.fov_frustum: bool = camera_config.fov_frustum
-        if self.fov_frustum:
-            self.fov_near_z: float = camera_config.fov_near_z
-            self.fov_near_x_min: float = camera_config.fov_near_x_min
-            self.fov_near_x_max: float = camera_config.fov_near_x_max
-            self.fov_near_y_min: float = camera_config.fov_near_y_min
-            self.fov_near_y_max: float = camera_config.fov_near_y_max
-            self.fov_far_z: float = camera_config.fov_far_z
-            self.fov_far_x_min: float = camera_config.fov_far_x_min
-            self.fov_far_x_max: float = camera_config.fov_far_x_max
-            self.fov_far_y_min: float = camera_config.fov_far_y_min
-            self.fov_far_y_max: float = camera_config.fov_far_y_max
-
-        # Trigger zone z bounds (from trigger_handler section)
-        self.z_min: float = float(config.get("z_min", 0.0))
-        self.z_max: float = float(config.get("z_max", 0.5))
-        if self.z_min >= self.z_max:
+    @classmethod
+    def from_section(
+        cls, section: dict, camera: "CameraConfig", zmq: "ZMQConfig"
+    ) -> "TriggerHandlerConfig":
+        z_min = float(section.get("z_min", 0.0))
+        z_max = float(section.get("z_max", 0.5))
+        if z_min >= z_max:
             raise ValueError("trigger_handler.z_min must be less than z_max")
 
-        # Heading cone configuration (degrees -> radians)
-        self.heading_cone_deg: float = float(config.get("heading_cone_deg", 45.0))
-        self.heading_threshold: float = math.radians(self.heading_cone_deg)
+        heading_cone_deg = float(section.get("heading_cone_deg", 45.0))
 
-        # Velocity bounds (m/s) — object must be moving but not unrealistically fast
-        self.min_velocity: float = float(config.get("min_velocity", 0.01))
-        self.max_velocity: float = float(config.get("max_velocity", 2.0))
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "__dict__", dict(
+            zone_timeout=float(section.get("zone_timeout", 2.0)),
+            cooldown_period=float(section.get("cooldown_period", 10.0)),
+            fov_x_min=camera.fov_x_min,
+            fov_x_max=camera.fov_x_max,
+            fov_y_min=camera.fov_y_min,
+            fov_y_max=camera.fov_y_max,
+            fov_frustum=camera.fov_frustum,
+            fov_near_z=camera.fov_near_z,
+            fov_near_x_min=camera.fov_near_x_min,
+            fov_near_x_max=camera.fov_near_x_max,
+            fov_near_y_min=camera.fov_near_y_min,
+            fov_near_y_max=camera.fov_near_y_max,
+            fov_far_z=camera.fov_far_z,
+            fov_far_x_min=camera.fov_far_x_min,
+            fov_far_x_max=camera.fov_far_x_max,
+            fov_far_y_min=camera.fov_far_y_min,
+            fov_far_y_max=camera.fov_far_y_max,
+            z_min=z_min,
+            z_max=z_max,
+            heading_cone_deg=heading_cone_deg,
+            heading_threshold=math.radians(heading_cone_deg),
+            min_velocity=float(section.get("min_velocity", 0.01)),
+            max_velocity=float(section.get("max_velocity", 2.0)),
+            min_tracking_age=float(section.get("min_tracking_age", 0.1)),
+            zmq=zmq,
+        ))
+        return instance
 
-        # Minimum tracking age: object must exist for this long before it can
-        # trigger ZONE_ENTER (filters transient noise detections).
-        self.min_tracking_age: float = float(config.get("min_tracking_age", 0.1))
-
-        # Communication settings reused across processes
-        self.zmq = ZMQConfig(config_path)
+    def __init__(self, config_path: str = "configs/config.toml"):
+        """Backward-compatible path-based constructor; reimplemented in
+        Task 8 to delegate to AppConfig.load(). For now, builds its own
+        CameraConfig/ZMQConfig -- Task 8 removes this last cross-construction
+        by routing through AppConfig.load()'s single parse instead."""
+        data = _load_toml_cached(config_path)
+        section = data.get("trigger_handler", {})
+        camera = CameraConfig(config_path)
+        zmq = ZMQConfig(config_path)
+        built = TriggerHandlerConfig.from_section(section, camera=camera, zmq=zmq)
+        object.__setattr__(self, "__dict__", dict(built.__dict__))
 
 
 class LiquidLensConfig(ConfigBase):

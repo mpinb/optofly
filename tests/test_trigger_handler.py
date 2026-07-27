@@ -6,6 +6,7 @@ import pytest
 
 import src.processes.tracking as tracking_module
 from src.processes.tracking import TrackedObject, TriggerHandler, _should_run_cleanup
+from src.utils.config import CameraConfig, TriggerHandlerConfig
 
 
 class FakePublisher:
@@ -45,22 +46,52 @@ def handler(config_path):
 
 
 def configure_test_trigger(handler):
-    handler.fov_x_min = -0.05
-    handler.fov_x_max = 0.05
-    handler.fov_y_min = -0.05
-    handler.fov_y_max = 0.05
-    handler.fov_center_x = 0.0
-    handler.fov_center_y = 0.0
-    handler.z_min = 0.1
-    handler.z_max = 0.3
+    # Create a test config with custom values instead of mutating the frozen config
+    # Start with the default camera and zmq from the handler's current config
+    camera = CameraConfig.from_section(
+        {
+            "active": True,
+            "resolution": [640, 480],
+            "fps": 100,
+            "FOV": {
+                "x_min": -0.05,
+                "x_max": 0.05,
+                "y_min": -0.05,
+                "y_max": 0.05,
+            },
+        }
+    )
+    zmq = handler.config.zmq
 
-    handler.config.min_tracking_age = 0.0
-    handler.config.min_velocity = 0.05
-    handler.config.max_velocity = 0.5
-    handler.config.heading_threshold = math.radians(30.0)
-    handler.config.zone_timeout = 0.5
-    handler.config.cooldown_period = 0.0
-    handler.cooldown_period = 0.0
+    # Build test config with custom values
+    test_config = TriggerHandlerConfig.from_section(
+        {
+            "zone_timeout": 0.5,
+            "cooldown_period": 0.0,
+            "z_min": 0.1,
+            "z_max": 0.3,
+            "min_tracking_age": 0.0,
+            "min_velocity": 0.05,
+            "max_velocity": 0.5,
+            "heading_cone_deg": 30.0,
+        },
+        camera=camera,
+        zmq=zmq,
+    )
+
+    # Replace the handler's config with the test config
+    handler.config = test_config
+
+    # Update the handler's mirrored attributes from the new config
+    handler.fov_x_min = test_config.fov_x_min
+    handler.fov_x_max = test_config.fov_x_max
+    handler.fov_y_min = test_config.fov_y_min
+    handler.fov_y_max = test_config.fov_y_max
+    handler.fov_center_x = (test_config.fov_x_min + test_config.fov_x_max) / 2.0
+    handler.fov_center_y = (test_config.fov_y_min + test_config.fov_y_max) / 2.0
+    handler.z_min = test_config.z_min
+    handler.z_max = test_config.z_max
+    handler.cooldown_period = test_config.cooldown_period
 
 
 class FakeClock:
@@ -162,7 +193,35 @@ def test_exit_emitted_when_object_leaves_zone(handler):
 
 
 def test_reentry_waits_for_cooldown_period_before_second_enter(handler, fake_clock):
-    handler.config.cooldown_period = 5.0
+    # Create a new config with longer cooldown_period for this test
+    camera = CameraConfig.from_section(
+        {
+            "active": True,
+            "resolution": [640, 480],
+            "fps": 100,
+            "FOV": {
+                "x_min": handler.config.fov_x_min,
+                "x_max": handler.config.fov_x_max,
+                "y_min": handler.config.fov_y_min,
+                "y_max": handler.config.fov_y_max,
+            },
+        }
+    )
+    test_config = TriggerHandlerConfig.from_section(
+        {
+            "zone_timeout": handler.config.zone_timeout,
+            "cooldown_period": 5.0,
+            "z_min": handler.config.z_min,
+            "z_max": handler.config.z_max,
+            "min_tracking_age": handler.config.min_tracking_age,
+            "min_velocity": handler.config.min_velocity,
+            "max_velocity": handler.config.max_velocity,
+            "heading_cone_deg": handler.config.heading_cone_deg,
+        },
+        camera=camera,
+        zmq=handler.config.zmq,
+    )
+    handler.config = test_config
     handler.cooldown_period = 5.0
 
     handler.process_message(make_birth(frame=1, x=0.08, xvel=-0.2))
@@ -209,7 +268,35 @@ def test_death_emits_zone_exit(handler):
 
 
 def test_timeout_emits_zone_exit(handler):
-    handler.config.zone_timeout = 0.05
+    # Create a new config with shorter zone_timeout for this test
+    camera = CameraConfig.from_section(
+        {
+            "active": True,
+            "resolution": [640, 480],
+            "fps": 100,
+            "FOV": {
+                "x_min": handler.config.fov_x_min,
+                "x_max": handler.config.fov_x_max,
+                "y_min": handler.config.fov_y_min,
+                "y_max": handler.config.fov_y_max,
+            },
+        }
+    )
+    test_config = TriggerHandlerConfig.from_section(
+        {
+            "zone_timeout": 0.05,
+            "cooldown_period": handler.config.cooldown_period,
+            "z_min": handler.config.z_min,
+            "z_max": handler.config.z_max,
+            "min_tracking_age": handler.config.min_tracking_age,
+            "min_velocity": handler.config.min_velocity,
+            "max_velocity": handler.config.max_velocity,
+            "heading_cone_deg": handler.config.heading_cone_deg,
+        },
+        camera=camera,
+        zmq=handler.config.zmq,
+    )
+    handler.config = test_config
 
     handler.process_message(make_birth(frame=1, x=0.08, xvel=-0.2))
     handler.process_message(make_update(frame=2, x=0.05, xvel=-0.2))
