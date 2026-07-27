@@ -660,3 +660,49 @@ class CameraConfig:
             f"  Field of View: {fov_width_mm:.2f} x {fov_height_mm:.2f} mm\n"
             f"  FOV Boundaries: [{self.fov_x_min}, {self.fov_x_max}] x [{self.fov_y_min}, {self.fov_y_max}] m"
         )
+
+
+@dataclass(frozen=True)
+class MonitoringConfig:
+    """Configuration for the web monitoring dashboard."""
+
+    active: bool
+    host: str
+    port: int
+
+    @classmethod
+    def from_section(cls, section: dict) -> "MonitoringConfig":
+        return cls(
+            active=section.get("active", False),
+            host=section.get("host", "0.0.0.0"),
+            port=int(section.get("port", 5000)),
+        )
+
+
+@dataclass(frozen=True)
+class LoggingConfig:
+    """Configuration for the root logger level."""
+
+    level: str
+
+    @classmethod
+    def from_section(cls, section: dict) -> "LoggingConfig":
+        return cls(level=section.get("level", "INFO").upper())
+
+    def level_int(self) -> int:
+        return getattr(logging, self.level, logging.INFO)
+
+
+@dataclass(frozen=True)
+class VisualStimuliConfig:
+    """Configuration for whether/how the Panda3D visual stimuli process runs."""
+
+    active: bool
+    config_file: str
+
+    @classmethod
+    def from_section(cls, section: dict) -> "VisualStimuliConfig":
+        return cls(
+            active=section.get("active", False),
+            config_file=section.get("config_file", "configs/visual_stimuli.toml"),
+        )
