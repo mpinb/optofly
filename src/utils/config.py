@@ -199,77 +199,81 @@ class LiquidLensConfig(ConfigBase):
         self.zmq = ZMQConfig(config_path)
 
 
-class ZMQConfig(ConfigBase):
+@dataclass(frozen=True)
+class ZMQConfig:
     """Configuration for ZMQ communication channels across the system."""
 
-    def __init__(self, config_path: str = "configs/config.toml"):
-        """Initialize ZMQ configuration."""
-        super().__init__(config_path, "zmq")
-        config = self._load_config()
+    braid_port: int
+    trigger_port: int
+    active_braid_port: int
+    latency_port: int
+    braid_topic: str
+    zone_enter_topic: str
+    zone_exit_topic: str
+    active_braid_topic: str
+    braid_pub_hwm: int
+    lens_update_conflate: bool
+    transport: str
 
-        # Ports
+    @classmethod
+    def from_section(cls, section: dict) -> "ZMQConfig":
         try:
-            self.braid_port: int = config["braid_port"]
+            braid_port = section["braid_port"]
         except KeyError:
             raise ValueError(
-                "Missing required config key: zmq.braid_port\n"
-                "  Example: braid_port = 5555"
+                "Missing required config key: zmq.braid_port\n  Example: braid_port = 5555"
             )
         try:
-            self.trigger_port: int = config["trigger_port"]
+            trigger_port = section["trigger_port"]
         except KeyError:
             raise ValueError(
-                "Missing required config key: zmq.trigger_port\n"
-                "  Example: trigger_port = 5556"
+                "Missing required config key: zmq.trigger_port\n  Example: trigger_port = 5556"
             )
-        self.active_braid_port: int = int(config.get("active_braid_port", 5557))
-        # Bound by LatencyLogger (zmq.PULL); OptoTriggerWorker, VisualProcess,
-        # and LiquidLens each connect a zmq.PUSH socket to it. One port
-        # covers all three producers -- see plan Global Constraints for why
-        # this is PUSH/PULL rather than the PUB/SUB pattern used everywhere
-        # else in this file.
-        self.latency_port: int = int(config.get("latency_port", 5558))
+        active_braid_port = int(section.get("active_braid_port", 5557))
+        latency_port = int(section.get("latency_port", 5558))
 
-        # Topics
         try:
-            self.braid_topic: str = config["braid_topic"]
+            braid_topic = section["braid_topic"]
         except KeyError:
             raise ValueError(
-                "Missing required config key: zmq.braid_topic\n"
-                "  Example: braid_topic = \"BRAID\""
-            )
-        self.zone_enter_topic: str = config.get("zone_enter_topic", "ZONE_ENTER")
-        self.zone_exit_topic: str = config.get("zone_exit_topic", "ZONE_EXIT")
-        self.active_braid_topic: str = config.get("active_braid_topic", "ACTIVE_BRAID")
-
-        # Queue policy
-        self.braid_pub_hwm: int = int(config.get("braid_pub_hwm", 1000))
-        self.lens_update_conflate: bool = bool(config.get("lens_update_conflate", True))
-
-        # Transport
-        self.transport: str = config.get("transport", "tcp")
-        if self.transport not in ("tcp", "ipc"):
-            raise ValueError(
-                f"zmq.transport must be 'tcp' or 'ipc', got {self.transport!r}"
+                'Missing required config key: zmq.braid_topic\n  Example: braid_topic = "BRAID"'
             )
 
-        # Validate configuration
-        self._validate_config()
+        braid_pub_hwm = int(section.get("braid_pub_hwm", 1000))
+        transport = section.get("transport", "tcp")
+        if transport not in ("tcp", "ipc"):
+            raise ValueError(f"zmq.transport must be 'tcp' or 'ipc', got {transport!r}")
 
-    def _validate_config(self):
-        """Validate the ZMQ configuration."""
-        ports = {
-            self.braid_port,
-            self.trigger_port,
-            self.active_braid_port,
-            self.latency_port,
-        }
+        ports = {braid_port, trigger_port, active_braid_port, latency_port}
         if len(ports) != 4:
             raise ValueError(
                 "Braid, trigger, active braid, and latency ports must be different"
             )
-        if self.braid_pub_hwm <= 0:
+        if braid_pub_hwm <= 0:
             raise ValueError("zmq.braid_pub_hwm must be positive")
+
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "__dict__", dict(
+            braid_port=braid_port,
+            trigger_port=trigger_port,
+            active_braid_port=active_braid_port,
+            latency_port=latency_port,
+            braid_topic=braid_topic,
+            zone_enter_topic=section.get("zone_enter_topic", "ZONE_ENTER"),
+            zone_exit_topic=section.get("zone_exit_topic", "ZONE_EXIT"),
+            active_braid_topic=section.get("active_braid_topic", "ACTIVE_BRAID"),
+            braid_pub_hwm=braid_pub_hwm,
+            lens_update_conflate=bool(section.get("lens_update_conflate", True)),
+            transport=transport,
+        ))
+        return instance
+
+    def __init__(self, config_path: str = "configs/config.toml"):
+        """Backward-compatible path-based constructor; reimplemented in
+        Task 8 to delegate to AppConfig.load()."""
+        section = _load_toml_cached(config_path).get("zmq", {})
+        built = ZMQConfig.from_section(section)
+        object.__setattr__(self, "__dict__", dict(built.__dict__))
 
     def get_subscriber_address(self, port: int) -> str:
         """Get the subscriber address for a given port."""
