@@ -142,15 +142,7 @@ class TriggerHandlerConfig:
         return instance
 
     def __init__(self, config_path: str = "configs/config.toml"):
-        """Backward-compatible path-based constructor; reimplemented in
-        Task 8 to delegate to AppConfig.load(). For now, builds its own
-        CameraConfig/ZMQConfig -- Task 8 removes this last cross-construction
-        by routing through AppConfig.load()'s single parse instead."""
-        data = _load_toml_cached(config_path)
-        section = data.get("trigger_handler", {})
-        camera = CameraConfig(config_path)
-        zmq = ZMQConfig(config_path)
-        built = TriggerHandlerConfig.from_section(section, camera=camera, zmq=zmq)
+        built = AppConfig.load(config_path).trigger_handler
         object.__setattr__(self, "__dict__", dict(built.__dict__))
 
 
@@ -223,16 +215,7 @@ class LiquidLensConfig:
         return instance
 
     def __init__(self, config_path: str = "configs/config.toml"):
-        """Backward-compatible path-based constructor; reimplemented in
-        Task 8 to delegate to AppConfig.load()."""
-        data = _load_toml_cached(config_path)
-        section = data.get("liquid_lens", {})
-        zmq = ZMQConfig(config_path)
-        camera = CameraConfig(config_path)
-        trigger_handler = TriggerHandlerConfig(config_path)
-        built = LiquidLensConfig.from_section(
-            section, trigger_handler=trigger_handler, camera=camera, zmq=zmq
-        )
+        built = AppConfig.load(config_path).liquid_lens
         object.__setattr__(self, "__dict__", dict(built.__dict__))
 
 
@@ -306,10 +289,7 @@ class ZMQConfig:
         return instance
 
     def __init__(self, config_path: str = "configs/config.toml"):
-        """Backward-compatible path-based constructor; reimplemented in
-        Task 8 to delegate to AppConfig.load()."""
-        section = _load_toml_cached(config_path).get("zmq", {})
-        built = ZMQConfig.from_section(section)
+        built = AppConfig.load(config_path).zmq
         object.__setattr__(self, "__dict__", dict(built.__dict__))
 
     def get_subscriber_address(self, port: int) -> str:
@@ -371,13 +351,7 @@ class BraidPublisherConfig:
         return instance
 
     def __init__(self, config_path: str = "configs/config.toml"):
-        """Backward-compatible path-based constructor; reimplemented in
-        Task 8 to delegate to AppConfig.load()."""
-        data = _load_toml_cached(config_path)
-        section = data.get("braid_publisher", {})
-        zmq = ZMQConfig(config_path)
-        trigger_handler = TriggerHandlerConfig(config_path)
-        built = BraidPublisherConfig.from_section(section, zmq=zmq, trigger_handler=trigger_handler)
+        built = AppConfig.load(config_path).braid_publisher
         object.__setattr__(self, "__dict__", dict(built.__dict__))
 
     def __str__(self) -> str:
@@ -461,10 +435,7 @@ class OptoTriggerConfig:
         return instance
 
     def __init__(self, config_path: str = "configs/config.toml"):
-        """Backward-compatible path-based constructor -- reimplemented in
-        Task 8 to delegate to AppConfig.load(); for now it parses directly
-        so this class is independently usable/testable before AppConfig
-        exists.
+        """Path-based constructor delegating to AppConfig.load().
 
         Dataclass note: @dataclass only auto-generates __init__ when a class
         doesn't define one itself; since this class defines __init__
@@ -475,8 +446,7 @@ class OptoTriggerConfig:
         one -- so it constructs via object.__new__() + direct __dict__
         update instead, exactly like this __init__ does for its own case.
         """
-        section = _load_toml_cached(config_path).get("opto_trigger", {})
-        built = OptoTriggerConfig.from_section(section)
+        built = AppConfig.load(config_path).opto_trigger
         self.__dict__.update(built.__dict__)
 
     def get_trigger_command(self) -> str:
@@ -643,10 +613,7 @@ class CameraConfig:
         return instance
 
     def __init__(self, config_path: str = "configs/config.toml"):
-        """Backward-compatible path-based constructor; reimplemented in
-        Task 8 to delegate to AppConfig.load()."""
-        section = _load_toml_cached(config_path).get("camera", {})
-        built = CameraConfig.from_section(section)
+        built = AppConfig.load(config_path).camera
         object.__setattr__(self, "__dict__", dict(built.__dict__))
 
     def __str__(self):
@@ -706,3 +673,56 @@ class VisualStimuliConfig:
             active=section.get("active", False),
             config_file=section.get("config_file", "configs/visual_stimuli.toml"),
         )
+
+
+@dataclass(frozen=True)
+class AppConfig:
+    """Root config object: one TOML parse, the whole dependency tree
+    assembled in the correct order, no config class constructs another."""
+
+    camera: "CameraConfig"
+    trigger_handler: "TriggerHandlerConfig"
+    liquid_lens: "LiquidLensConfig"
+    zmq: "ZMQConfig"
+    braid_publisher: "BraidPublisherConfig"
+    opto_trigger: "OptoTriggerConfig"
+    monitoring: "MonitoringConfig"
+    logging: "LoggingConfig"
+    visual_stimuli: "VisualStimuliConfig"
+
+    @classmethod
+    def load(cls, config_path: str = "configs/config.toml") -> "AppConfig":
+        data = _load_toml_cached(config_path)
+
+        zmq = ZMQConfig.from_section(data.get("zmq", {}))
+        camera = CameraConfig.from_section(data.get("camera", {}))
+        trigger_handler = TriggerHandlerConfig.from_section(
+            data.get("trigger_handler", {}), camera=camera, zmq=zmq
+        )
+        liquid_lens = LiquidLensConfig.from_section(
+            data.get("liquid_lens", {}),
+            trigger_handler=trigger_handler,
+            camera=camera,
+            zmq=zmq,
+        )
+        braid_publisher = BraidPublisherConfig.from_section(
+            data.get("braid_publisher", {}), zmq=zmq, trigger_handler=trigger_handler
+        )
+        opto_trigger = OptoTriggerConfig.from_section(data.get("opto_trigger", {}))
+        monitoring = MonitoringConfig.from_section(data.get("monitoring", {}))
+        logging_cfg = LoggingConfig.from_section(data.get("logging", {}))
+        visual_stimuli = VisualStimuliConfig.from_section(data.get("visual_stimuli", {}))
+
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "__dict__", dict(
+            camera=camera,
+            trigger_handler=trigger_handler,
+            liquid_lens=liquid_lens,
+            zmq=zmq,
+            braid_publisher=braid_publisher,
+            opto_trigger=opto_trigger,
+            monitoring=monitoring,
+            logging=logging_cfg,
+            visual_stimuli=visual_stimuli,
+        ))
+        return instance
