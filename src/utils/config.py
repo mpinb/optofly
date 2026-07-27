@@ -325,38 +325,62 @@ class ZMQConfig:
         return f"tcp://*:{port}"
 
 
-class BraidPublisherConfig(ConfigBase):
+@dataclass(frozen=True)
+class BraidPublisherConfig:
     """Configuration helper for the Braid publisher process."""
 
-    def __init__(self, config_path: str = "configs/config.toml"):
-        """Load configuration for the Braid publisher."""
-        super().__init__(config_path, "braid_publisher")
-        config = self._load_config()
+    host: str
+    callback_port: int
+    experiments_path: str
+    url: str
+    callback_url: str
+    timeout: float
+    reconnect_delay: float
+    zmq: "ZMQConfig"
+    zone_timeout: float
 
-        host = config.get("host", "127.0.0.1")
-        events_port = int(config.get("events_port", 8397))
-        callback_port = int(config.get("callback_port", 12345))
+    @classmethod
+    def from_section(
+        cls, section: dict, zmq: "ZMQConfig", trigger_handler: "TriggerHandlerConfig"
+    ) -> "BraidPublisherConfig":
+        host = section.get("host", "127.0.0.1")
+        events_port = int(section.get("events_port", 8397))
+        callback_port = int(section.get("callback_port", 12345))
+        experiments_path = section.get("experiments_path", "/mnt/data/experiments/")
 
-        self.url: str = f"http://{host}:{events_port}"
-        self.callback_url: str = f"http://{host}:{callback_port}"
-
-        self.timeout: float = float(config.get("timeout", 30))
-        if self.timeout <= 0:
+        timeout = float(section.get("timeout", 30))
+        if timeout <= 0:
             raise ValueError("braid_publisher.timeout must be positive")
 
-        self.reconnect_delay: float = float(config.get("reconnect_delay", 5))
-        if self.reconnect_delay <= 0:
+        reconnect_delay = float(section.get("reconnect_delay", 5))
+        if reconnect_delay <= 0:
             raise ValueError("braid_publisher.reconnect_delay must be positive")
 
-        # Shared ZMQ configuration
-        self.zmq = ZMQConfig(config_path)
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "__dict__", dict(
+            host=host,
+            callback_port=callback_port,
+            experiments_path=experiments_path,
+            url=f"http://{host}:{events_port}",
+            callback_url=f"http://{host}:{callback_port}",
+            timeout=timeout,
+            reconnect_delay=reconnect_delay,
+            zmq=zmq,
+            zone_timeout=trigger_handler.zone_timeout,
+        ))
+        return instance
 
-        # Zone timeout — used to expire a stuck _active_obj_id if ZONE_EXIT is missed.
-        trigger_config = TriggerHandlerConfig(config_path)
-        self.zone_timeout: float = trigger_config.zone_timeout
+    def __init__(self, config_path: str = "configs/config.toml"):
+        """Backward-compatible path-based constructor; reimplemented in
+        Task 8 to delegate to AppConfig.load()."""
+        data = _load_toml_cached(config_path)
+        section = data.get("braid_publisher", {})
+        zmq = ZMQConfig(config_path)
+        trigger_handler = TriggerHandlerConfig(config_path)
+        built = BraidPublisherConfig.from_section(section, zmq=zmq, trigger_handler=trigger_handler)
+        object.__setattr__(self, "__dict__", dict(built.__dict__))
 
     def __str__(self) -> str:
-        """Return a readable description of the Braid publisher configuration."""
         return (
             "BraidPublisher Configuration:\n"
             f"  URL: {self.url}\n"

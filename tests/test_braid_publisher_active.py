@@ -216,7 +216,7 @@ def test_reentry_after_prior_trial_is_not_immediately_expired(monkeypatch):
     wrongly expire B. Post-fix, B's own _active_last_seen (2.0, set on
     its ZONE_ENTER) keeps it alive."""
     pub = make_publisher()
-    pub.config.zone_timeout = 3.0
+    # config.zone_timeout is already set to 3.0 by make_publisher()
     clock = {"t": 0.0}
     monkeypatch.setattr("src.processes.braid.time.monotonic", lambda: clock["t"])
 
