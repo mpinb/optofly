@@ -4,7 +4,7 @@ import pytest
 import tomli_w
 import tomllib
 
-from src.utils.config import LiquidLensConfig
+from src.utils.config import CameraConfig, LiquidLensConfig, TriggerHandlerConfig, ZMQConfig
 
 
 def _config_with_predictor(tmp_path: Path, predictor: str) -> str:
@@ -38,3 +38,50 @@ def test_none_predictor_still_works(tmp_path):
     config_path = _config_with_predictor(tmp_path, "none")
     cfg = LiquidLensConfig(config_path)
     assert cfg.predictor == "none"
+
+
+def _camera():
+    return CameraConfig.from_section(
+        {"active": True, "resolution": [640, 480], "fps": 100}
+    )
+
+
+def _zmq():
+    return ZMQConfig.from_section(
+        {"braid_port": 5555, "trigger_port": 5556, "braid_topic": "BRAID"}
+    )
+
+
+def _trigger_handler():
+    return TriggerHandlerConfig.from_section({"zone_timeout": 3.0}, camera=_camera(), zmq=_zmq())
+
+
+def test_from_section_builds_expected_fields():
+    cfg = LiquidLensConfig.from_section(
+        {"port": "/dev/optotune_ld", "predictor": "linear"},
+        trigger_handler=_trigger_handler(),
+        camera=_camera(),
+        zmq=_zmq(),
+    )
+    assert cfg.port == "/dev/optotune_ld"
+    assert cfg.predictor == "linear"
+    assert cfg.zone_timeout == 3.0  # pulled from trigger_handler, not re-parsed
+    assert cfg.fov_x_min == _camera().fov_x_min
+
+
+def test_from_section_missing_port_raises():
+    with pytest.raises(ValueError, match="liquid_lens.port"):
+        LiquidLensConfig.from_section(
+            {}, trigger_handler=_trigger_handler(), camera=_camera(), zmq=_zmq()
+        )
+
+
+def test_frozen_instance_cannot_be_mutated():
+    cfg = LiquidLensConfig.from_section(
+        {"port": "/dev/optotune_ld"},
+        trigger_handler=_trigger_handler(),
+        camera=_camera(),
+        zmq=_zmq(),
+    )
+    with pytest.raises(Exception):
+        cfg.predictor = "none"

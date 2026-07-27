@@ -154,77 +154,86 @@ class TriggerHandlerConfig:
         object.__setattr__(self, "__dict__", dict(built.__dict__))
 
 
-class LiquidLensConfig(ConfigBase):
+@dataclass(frozen=True)
+class LiquidLensConfig:
     """Configuration for the Liquid Lens hardware control."""
 
-    def __init__(self, config_path: str = "configs/config.toml"):
-        """Initialize LiquidLens configuration.
+    port: str
+    mode: str
+    calibration_file: str
+    calibration_model: str
+    max_diopter_step: float
+    zone_timeout: float
+    fov_x_min: float
+    fov_x_max: float
+    fov_y_min: float
+    fov_y_max: float
+    predictor: str
+    system_latency: float
+    prediction_horizon: float
+    zmq: "ZMQConfig"
 
-        Args:
-            config_path: Path to the TOML configuration file
-        """
-        super().__init__(config_path, "liquid_lens")
-        config = self._load_config()
-
-        # Hardware configuration
+    @classmethod
+    def from_section(
+        cls,
+        section: dict,
+        trigger_handler: "TriggerHandlerConfig",
+        camera: "CameraConfig",
+        zmq: "ZMQConfig",
+    ) -> "LiquidLensConfig":
         try:
-            self.port: str = config["port"]
+            port = section["port"]
         except KeyError:
             raise ValueError(
-                "Missing required config key: liquid_lens.port\n"
-                "  Example: port = \"/dev/optotune_ld\""
+                'Missing required config key: liquid_lens.port\n  Example: port = "/dev/optotune_ld"'
             )
 
-        # Control mode
-        self.mode: str = config.get("mode", "diopter")
-
-        # Calibration and tracking settings
-        self.calibration_file: str = config.get(
-            "calibration_file", "calibrations/liquid_lens.csv"
-        )
-        calibration_model = config.get("calibration_model", "quadratic")
+        calibration_model = section.get("calibration_model", "quadratic")
         valid = ("linear", "quadratic", "power", "inverse")
         if calibration_model not in valid:
             raise ValueError(
                 f"liquid_lens.calibration_model must be one of {valid}, got {calibration_model!r}"
             )
-        self.calibration_model: str = calibration_model
 
-        # Max change in commanded diopter per Braid update (slew-rate limit).
-        # The lens rings at ~400 Hz when fed an abrupt step; limiting the
-        # per-update change ramps large transitions (esp. trial onset) so the
-        # resonance isn't excited. 0 disables limiting (raw steps). Tune against
-        # real fly speed: too small lags fast flies, too large still rings.
-        self.max_diopter_step: float = float(config.get("max_diopter_step", 0.0))
-
-        # Zone timeout is now global — read from trigger_handler config
-        trigger_config = TriggerHandlerConfig(config_path)
-        self.zone_timeout: float = trigger_config.zone_timeout
-
-        # Get camera FOV boundaries from CameraConfig (x/y only — lens uses calibration for z)
-        camera_config = CameraConfig(config_path)
-        self.fov_x_min = camera_config.fov_x_min
-        self.fov_x_max = camera_config.fov_x_max
-        self.fov_y_min = camera_config.fov_y_min
-        self.fov_y_max = camera_config.fov_y_max
-
-        # Predictor mode: "none" or "linear"
-        predictor = config.get("predictor", "none")
+        predictor = section.get("predictor", "none")
         if predictor not in ("none", "linear"):
             raise ValueError(
                 f"liquid_lens.predictor must be 'none' or 'linear', got '{predictor}'"
             )
-        self.predictor: str = predictor
 
-        # Prediction parameters (used by "linear" mode). Section name is
-        # kept as [liquid_lens.kalman] for config-file compatibility even
-        # though the Kalman predictor itself was removed.
-        kalman_config = config.get("kalman", {})
-        self.system_latency: float = kalman_config.get("system_latency", 0.05)
-        self.prediction_horizon: float = kalman_config.get("prediction_horizon", 0.05)
+        kalman_config = section.get("kalman", {})
 
-        # ZMQ configuration
-        self.zmq = ZMQConfig(config_path)
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "__dict__", dict(
+            port=port,
+            mode=section.get("mode", "diopter"),
+            calibration_file=section.get("calibration_file", "calibrations/liquid_lens.csv"),
+            calibration_model=calibration_model,
+            max_diopter_step=float(section.get("max_diopter_step", 0.0)),
+            zone_timeout=trigger_handler.zone_timeout,
+            fov_x_min=camera.fov_x_min,
+            fov_x_max=camera.fov_x_max,
+            fov_y_min=camera.fov_y_min,
+            fov_y_max=camera.fov_y_max,
+            predictor=predictor,
+            system_latency=kalman_config.get("system_latency", 0.05),
+            prediction_horizon=kalman_config.get("prediction_horizon", 0.05),
+            zmq=zmq,
+        ))
+        return instance
+
+    def __init__(self, config_path: str = "configs/config.toml"):
+        """Backward-compatible path-based constructor; reimplemented in
+        Task 8 to delegate to AppConfig.load()."""
+        data = _load_toml_cached(config_path)
+        section = data.get("liquid_lens", {})
+        zmq = ZMQConfig(config_path)
+        camera = CameraConfig(config_path)
+        trigger_handler = TriggerHandlerConfig(config_path)
+        built = LiquidLensConfig.from_section(
+            section, trigger_handler=trigger_handler, camera=camera, zmq=zmq
+        )
+        object.__setattr__(self, "__dict__", dict(built.__dict__))
 
 
 @dataclass(frozen=True)
