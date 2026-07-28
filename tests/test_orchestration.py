@@ -215,6 +215,24 @@ def test_start_spawns_core_processes_and_status_reports_running(config_path):
     exp.stop()
 
 
+def test_start_spawns_active_flag_gated_processes(config_path):
+    """configs/config.example.toml has monitoring.active, camera.active, and
+    visual_stimuli.active all set to true -- exercise the gated branches and
+    confirm they actually spawn, so a regression in the `active`-flag
+    checks (wrong attribute, inverted condition, code moved outside its
+    `if`) fails a test instead of silently skipping these processes."""
+    exp = Experiment()
+    exp.start(config_path, metadata=None)
+
+    processes = exp.status()["processes"]
+    assert "Monitoring Server" in processes
+    assert "VisualProcess" in processes
+    assert "CameraProcess" in processes
+    assert "LiquidLens" in processes
+
+    exp.stop()
+
+
 def test_start_while_running_raises(config_path):
     from src.orchestration import ExperimentAlreadyRunningError
 
@@ -248,15 +266,35 @@ def test_prepare_braid_folder_is_reused_by_start(config_path, patch_processes):
     exp.stop()
 
 
-def test_start_writes_metadata_when_provided(config_path, tmp_path):
+def test_start_writes_metadata_when_provided(monkeypatch, config_path):
+    write_metadata_calls = []
+    extract_config_columns_calls = []
+    append_metadata_to_csv_calls = []
+    monkeypatch.setattr(
+        orchestration,
+        "write_metadata",
+        lambda metadata, braid_folder: write_metadata_calls.append((metadata, braid_folder)),
+    )
+    monkeypatch.setattr(
+        orchestration,
+        "extract_config_columns",
+        lambda config_path: extract_config_columns_calls.append(config_path) or ["researcher"],
+    )
+    monkeypatch.setattr(
+        orchestration,
+        "append_metadata_to_csv",
+        lambda metadata, braid_folder, config_columns: append_metadata_to_csv_calls.append(
+            (metadata, braid_folder, config_columns)
+        ),
+    )
+
     exp = Experiment()
     metadata = {"experiment_duration": 2, "researcher": "test"}
     exp.start(config_path, metadata=metadata)
 
     braid_folder = exp.status()["braid_folder"]
-    import os
+    assert write_metadata_calls == [(metadata, braid_folder)]
+    assert extract_config_columns_calls == [config_path]
+    assert append_metadata_to_csv_calls == [(metadata, braid_folder, ["researcher"])]
 
-    assert os.path.exists(os.path.join(braid_folder, "metadata.json")) or os.path.exists(
-        os.path.join(braid_folder, "metadata.toml")
-    ) or True  # exact metadata filename is write_metadata()'s concern, not this test's
     exp.stop()
