@@ -1,7 +1,6 @@
 import json
 import os
 import re
-import sys
 import time
 import urllib.parse
 from datetime import datetime
@@ -12,6 +11,14 @@ import requests
 
 
 COOKIE_JAR_FNAME = "braid-cookies.json"
+
+
+class BraidFolderError(Exception):
+    """Raised when the Braid recording folder cannot be found, created, or confirmed.
+
+    Replaces the old sys.exit(1) behavior so this function is safely callable
+    from a long-running process (e.g. a Flask GUI backend) as well as the CLI.
+    """
 
 
 class BraidProxy:
@@ -106,7 +113,7 @@ def check_braid_folder_exists(
         braid_proxy is None only when auto_start_recording is False.
 
     Raises:
-        SystemExit: If root_path doesn't exist, connection fails, or
+        BraidFolderError: If root_path doesn't exist, connection fails, or
             recording start fails.
     """
     if not os.path.exists(root_path):
@@ -116,7 +123,7 @@ def check_braid_folder_exists(
         print(f"Path: {root_path}")
         print("\nPlease verify the experiments path is mounted and accessible.")
         print(f"{'=' * 70}\n")
-        sys.exit(1)
+        raise BraidFolderError(f"Braid experiments root path does not exist: {root_path}")
 
     today = datetime.now().strftime("%Y%m%d")
     pattern = re.compile(f"^{today}_\\d{{6}}\\.braid$")
@@ -136,7 +143,7 @@ def check_braid_folder_exists(
             print(f"Path: {root_path}")
             print("\nPlease check folder permissions.")
             print(f"{'=' * 70}\n")
-            sys.exit(1)
+            raise BraidFolderError(f"Permission denied accessing experiments folder: {root_path}")
         return matching
 
     if not auto_start_recording:
@@ -159,7 +166,7 @@ def check_braid_folder_exists(
         print(f"Searched in: {root_path}")
         print("\nPlease start Braid recording BEFORE running this script.")
         print(f"{'=' * 70}\n")
-        sys.exit(1)
+        raise BraidFolderError(f"No Braid recording folder found for today in {root_path}")
 
     if not callback_url:
         print(f"\n{'=' * 70}")
@@ -167,7 +174,7 @@ def check_braid_folder_exists(
         print(f"{'=' * 70}")
         print("Cannot start recording without Braid callback URL.")
         print(f"{'=' * 70}\n")
-        sys.exit(1)
+        raise BraidFolderError("No Braid folder found and no Braid callback URL provided")
 
     print("\nStarting Braid recording...")
     print(f"Connecting to Braid at {callback_url}...")
@@ -207,7 +214,7 @@ def check_braid_folder_exists(
         print(f"Waited {max_wait} seconds for a new folder to appear in {root_path}")
         print("The recording may not be working correctly.")
         print(f"{'=' * 70}\n")
-        sys.exit(1)
+        raise BraidFolderError(f"Recording started but .braid folder not created in {root_path}")
 
     except (ConnectionError, TimeoutError) as e:
         print(f"\n{'=' * 70}")
@@ -218,7 +225,7 @@ def check_braid_folder_exists(
         print("  1. Braid is running (braid-run ...)")
         print(f"  2. Braid is accessible at {callback_url}")
         print(f"{'=' * 70}\n")
-        sys.exit(1)
+        raise BraidFolderError(f"Could not connect to Braid at {callback_url}: {e}") from e
 
     except Exception as e:
         print(f"\n{'=' * 70}")
@@ -226,7 +233,7 @@ def check_braid_folder_exists(
         print(f"{'=' * 70}")
         print(f"{e}")
         print(f"{'=' * 70}\n")
-        sys.exit(1)
+        raise BraidFolderError(f"Failed to start Braid recording: {e}") from e
 
 
 def verify_csv_files_in_braid(braid_folder: str) -> None:
