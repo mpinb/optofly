@@ -24,7 +24,7 @@ from src.processes.led import OptoTriggerWorker
 from src.processes.camera import RustCameraProcess as CameraProcess
 from src.processes.lens import LiquidLens
 from src.utils.braid import BraidProxy, check_braid_folder_exists
-from src.utils.braid import verify_csv_files_in_braid  # noqa: F401 -- used by stop() (Task 4)
+from src.utils.braid import verify_csv_files_in_braid
 from src.utils.config import AppConfig
 from src.utils.logger import configure_process_logging
 from src.utils.metadata import append_metadata_to_csv
@@ -308,13 +308,38 @@ class Experiment:
             raise ExperimentStartError("; ".join(fatal_messages))
 
     def stop(self) -> None:
-        """No-op when nothing has been started yet.
-
-        main.py's finally block always calls stop(), including when start()
-        was never reached (e.g. prepare_braid_folder() raised) or failed
-        before an mp.Event was created -- this guard makes that safe. The
-        real shutdown sequence (join/terminate processes, reset state) is
-        added in Task 4 alongside start().
-        """
         if self._stop_event is None:
             return
+
+        self._stop_event.set()
+        time.sleep(1)
+
+        for name, process in self._processes:
+            if process.is_alive():
+                timeout = _SHUTDOWN_TIMEOUTS.get(name, 5)
+                logger.info(f"  Waiting for {name} to terminate...")
+                process.join(timeout=timeout)
+                if process.is_alive():
+                    logger.info(f"  Force terminating {name}...")
+                    process.terminate()
+                    process.join(timeout=2)
+                    self._shutdown_state[name] = "forced"
+                else:
+                    self._shutdown_state[name] = "clean"
+            else:
+                self._shutdown_state[name] = "clean"
+
+        if self._braid_folder:
+            verify_csv_files_in_braid(self._braid_folder)
+
+        if self._braid_proxy is not None:
+            logger.info("Stopping Braid recording...")
+            try:
+                self._braid_proxy.stop_csv_recording()
+                logger.info("✓ Recording stopped")
+            except Exception:
+                logger.exception("Failed to stop Braid recording")
+
+        self._stop_event = None
+        self._braid_folder = None
+        self._braid_proxy = None

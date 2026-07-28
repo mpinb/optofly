@@ -266,6 +266,51 @@ def test_prepare_braid_folder_is_reused_by_start(config_path, patch_processes):
     exp.stop()
 
 
+class FakeHungProcess(FakeProcess):
+    """Never dies on join() -- forces Experiment.stop() to terminate() it."""
+
+    def join(self, timeout=None):
+        pass  # stays alive
+
+
+def test_stop_reports_clean_shutdown(config_path):
+    exp = Experiment()
+    exp.start(config_path, metadata=None)
+    exp.stop()
+
+    status = exp.status()
+    assert status["running"] is False
+    for info in status["processes"].values():
+        assert info["shutdown"] == "clean"
+
+
+def test_stop_force_terminates_hung_process(monkeypatch, config_path):
+    monkeypatch.setattr(orchestration, "OptoTriggerWorker", FakeHungProcess)
+    exp = Experiment()
+    exp.start(config_path, metadata=None)
+    exp.stop()
+
+    status = exp.status()
+    assert status["processes"]["OptoTriggerWorker"]["shutdown"] == "forced"
+    hung = [p for p in FakeProcess.instances if isinstance(p, FakeHungProcess)][0]
+    assert hung.terminated is True
+
+
+def test_needs_cleanup_true_when_stop_event_set_externally(config_path):
+    exp = Experiment()
+    exp.start(config_path, metadata=None)
+
+    # Simulate a mid-run crash / anything setting the shared stop event
+    # directly, without going through Experiment.stop().
+    exp._stop_event.set()
+
+    assert exp.needs_cleanup() is True
+    assert exp.is_running() is False  # is_running() flips immediately...
+
+    exp.stop()
+    assert exp.needs_cleanup() is False  # ...but needs_cleanup() clears once stop() actually runs
+
+
 def test_start_writes_metadata_when_provided(monkeypatch, config_path):
     write_metadata_calls = []
     extract_config_columns_calls = []
