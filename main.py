@@ -175,24 +175,20 @@ def main():
 
     print(f"Experiment duration set to {experiment_duration} hours.")
 
+    start_failed = False
     try:
         experiment.start(config_path, metadata)
-    except ExperimentStartError as e:
-        print(f"\nFATAL: {e}")
-        experiment.stop()
-        sys.exit(1)
 
-    status = experiment.status()
-    end_time = status["end_time"]
-    print(
-        f"Experiment will end at: {datetime.fromtimestamp(end_time).strftime('%Y-%m-%d %H:%M:%S')}"
-    )
-    if status["log_path"]:
-        print(f"Logging to: {status['log_path']}")
+        status = experiment.status()
+        end_time = status["end_time"]
+        print(
+            f"Experiment will end at: {datetime.fromtimestamp(end_time).strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        if status["log_path"]:
+            print(f"Logging to: {status['log_path']}")
 
-    print_experiment_config(app_config, list(status["processes"].keys()))
+        print_experiment_config(app_config, list(status["processes"].keys()))
 
-    try:
         while experiment.is_running():
             if datetime.now().timestamp() >= end_time:
                 print("\n\nExperiment duration reached, shutting down...")
@@ -202,6 +198,9 @@ def main():
                 print("\n\nA critical process died during the run, shutting down...")
                 break
             time.sleep(0.1)
+    except ExperimentStartError as e:
+        print(f"\nFATAL: {e}")
+        start_failed = True
     except KeyboardInterrupt:
         print("\n\nReceived keyboard interrupt, shutting down...")
     except Exception as e:
@@ -212,7 +211,7 @@ def main():
         raise
     finally:
         print("\nShutting down processes...")
-        braid_folder_at_stop = status["braid_folder"]
+        braid_folder_at_stop = experiment.status()["braid_folder"]
         experiment.stop()
 
         if braid_folder_at_stop:
@@ -221,6 +220,9 @@ def main():
             print("=" * 70)
         else:
             print("\nExperiment terminated.")
+
+    if start_failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
