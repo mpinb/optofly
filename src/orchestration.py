@@ -77,7 +77,9 @@ def _check_critical_processes_alive(processes: list) -> list[str]:
     messages = []
     for name, proc in processes:
         if name in _CRITICAL_INIT_HINTS and not proc.is_alive():
-            messages.append(f"{name} process exited. {_CRITICAL_INIT_HINTS[name]}")
+            messages.append(
+                f"{name} process exited during initialization. {_CRITICAL_INIT_HINTS[name]}"
+            )
     return messages
 
 

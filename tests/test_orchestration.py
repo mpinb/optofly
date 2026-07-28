@@ -115,6 +115,11 @@ def test_dead_braid_publisher_produces_its_own_message_not_hardware():
     assert "BraidPublisher" in messages[0]
     assert "Braid" in messages[0]
     assert "hardware" not in messages[0].lower()
+    assert messages[0] == (
+        "BraidPublisher process exited during initialization. "
+        "Check that Braid is running and reachable at the configured "
+        "host/port in config.toml."
+    )
 
 
 def test_dead_liquid_lens_produces_hardware_message():
