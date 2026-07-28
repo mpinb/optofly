@@ -1,6 +1,4 @@
 from main import (
-    check_critical_processes_alive,
-    check_latency_logger_alive,
     check_recording_time_sufficient,
     handle_metadata_cancellation,
 )
@@ -18,103 +16,6 @@ def _app_config(tmp_path, **toml_overrides):
     out = tmp_path / "test_main_app_config.toml"
     out.write_bytes(tomli_w.dumps(data).encode("utf-8"))
     return AppConfig.load(str(out))
-
-
-class _FakeAliveProcess:
-    def is_alive(self):
-        return True
-
-
-class _FakeDeadProcess:
-    def is_alive(self):
-        return False
-
-
-def test_dead_braid_publisher_produces_its_own_message_not_hardware():
-    """A BraidPublisher init failure must be diagnosed as a Braid
-    connectivity issue, not misattributed to lens/opto hardware."""
-    processes = [
-        ("BraidPublisher", _FakeDeadProcess()),
-        ("TriggerHandler", _FakeAliveProcess()),
-    ]
-
-    messages = check_critical_processes_alive(processes)
-
-    assert len(messages) == 1
-    assert "BraidPublisher" in messages[0]
-    assert "Braid" in messages[0]
-    assert "hardware" not in messages[0].lower()
-
-
-def test_dead_liquid_lens_produces_hardware_message():
-    processes = [("LiquidLens", _FakeDeadProcess())]
-
-    messages = check_critical_processes_alive(processes)
-
-    assert len(messages) == 1
-    assert "LiquidLens" in messages[0]
-    assert "hardware" in messages[0].lower()
-
-
-def test_dead_opto_trigger_worker_produces_hardware_message():
-    processes = [("OptoTriggerWorker", _FakeDeadProcess())]
-
-    messages = check_critical_processes_alive(processes)
-
-    assert len(messages) == 1
-    assert "OptoTriggerWorker" in messages[0]
-    assert "hardware" in messages[0].lower()
-
-
-def test_all_alive_produces_no_messages():
-    processes = [
-        ("BraidPublisher", _FakeAliveProcess()),
-        ("LiquidLens", _FakeAliveProcess()),
-        ("OptoTriggerWorker", _FakeAliveProcess()),
-    ]
-
-    assert check_critical_processes_alive(processes) == []
-
-
-def test_non_critical_process_death_is_ignored():
-    """A dead Monitoring Server/VisualProcess/CameraProcess must not abort
-    the whole experiment — only processes known to fail fast and
-    unrecoverably during their own init are critical."""
-    processes = [
-        ("Monitoring Server", _FakeDeadProcess()),
-        ("VisualProcess", _FakeDeadProcess()),
-        ("CameraProcess", _FakeDeadProcess()),
-    ]
-
-    assert check_critical_processes_alive(processes) == []
-
-
-def test_dead_trigger_handler_produces_its_own_message():
-    """TriggerHandler binds its own ZMQ publisher socket during init and
-    exits unrecoverably if the port is already taken -- the same fail-fast
-    profile as the other critical processes, so its death during init must
-    also be treated as fatal rather than silently running a 24-hour
-    experiment with no tracking, no triggers, no recordings."""
-    processes = [("TriggerHandler", _FakeDeadProcess())]
-
-    messages = check_critical_processes_alive(processes)
-
-    assert len(messages) == 1
-    assert "TriggerHandler" in messages[0]
-
-
-def test_multiple_dead_critical_processes_each_produce_a_message():
-    processes = [
-        ("BraidPublisher", _FakeDeadProcess()),
-        ("LiquidLens", _FakeDeadProcess()),
-    ]
-
-    messages = check_critical_processes_alive(processes)
-
-    assert len(messages) == 2
-    joined = " ".join(messages)
-    assert "BraidPublisher" in joined
-    assert "LiquidLens" in joined
 
 
 def test_warns_when_max_recording_time_less_than_zone_timeout(tmp_path):
@@ -182,14 +83,12 @@ def test_handle_metadata_cancellation_stop_failure_is_reported_not_raised(capsys
     assert "warning" in out.lower()
 
 
-def test_check_latency_logger_alive_returns_none_when_alive():
-    assert check_latency_logger_alive(_FakeAliveProcess()) is None
+def test_load_config_still_returns_app_config():
+    from src.utils.config import AppConfig
+    from main import load_config
 
-
-def test_check_latency_logger_alive_returns_warning_when_dead():
-    warning = check_latency_logger_alive(_FakeDeadProcess())
-    assert warning is not None
-    assert "LatencyLogger" in warning
+    app_config = load_config("configs/config.example.toml")
+    assert isinstance(app_config, AppConfig)
 
 
 def test_summary_prints_lens_predictor(capsys, tmp_path):

@@ -145,6 +145,14 @@ class Experiment:
             "processes": processes,
         }
 
+    @property
+    def braid_proxy(self) -> Optional[BraidProxy]:
+        """The BraidProxy from the most recent prepare_braid_folder()/start()
+        call, or None. Exposed for callers (main.py's metadata-cancellation
+        path) that need to stop a recording that was started before start()
+        was ever called."""
+        return self._braid_proxy
+
     def prepare_braid_folder(self, config_path: str) -> str:
         """Confirm/start Braid recording and return the resulting folder path.
 
