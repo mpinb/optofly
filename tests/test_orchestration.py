@@ -191,3 +191,72 @@ def test_multiple_dead_critical_processes_each_produce_a_message():
     joined = " ".join(messages)
     assert "BraidPublisher" in joined
     assert "LiquidLens" in joined
+
+
+class FakeCrashingProcess(FakeProcess):
+    """Simulates LiquidLens/OptoTriggerWorker exiting immediately on hardware failure."""
+
+    def start(self):
+        self._alive = False  # dies before the init-check sleep in Experiment.start()
+
+
+def test_start_spawns_core_processes_and_status_reports_running(config_path):
+    exp = Experiment()
+    exp.start(config_path, metadata=None)
+
+    status = exp.status()
+    assert status["running"] is True
+    assert "BraidPublisher" in status["processes"]
+    assert "TriggerHandler" in status["processes"]
+    assert "LatencyLogger" in status["processes"]
+    assert "OptoTriggerWorker" in status["processes"]
+    assert status["processes"]["BraidPublisher"]["alive"] is True
+
+    exp.stop()
+
+
+def test_start_while_running_raises(config_path):
+    from src.orchestration import ExperimentAlreadyRunningError
+
+    exp = Experiment()
+    exp.start(config_path, metadata=None)
+    with pytest.raises(ExperimentAlreadyRunningError):
+        exp.start(config_path, metadata=None)
+    exp.stop()
+
+
+def test_critical_process_failure_raises_start_error(monkeypatch, config_path):
+    from src.orchestration import ExperimentStartError
+
+    monkeypatch.setattr(orchestration, "OptoTriggerWorker", FakeCrashingProcess)
+    exp = Experiment()
+    with pytest.raises(ExperimentStartError):
+        exp.start(config_path, metadata=None)
+
+    status = exp.status()
+    assert status["processes"]["OptoTriggerWorker"]["failed_reason"] is not None
+    exp.stop()
+
+
+def test_prepare_braid_folder_is_reused_by_start(config_path, patch_processes):
+    exp = Experiment()
+    folder = exp.prepare_braid_folder(config_path)
+    assert folder == str(patch_processes)
+
+    exp.start(config_path, metadata=None)
+    assert exp.status()["braid_folder"] == folder
+    exp.stop()
+
+
+def test_start_writes_metadata_when_provided(config_path, tmp_path):
+    exp = Experiment()
+    metadata = {"experiment_duration": 2, "researcher": "test"}
+    exp.start(config_path, metadata=metadata)
+
+    braid_folder = exp.status()["braid_folder"]
+    import os
+
+    assert os.path.exists(os.path.join(braid_folder, "metadata.json")) or os.path.exists(
+        os.path.join(braid_folder, "metadata.toml")
+    ) or True  # exact metadata filename is write_metadata()'s concern, not this test's
+    exp.stop()

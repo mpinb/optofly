@@ -7,31 +7,30 @@ one interface instead of duplicating the spawn/shutdown sequence.
 
 import logging
 import multiprocessing as mp
-import time  # noqa: F401 -- used by start()/stop() (Tasks 3-4); monkeypatched in tests
-from datetime import datetime  # noqa: F401 -- used by start() (Task 3) for end_time
+import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-# The process classes and helpers below are not yet called from this module --
-# start()/stop()/check_health() land in Tasks 3-5 and will use them. They stay
-# imported now because tests/test_orchestration.py's patch_processes fixture
-# monkeypatches these exact module attributes (monkeypatch.setattr requires
-# the attribute to already exist).
-from src.processes.braid import BraidPublisher  # noqa: F401
-from src.processes.tracking import TriggerHandler  # noqa: F401
-from src.processes.latency_logger import LatencyLogger  # noqa: F401
-from src.visual.process import VisualProcess  # noqa: F401
-from src.processes.led import OptoTriggerWorker  # noqa: F401
-from src.processes.camera import RustCameraProcess as CameraProcess  # noqa: F401
-from src.processes.lens import LiquidLens  # noqa: F401
+# Process classes used by start() to spawn the worker pool. Imported here
+# (rather than inside start()) because tests/test_orchestration.py's
+# patch_processes fixture monkeypatches these exact module attributes
+# (monkeypatch.setattr requires the attribute to already exist).
+from src.processes.braid import BraidPublisher
+from src.processes.tracking import TriggerHandler
+from src.processes.latency_logger import LatencyLogger
+from src.visual.process import VisualProcess
+from src.processes.led import OptoTriggerWorker
+from src.processes.camera import RustCameraProcess as CameraProcess
+from src.processes.lens import LiquidLens
 from src.utils.braid import BraidProxy, check_braid_folder_exists
-from src.utils.braid import verify_csv_files_in_braid  # noqa: F401
+from src.utils.braid import verify_csv_files_in_braid  # noqa: F401 -- used by stop() (Task 4)
 from src.utils.config import AppConfig
-from src.utils.logger import configure_process_logging  # noqa: F401
-from src.utils.metadata import append_metadata_to_csv  # noqa: F401
-from src.utils.metadata import extract_config_columns  # noqa: F401
-from src.utils.metadata import write_metadata  # noqa: F401
-from src.monitoring.server import run_server  # noqa: F401
+from src.utils.logger import configure_process_logging
+from src.utils.metadata import append_metadata_to_csv
+from src.utils.metadata import extract_config_columns
+from src.utils.metadata import write_metadata
+from src.monitoring.server import run_server
 
 logger = logging.getLogger(__name__)
 # Always emit this module's milestone messages at INFO regardless of the root
@@ -163,6 +162,150 @@ class Experiment:
             auto_start_recording=True,
         )
         return self._braid_folder
+
+    def start(self, config_path: str, metadata: Optional[dict] = None) -> None:
+        if self.is_running():
+            raise ExperimentAlreadyRunningError("Experiment already running")
+
+        app_config = AppConfig.load(config_path)
+        log_level_str = app_config.logging.level
+        log_level_int = app_config.logging.level_int()
+
+        if self._braid_folder is None:
+            self.prepare_braid_folder(config_path)
+        braid_folder = self._braid_folder
+
+        if metadata is not None:
+            write_metadata(metadata, braid_folder)
+            config_columns = extract_config_columns(config_path)
+            append_metadata_to_csv(metadata, braid_folder, config_columns)
+        experiment_duration = (
+            float(metadata.get("experiment_duration", 24)) if metadata else 24.0
+        )
+        self._end_time = datetime.now().timestamp() + experiment_duration * 3600
+
+        _copy_config_to_braid_folder(config_path, braid_folder)
+        if app_config.visual_stimuli.active:
+            _copy_config_to_braid_folder(app_config.visual_stimuli.config_file, braid_folder)
+
+        log_path = str(Path(braid_folder) / "optofly.log")
+        self._log_path = log_path
+        configure_process_logging(log_path, "Main", "WHITE", level=log_level_int)
+        logger.info(f"Logging to: {log_path}")
+
+        stop_event = mp.Event()
+        self._stop_event = stop_event
+        self._processes = []
+        self._failed_reasons = {}
+        self._shutdown_state = {}
+        self._known_dead = set()
+
+        common = dict(
+            config_path=config_path, event=stop_event, log_path=log_path, log_level=log_level_str
+        )
+
+        logger.info("Starting core processes...")
+        braid_publisher = BraidPublisher(**common)
+        braid_publisher.start()
+        self._processes.append(("BraidPublisher", braid_publisher))
+        logger.info("  ✓ BraidPublisher")
+        time.sleep(0.5)
+
+        trigger_handler = TriggerHandler(**common)
+        trigger_handler.start()
+        self._processes.append(("TriggerHandler", trigger_handler))
+        logger.info("  ✓ TriggerHandler")
+        time.sleep(0.5)
+
+        latency_logger = LatencyLogger(
+            config_path=config_path, event=stop_event, braid_folder=braid_folder,
+            log_path=log_path, log_level=log_level_str,
+        )
+        latency_logger.start()
+        self._processes.append(("LatencyLogger", latency_logger))
+        logger.info("  ✓ LatencyLogger")
+        time.sleep(0.5)
+
+        logger.info("Starting optional processes...")
+        if app_config.monitoring.active:
+            zmq_address = f"tcp://localhost:{app_config.zmq.trigger_port}"
+            monitoring_process = mp.Process(
+                target=run_server,
+                args=(
+                    zmq_address,
+                    app_config.monitoring.host,
+                    app_config.monitoring.port,
+                    app_config.zmq.zone_enter_topic,
+                ),
+                daemon=True,
+            )
+            monitoring_process.start()
+            self._processes.append(("Monitoring Server", monitoring_process))
+            logger.info("  ✓ Monitoring Server")
+            logger.info(f"    Dashboard: http://{app_config.monitoring.host}:{app_config.monitoring.port}")
+
+        if app_config.visual_stimuli.active:
+            visual_process = VisualProcess(
+                config_path=config_path,
+                event=stop_event,
+                braid_folder=braid_folder,
+                log_path=log_path,
+                log_level=log_level_str,
+            )
+            visual_process.start()
+            self._processes.append(("VisualProcess", visual_process))
+            logger.info("  ✓ VisualProcess (Panda3D)")
+
+        if app_config.camera.active:
+            video_folder = str(
+                Path(braid_folder).parent.parent / "videos" / Path(braid_folder).name
+            )
+            camera = CameraProcess(
+                config_path=config_path,
+                event=stop_event,
+                save_folder=video_folder,
+                log_path=log_path,
+                log_level=log_level_str,
+            )
+            camera.start()
+            self._processes.append(("CameraProcess", camera))
+            logger.info("  ✓ CameraProcess")
+
+            liquid_lens = LiquidLens(
+                event=stop_event,
+                config_path=config_path,
+                braid_folder=braid_folder,
+                video_folder=video_folder,
+                log_path=log_path,
+                log_level=log_level_str,
+            )
+            liquid_lens.start()
+            self._processes.append(("LiquidLens", liquid_lens))
+            logger.info("  ✓ LiquidLens")
+
+        opto_trigger = OptoTriggerWorker(
+            event=stop_event,
+            braid_folder=braid_folder,
+            config_path=config_path,
+            log_path=log_path,
+            log_level=log_level_str,
+        )
+        opto_trigger.start()
+        self._processes.append(("OptoTriggerWorker", opto_trigger))
+        logger.info("  ✓ OptoTriggerWorker")
+
+        time.sleep(1)
+
+        fatal_messages = _check_critical_processes_alive(self._processes)
+        if fatal_messages:
+            for name, proc in self._processes:
+                if name in _CRITICAL_INIT_HINTS and not proc.is_alive():
+                    self._failed_reasons[name] = (
+                        f"{name} process exited during initialization. "
+                        f"{_CRITICAL_INIT_HINTS[name]}"
+                    )
+            stop_event.set()
+            raise ExperimentStartError("; ".join(fatal_messages))
 
     def stop(self) -> None:
         """No-op when nothing has been started yet.
