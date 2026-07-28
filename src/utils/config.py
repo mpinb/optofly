@@ -511,8 +511,6 @@ class CameraConfig:
     height: int
     exposure_time: float
     max_recording_time: float
-    zmq_address: str
-    zmq_port: str
     save_folder: str
     fov_frustum: bool
     fov_x_min: float
@@ -529,7 +527,6 @@ class CameraConfig:
     fov_far_x_max: float | None
     fov_far_y_min: float | None
     fov_far_y_max: float | None
-    braid_ximea_calibration_file: str | None
 
     @classmethod
     def from_section(cls, section: dict) -> "CameraConfig":
@@ -590,8 +587,6 @@ class CameraConfig:
             height=sensor_height_px,
             exposure_time=float(section.get("exposure_time", 0.0)),
             max_recording_time=float(section.get("max_recording_time", 3.0)),
-            zmq_address=section.get("zmq_address", "127.0.0.1"),
-            zmq_port=section.get("zmq_port", "5556"),
             save_folder=section.get("save_folder", "camera_videos"),
             fov_frustum=fov_frustum,
             fov_x_min=fov_x_min,
@@ -608,7 +603,6 @@ class CameraConfig:
             fov_far_x_max=fov_far_x_max,
             fov_far_y_min=fov_far_y_min,
             fov_far_y_max=fov_far_y_max,
-            braid_ximea_calibration_file=section.get("braid_ximea_calibration_file", None),
         ))
         return instance
 
