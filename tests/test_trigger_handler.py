@@ -74,6 +74,8 @@ def configure_test_trigger(handler):
             "min_velocity": 0.05,
             "max_velocity": 0.5,
             "heading_cone_deg": 30.0,
+            "opto_zone_scale": 0.5,
+            "visual_zone_scale": 1.0,
         },
         camera=camera,
         zmq=zmq,
@@ -92,6 +94,8 @@ def configure_test_trigger(handler):
     handler.z_min = test_config.z_min
     handler.z_max = test_config.z_max
     handler.cooldown_period = test_config.cooldown_period
+    handler.opto_zone_scale = test_config.opto_zone_scale
+    handler.visual_zone_scale = test_config.visual_zone_scale
 
 
 class FakeClock:
