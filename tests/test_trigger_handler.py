@@ -424,6 +424,153 @@ def test_zone_enter_preserves_braid_timestamp_and_adds_handler_timestamp(
     assert payload["timestamp"] == fake_clock.now  # existing field unchanged
 
 
+def all_messages(fake_publisher):
+    return decode_messages(fake_publisher)
+
+
+def test_opto_zone_enter_fires_once_fly_reaches_scaled_inner_zone(handler):
+    handler.config = handler.config.__class__.from_section(
+        {
+            "zone_timeout": handler.config.zone_timeout,
+            "cooldown_period": handler.config.cooldown_period,
+            "z_min": handler.config.z_min,
+            "z_max": handler.config.z_max,
+            "min_tracking_age": handler.config.min_tracking_age,
+            "min_velocity": handler.config.min_velocity,
+            "max_velocity": handler.config.max_velocity,
+            "heading_cone_deg": handler.config.heading_cone_deg,
+            "opto_zone_scale": 0.5,
+            "visual_zone_scale": 1.0,
+        },
+        camera=CameraConfig.from_section(
+            {
+                "active": True,
+                "resolution": [640, 480],
+                "fps": 100,
+                "FOV": {
+                    "x_min": handler.config.fov_x_min,
+                    "x_max": handler.config.fov_x_max,
+                    "y_min": handler.config.fov_y_min,
+                    "y_max": handler.config.fov_y_max,
+                },
+            }
+        ),
+        zmq=handler.config.zmq,
+    )
+    handler.opto_zone_scale = 0.5
+    handler.visual_zone_scale = 1.0
+
+    # FOV is -0.05..0.05 in x/y (see configure_test_trigger). Outer entry at
+    # x=0.05 is inside the outer FOV (triggers ZONE_ENTER + VISUAL_ZONE_ENTER,
+    # since visual_zone_scale=1.0 makes the visual box equal the outer FOV)
+    # but outside the opto zone (half-width 0.05*0.5=0.025 at scale=0.5).
+    # Only once x reaches 0.0 (fov center) is the fly guaranteed inside the
+    # scaled-down opto box, firing OPTO_ZONE_ENTER on that later update.
+    handler.process_message(make_birth(x=0.08, frame=1, xvel=-0.2))
+    handler.process_message(make_update(x=0.05, frame=2, xvel=-0.2))
+    handler.process_message(make_update(x=0.0, frame=3, xvel=-0.2))
+
+    messages = all_messages(handler.publisher)
+    topics = [topic for topic, _ in messages]
+    assert topics == ["ZONE_ENTER", "VISUAL_ZONE_ENTER", "OPTO_ZONE_ENTER"]
+    opto_payload = messages[2][1]
+    assert opto_payload["obj_id"] == 7
+    assert opto_payload["frame"] == 3
+    assert opto_payload["record_frame"] == 2
+
+
+def test_visual_zone_enter_fires_same_frame_as_zone_enter_when_scale_is_one(handler):
+    handler.visual_zone_scale = 1.0
+
+    handler.process_message(make_birth(x=0.08, frame=1, xvel=-0.2))
+    handler.process_message(make_update(x=0.05, frame=2, xvel=-0.2))
+
+    messages = all_messages(handler.publisher)
+    assert [topic for topic, _ in messages] == ["ZONE_ENTER", "VISUAL_ZONE_ENTER"]
+    assert messages[0][1]["frame"] == messages[1][1]["frame"] == 2
+    assert messages[1][1]["record_frame"] == 2
+
+
+def test_opto_and_visual_fired_flags_reset_on_zone_exit_allowing_refire(handler):
+    handler.opto_zone_scale = 1.0
+    handler.visual_zone_scale = 1.0
+
+    handler.process_message(make_birth(x=0.08, frame=1, xvel=-0.2))
+    handler.process_message(make_update(x=0.05, frame=2, xvel=-0.2))
+    handler.process_message(make_update(x=0.08, frame=3, xvel=-0.2))  # exits FOV
+    handler.process_message(make_update(x=0.05, frame=4, xvel=-0.2))  # re-enters
+
+    # Both scales are 1.0 here, so opto and visual both fire on the same
+    # update as ZONE_ENTER; the implementation checks opto before visual
+    # when both fire simultaneously (see Step 7 below), hence this order.
+    topics = [topic for topic, _ in all_messages(handler.publisher)]
+    assert topics == [
+        "ZONE_ENTER",
+        "OPTO_ZONE_ENTER",
+        "VISUAL_ZONE_ENTER",
+        "ZONE_EXIT",
+        "ZONE_ENTER",
+        "OPTO_ZONE_ENTER",
+        "VISUAL_ZONE_ENTER",
+    ]
+
+
+def test_opto_zone_enter_never_fires_before_zone_enter(handler):
+    handler.opto_zone_scale = 1.0
+    handler.visual_zone_scale = 1.0
+
+    # xvel=0 with min_velocity=0.05 means the object never passes the
+    # velocity gate, so it should never reach in_zone at all.
+    handler.process_message(make_birth(x=0.08, frame=1, xvel=0.0))
+    handler.process_message(make_update(x=0.05, frame=2, xvel=0.0))
+
+    assert all_messages(handler.publisher) == []
+
+
+def test_zone_enter_payload_includes_record_frame_equal_to_its_own_frame(handler):
+    handler.process_message(make_birth(x=0.08, frame=1, xvel=-0.2))
+    handler.process_message(make_update(x=0.05, frame=2, xvel=-0.2))
+
+    messages = zone_messages(handler.publisher)
+    zone_enter_payload = messages[0][1]
+    assert zone_enter_payload["record_frame"] == zone_enter_payload["frame"] == 2
+
+
+def test_get_zone_at_z_scale_one_equals_outer_fov(handler):
+    x_min, x_max, y_min, y_max = handler._get_zone_at_z(0.2, 1.0)
+    assert (x_min, x_max, y_min, y_max) == handler._get_fov_at_z(0.2)
+
+
+def test_get_zone_at_z_shrinks_toward_center(handler):
+    outer = handler._get_fov_at_z(0.2)
+    x_min, x_max, y_min, y_max = handler._get_zone_at_z(0.2, 0.5)
+    outer_cx = (outer[0] + outer[1]) / 2.0
+    outer_cy = (outer[2] + outer[3]) / 2.0
+    assert x_min == pytest.approx(outer_cx - (outer[1] - outer[0]) / 4.0)
+    assert x_max == pytest.approx(outer_cx + (outer[1] - outer[0]) / 4.0)
+    assert y_min == pytest.approx(outer_cy - (outer[3] - outer[2]) / 4.0)
+    assert y_max == pytest.approx(outer_cy + (outer[3] - outer[2]) / 4.0)
+
+
+def test_get_zone_at_z_scales_frustum_interpolated_box(frustum_handler):
+    """Uses the frustum_handler fixture already defined earlier in this
+    file (near ±0.03 at z=0.10, far ±0.06 at z=0.30, both centered on 0),
+    so a 0.5 scale should exactly halve the frustum-interpolated box at
+    either plane."""
+    h = frustum_handler
+    x_min, x_max, y_min, y_max = h._get_zone_at_z(0.10, 0.5)
+    assert x_min == pytest.approx(-0.015)
+    assert x_max == pytest.approx(0.015)
+    assert y_min == pytest.approx(-0.015)
+    assert y_max == pytest.approx(0.015)
+
+    x_min, x_max, y_min, y_max = h._get_zone_at_z(0.30, 0.5)
+    assert x_min == pytest.approx(-0.03)
+    assert x_max == pytest.approx(0.03)
+    assert y_min == pytest.approx(-0.03)
+    assert y_max == pytest.approx(0.03)
+
+
 def test_velocity_and_age_bookkeeping_still_use_receipt_clock_not_braid_timestamp(
     handler, fake_clock
 ):
