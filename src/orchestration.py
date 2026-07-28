@@ -343,3 +343,44 @@ class Experiment:
         self._stop_event = None
         self._braid_folder = None
         self._braid_proxy = None
+
+    def check_health(self) -> None:
+        """Passive/fatal mid-run health check -- call this once per iteration
+        of the caller's wait loop.
+
+        Critical processes (see _CRITICAL_INIT_HINTS) dying mid-run is fatal,
+        matching main.py's original inline behavior: this sets the internal
+        stop event so is_running() flips false on the caller's next check.
+
+        Every other process dying mid-run is purely observational: logs once
+        (not repeatedly) the first time it's noticed, never affects control
+        flow. Nothing currently detects this at all, so this closes a real
+        gap -- a non-critical process dying at hour 12 of a 24-hour
+        experiment previously went unnoticed until someone looked.
+        """
+        if self._stop_event is None or self._stop_event.is_set():
+            return
+
+        fatal_messages = _check_critical_processes_alive(self._processes)
+        if fatal_messages:
+            for name, proc in self._processes:
+                if name in _CRITICAL_INIT_HINTS and not proc.is_alive():
+                    self._failed_reasons[name] = (
+                        f"{name} process exited during the run. "
+                        f"{_CRITICAL_INIT_HINTS[name]}"
+                    )
+                    logger.error(self._failed_reasons[name])
+            self._stop_event.set()
+            return
+
+        for name, proc in self._processes:
+            if name in _CRITICAL_INIT_HINTS:
+                continue
+            if name in self._known_dead:
+                continue
+            if not proc.is_alive():
+                self._known_dead.add(name)
+                logger.warning(
+                    f"{name} process exited during the run (non-critical -- "
+                    "experiment continues, but this subsystem is no longer active)."
+                )

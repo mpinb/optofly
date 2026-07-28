@@ -343,3 +343,53 @@ def test_start_writes_metadata_when_provided(monkeypatch, config_path):
     assert append_metadata_to_csv_calls == [(metadata, braid_folder, ["researcher"])]
 
     exp.stop()
+
+
+def test_check_health_is_a_no_op_before_start():
+    exp = Experiment()
+    exp.check_health()  # must not raise
+
+
+def test_check_health_sets_stop_event_when_critical_process_dies_mid_run(config_path):
+    exp = Experiment()
+    exp.start(config_path, metadata=None)
+    assert exp.is_running() is True
+
+    # Simulate OptoTriggerWorker dying mid-run (it started alive, per FakeProcess.start()).
+    opto = [p for name, p in exp._processes if name == "OptoTriggerWorker"][0]
+    opto._alive = False
+
+    exp.check_health()
+
+    assert exp.is_running() is False
+    assert exp.status()["processes"]["OptoTriggerWorker"]["failed_reason"] is not None
+    exp.stop()
+
+
+def test_check_health_logs_once_for_non_critical_process_death(config_path, caplog, monkeypatch):
+    import logging
+
+    # start() calls the real configure_process_logging(), which -- by design,
+    # to give each spawned process a clean handler set -- clears every handler
+    # on the root logger, including pytest's caplog capture handler. Stub it
+    # out here so caplog can still observe log records emitted after start().
+    monkeypatch.setattr(orchestration, "configure_process_logging", lambda *a, **kw: None)
+
+    exp = Experiment()
+    exp.start(config_path, metadata=None)
+
+    latency_logger = [p for name, p in exp._processes if name == "LatencyLogger"][0]
+    latency_logger._alive = False
+
+    # Discard start()'s own INFO logs (e.g. "  ✓ LatencyLogger") so the
+    # substring match below only sees what check_health() itself logs.
+    caplog.clear()
+
+    with caplog.at_level(logging.WARNING, logger="src.orchestration"):
+        exp.check_health()
+        exp.check_health()  # second call must not log again
+
+    matching = [r for r in caplog.records if "LatencyLogger" in r.message]
+    assert len(matching) == 1
+    assert exp.is_running() is True  # non-critical death is never fatal
+    exp.stop()
