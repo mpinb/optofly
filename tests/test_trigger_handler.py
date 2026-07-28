@@ -433,36 +433,8 @@ def all_messages(fake_publisher):
 
 
 def test_opto_zone_enter_fires_once_fly_reaches_scaled_inner_zone(handler):
-    handler.config = handler.config.__class__.from_section(
-        {
-            "zone_timeout": handler.config.zone_timeout,
-            "cooldown_period": handler.config.cooldown_period,
-            "z_min": handler.config.z_min,
-            "z_max": handler.config.z_max,
-            "min_tracking_age": handler.config.min_tracking_age,
-            "min_velocity": handler.config.min_velocity,
-            "max_velocity": handler.config.max_velocity,
-            "heading_cone_deg": handler.config.heading_cone_deg,
-            "opto_zone_scale": 0.5,
-            "visual_zone_scale": 1.0,
-        },
-        camera=CameraConfig.from_section(
-            {
-                "active": True,
-                "resolution": [640, 480],
-                "fps": 100,
-                "FOV": {
-                    "x_min": handler.config.fov_x_min,
-                    "x_max": handler.config.fov_x_max,
-                    "y_min": handler.config.fov_y_min,
-                    "y_max": handler.config.fov_y_max,
-                },
-            }
-        ),
-        zmq=handler.config.zmq,
-    )
-    handler.opto_zone_scale = 0.5
-    handler.visual_zone_scale = 1.0
+    # configure_test_trigger (via the handler fixture) already sets
+    # opto_zone_scale=0.5 / visual_zone_scale=1.0.
 
     # FOV is -0.05..0.05 in x/y (see configure_test_trigger). Outer entry at
     # x=0.05 is inside the outer FOV (triggers ZONE_ENTER + VISUAL_ZONE_ENTER,
@@ -481,6 +453,24 @@ def test_opto_zone_enter_fires_once_fly_reaches_scaled_inner_zone(handler):
     assert opto_payload["obj_id"] == 7
     assert opto_payload["frame"] == 3
     assert opto_payload["record_frame"] == 2
+
+
+def test_opto_zone_enter_does_not_refire_while_still_inside_scaled_inner_zone(handler):
+    """One-shot guarantee at a realistic (non-1.0) production-default scale.
+    The existing one-shot test (test_opto_and_visual_fired_flags_reset_on_zone_exit_allowing_refire)
+    only checks this at opto_zone_scale=1.0; this exercises it at the
+    handler fixture's default opto_zone_scale=0.5.
+    """
+    # handler fixture (via configure_test_trigger) already sets
+    # opto_zone_scale=0.5 / visual_zone_scale=1.0.
+    handler.process_message(make_birth(x=0.08, frame=1, xvel=-0.2))
+    handler.process_message(make_update(x=0.05, frame=2, xvel=-0.2))  # ZONE_ENTER + VISUAL_ZONE_ENTER; outside the ±0.025 opto box
+    handler.process_message(make_update(x=0.0, frame=3, xvel=-0.2))  # inside the opto box -> OPTO_ZONE_ENTER fires
+    handler.process_message(make_update(x=0.01, frame=4, xvel=-0.2))  # still inside the opto box -> must not refire
+
+    topics = [topic for topic, _ in all_messages(handler.publisher)]
+    assert topics == ["ZONE_ENTER", "VISUAL_ZONE_ENTER", "OPTO_ZONE_ENTER"]
+    assert topics.count("OPTO_ZONE_ENTER") == 1
 
 
 def test_visual_zone_enter_fires_same_frame_as_zone_enter_when_scale_is_one(handler):
@@ -529,6 +519,39 @@ def test_opto_zone_enter_never_fires_before_zone_enter(handler):
     handler.process_message(make_update(x=0.05, frame=2, xvel=0.0))
 
     assert all_messages(handler.publisher) == []
+
+
+def test_opto_and_visual_zone_enter_do_not_fire_when_object_drifts_outside_z_band(
+    handler,
+):
+    """Regression test: in_zone is a sticky flag that stays True even after
+    the object's z drifts outside [z_min, z_max] (only x/y exit triggers
+    ZONE_EXIT, by design). The inner opto/visual zone check must still
+    require the object be within the live trigger zone (including z), not
+    just rely on the sticky in_zone flag, since _is_in_scaled_zone only
+    checks x/y and never z.
+    """
+    handler.opto_zone_scale = 0.5
+    handler.visual_zone_scale = 0.5
+
+    handler.process_message(make_birth(x=0.08, z=0.2, frame=1, xvel=-0.2))
+    # x=0.05 is inside the outer FOV (-0.05..0.05) so ZONE_ENTER fires here,
+    # but it's outside the 0.5-scaled inner box (-0.025..0.025), so neither
+    # OPTO_ZONE_ENTER nor VISUAL_ZONE_ENTER fires yet -- no flag reset needed.
+    handler.process_message(make_update(x=0.05, z=0.2, frame=2, xvel=-0.2))
+
+    topics_after_enter = [topic for topic, _ in all_messages(handler.publisher)]
+    assert topics_after_enter == ["ZONE_ENTER"]
+
+    # x=0.0 is now well inside the scaled inner box, but z=0.9 is far outside
+    # z_max=0.3, so in_zone_now is False here even though the sticky in_zone
+    # flag remains True. Neither inner zone should fire.
+    handler.process_message(make_update(x=0.0, z=0.9, frame=3, xvel=-0.2))
+
+    topics = [topic for topic, _ in all_messages(handler.publisher)]
+    assert topics == ["ZONE_ENTER"]
+    assert "OPTO_ZONE_ENTER" not in topics
+    assert "VISUAL_ZONE_ENTER" not in topics
 
 
 def test_zone_enter_payload_includes_record_frame_equal_to_its_own_frame(handler):

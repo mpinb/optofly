@@ -541,10 +541,11 @@ class TriggerHandler(WorkerProcess):
             self._send_zone_exit(tracked_obj, reason="left_fov", now=now)
             tracked_obj.in_zone = False
             tracked_obj.zone_enter_time = None
+            tracked_obj.zone_enter_frame = None
             tracked_obj.opto_fired = False
             tracked_obj.visual_fired = False
 
-        if tracked_obj.in_zone:
+        if tracked_obj.in_zone and in_zone_now:
             if not tracked_obj.opto_fired and self._is_in_scaled_zone(
                 x, y, z, self.opto_zone_scale
             ):
@@ -648,6 +649,7 @@ class TriggerHandler(WorkerProcess):
                     self._send_zone_exit(obj, reason="timeout", now=current_time)
                     obj.in_zone = False
                     obj.zone_enter_time = None
+                    obj.zone_enter_frame = None
                     obj.opto_fired = False
                     obj.visual_fired = False
 
