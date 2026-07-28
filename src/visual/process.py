@@ -1,6 +1,6 @@
 """Panda3D visual stimuli process for OptoFly.
 
-Subscribes to ZONE_ENTER messages via ZMQ, converts Braid heading to
+Subscribes to VISUAL_ZONE_ENTER messages via ZMQ, converts Braid heading to
 world degrees, dispatches to registered stimuli, and drives the Panda3D
 render loop via the task manager.
 """
@@ -42,7 +42,7 @@ def braid_to_world_heading(braid_rad: float, offset_rad: float, flip: bool) -> f
 class VisualProcess(WorkerProcess):
     """Panda3D visual stimuli process.
 
-    Subscribes to ZONE_ENTER messages via ZMQ, converts Braid heading to
+    Subscribes to VISUAL_ZONE_ENTER messages via ZMQ, converts Braid heading to
     world degrees, dispatches to registered stimuli, and drives the Panda3D
     render loop at target_fps via the task manager.
     """
@@ -254,7 +254,7 @@ class VisualProcess(WorkerProcess):
         braid_rad = data.get("mean_heading", 0.0)
         world_heading = braid_to_world_heading(braid_rad, self._offset_rad, self._flip)
         self.logger.info(
-            "ZONE_ENTER obj=%s world_heading=%.1f deg",
+            "VISUAL_ZONE_ENTER obj=%s world_heading=%.1f deg",
             data.get("obj_id"),
             world_heading,
         )

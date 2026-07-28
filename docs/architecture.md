@@ -16,16 +16,16 @@ TriggerHandler (src/processes/tracking.py)
       4. Velocity must be in [min_velocity, max_velocity] range
       5. Must be heading toward arena center (within heading_cone_deg)
     |
-    | ZMQ PUB (topics: ZONE_ENTER / ZONE_EXIT, port: 5556)
+    | ZMQ PUB (topics: ZONE_ENTER / ZONE_EXIT / OPTO_ZONE_ENTER / VISUAL_ZONE_ENTER, port: 5556)
     |
     +---> RustCameraProcess    (starts recording on ZONE_ENTER; stops on ZONE_EXIT)
     +---> LiquidLens           (starts tracking on ZONE_ENTER; follows BRAID until ZONE_EXIT)
-    +---> OptoTriggerWorker    (one-shot LED on ZONE_ENTER only)
-    +---> VisualProcess        (Panda3D; renders stimuli on ZONE_ENTER, one-shot)
+    +---> OptoTriggerWorker    (one-shot LED on OPTO_ZONE_ENTER only)
+    +---> VisualProcess        (Panda3D; renders stimuli on VISUAL_ZONE_ENTER, one-shot)
     +---> Monitoring Server    (web dashboard, optional)
 ```
 
-TriggerHandler is the single admission controller. Each object can produce at most one `ZONE_ENTER`/`ZONE_EXIT` pair per visit to the trigger volume, with re-entry treated as a new cycle subject only to the global cooldown period.
+TriggerHandler is the single admission controller. Each object can produce at most one `ZONE_ENTER`/`ZONE_EXIT` pair per visit to the trigger volume, with re-entry treated as a new cycle subject only to the global cooldown period. `OPTO_ZONE_ENTER`/`VISUAL_ZONE_ENTER` are separate one-shot events fired once the object, already inside the outer `ZONE_ENTER` zone, reaches a smaller nested zone sized by `opto_zone_scale`/`visual_zone_scale`; at `scale=1.0` they fire on the same frame as `ZONE_ENTER`.
 
 ## Process Model
 
@@ -36,8 +36,8 @@ All processes inherit from `WorkerProcess` (`src/utils/worker.py`) and run as `m
 | BraidPublisher | PUB on port 5555 (topic: BRAID) | `src/processes/braid.py` |
 | TriggerHandler | SUB on 5555, PUB on 5556 (topics: ZONE_ENTER, ZONE_EXIT) | `src/processes/tracking.py` |
 | RustCameraProcess | SUB on 5556 (ZONE_ENTER, ZONE_EXIT, kill) | `src/processes/camera.py` |
-| OptoTriggerWorker | SUB on 5556 (ZONE_ENTER only) | `src/processes/led.py` |
-| VisualProcess | SUB on 5556 (ZONE_ENTER only) | `src/visual/process.py` |
+| OptoTriggerWorker | SUB on 5556 (OPTO_ZONE_ENTER only) | `src/processes/led.py` |
+| VisualProcess | SUB on 5556 (VISUAL_ZONE_ENTER only) | `src/visual/process.py` |
 | LiquidLens | SUB on 5555 (BRAID) + 5556 (ZONE_ENTER, ZONE_EXIT) | `src/processes/lens.py` |
 | Monitoring Server | SUB on 5556 (ZONE_ENTER, ZONE_EXIT) | `src/monitoring/server.py` |
 
