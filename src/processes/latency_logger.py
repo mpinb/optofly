@@ -92,6 +92,7 @@ class LatencyLogger(WorkerProcess):
         return {
             "obj_id": message.get("obj_id"),
             "frame": message.get("frame"),
+            "record_frame": message.get("record_frame"),
             "system": message.get("system"),
             "braid_timestamp": braid_timestamp,
             "trigger_timestamp": message.get("trigger_timestamp"),
