@@ -78,6 +78,7 @@ def test_handle_trigger_publishes_latency_for_real_activation():
         {
             "obj_id": 7,
             "frame": 100,
+            "record_frame": 95,
             "braid_timestamp": 500.0,
             "handler_timestamp": 500.01,
             "mean_heading": 0.1,
@@ -90,6 +91,7 @@ def test_handle_trigger_publishes_latency_for_real_activation():
         "system": "opto",
         "obj_id": 7,
         "frame": 100,
+        "record_frame": 95,
         "braid_timestamp": 500.0,
         "trigger_timestamp": 500.01,
         "activation_timestamp": 500.02,
@@ -113,6 +115,7 @@ def test_handle_trigger_publishes_latency_with_none_activation_for_sham():
     sent = worker.latency_socket.sent
     assert sent[0]["sham"] is True
     assert sent[0]["activation_timestamp"] is None
+    assert sent[0]["record_frame"] is None
 
 
 def test_initialize_zmq_configures_latency_socket_as_non_blocking():
@@ -138,3 +141,55 @@ def test_initialize_zmq_configures_latency_socket_as_non_blocking():
         worker.latency_socket.close()
         worker.trigger_socket.close()
         worker.context.term()
+
+
+class FakeSubSocket:
+    def __init__(self):
+        self.connected_to = None
+        self.subscriptions = []
+
+    def connect(self, address):
+        self.connected_to = address
+
+    def setsockopt_string(self, opt, value):
+        self.subscriptions.append(value)
+
+
+class FakePushSocket:
+    def setsockopt(self, opt, value):
+        pass
+
+    def connect(self, address):
+        pass
+
+
+class FakeZmqContext:
+    def __init__(self):
+        self.sub_socket = FakeSubSocket()
+        self.push_socket = FakePushSocket()
+
+    def socket(self, socket_type):
+        return self.sub_socket if socket_type == zmq.SUB else self.push_socket
+
+
+def test_initialize_zmq_subscribes_to_configured_opto_enter_topic_not_zone_enter(
+    monkeypatch,
+):
+    worker = object.__new__(OptoTriggerWorker)
+    worker.zmq_config = ZMQConfig(
+        "configs/config.example.toml"
+    )
+    worker.logger = type(
+        "Logger",
+        (),
+        {"debug": lambda *a, **k: None, "error": lambda *a, **k: None},
+    )()
+    fake_context = FakeZmqContext()
+    monkeypatch.setattr(
+        "src.processes.led.zmq.Context", lambda: fake_context
+    )
+
+    worker._initialize_zmq()
+
+    assert fake_context.sub_socket.subscriptions == [worker.zmq_config.opto_enter_topic]
+    assert "ZONE_ENTER" not in fake_context.sub_socket.subscriptions
