@@ -63,13 +63,15 @@ BraidPublisher  →  ZMQ PUB  topic=BRAID  port=5555
 TriggerHandler  →  ZMQ PUB  topics=ZONE_ENTER/ZONE_EXIT  port=5556
     ↓
     ├── RustCameraProcess    (starts recording on ZONE_ENTER; stamps trigger_frame_idx on ZONE_ENTER)
-    ├── LiquidLens           (starts focusing on ZONE_ENTER via BRAID; writes lens_timing.csv per video)
-    ├── OptoTriggerWorker    (fires LED on ZONE_ENTER, one-shot)
-    ├── VisualProcess        (Panda3D; renders stimuli on ZONE_ENTER, one-shot)
+    ├── LiquidLens           (starts focusing on ZONE_ENTER via BRAID; writes lens_timing.csv per video) ─┐
+    ├── OptoTriggerWorker    (fires LED on ZONE_ENTER, one-shot)                                          ├─→ ZMQ PUSH  port=latency_port ─→ LatencyLogger (ZMQ PULL, writes latency.csv)
+    ├── VisualProcess        (Panda3D; renders stimuli on ZONE_ENTER, one-shot)                           ─┘
     └── Monitoring Server    (web dashboard, optional)
 ```
 
 The ZMQ BRAID feed is only live when the full stack is running. Standalone tools (calibration, simulators) that need tracking data must connect directly to the Braid HTTP SSE endpoint (`/events`).
+
+`LatencyLogger` is core and always-on (started right after `TriggerHandler`, before any optional process) — a dead `LatencyLogger` only loses latency data, it never aborts the experiment. It's the one place in the codebase using ZMQ PUSH/PULL instead of PUB/SUB: `OptoTriggerWorker`, `VisualProcess`, and `LiquidLens` each PUSH one `LATENCY` message per trigger to `zmq.latency_port` (a many-producer/one-consumer fan-in, not a broadcast), and `LatencyLogger` is the sole writer of `latency.csv` in the braid folder. Each `LATENCY` message carries `system` (`"opto"` | `"visual"` | `"lens"`), `obj_id`, `frame`, `braid_timestamp`, `activation_timestamp`, and `sham`; `LatencyLogger` computes `latency_ms = (activation_timestamp - braid_timestamp) * 1000` for non-sham trials. `LiquidLens` only publishes latency for the first commanded diopter per trial (not every subsequent tracking update).
 
 ### Process Model
 
@@ -92,8 +94,9 @@ Death carries the bare obj_id as an integer, not an object.
 
 **ZONE_ENTER** (from TriggerHandler):
 ```json
-{"obj_id": 1, "frame": 12345, "timestamp": 1234.56, "x": 0.01, "y": -0.02, "z": 0.18, "xvel": 0.05, "yvel": -0.12, "zvel": 0.01, "mean_heading": 0.52}
+{"obj_id": 1, "frame": 12345, "timestamp": 1234.56, "braid_timestamp": 1234.50, "handler_timestamp": 1234.56, "x": 0.01, "y": -0.02, "z": 0.18, "xvel": 0.05, "yvel": -0.12, "zvel": 0.01, "mean_heading": 0.52}
 ```
+`timestamp`/`handler_timestamp` are both the handler's local receipt-time clock (used for velocity/age/cooldown math); `braid_timestamp` is the Triggerbox-clock-model timestamp from Braid's SSE envelope, kept separate since it's on a different clock and is only used for latency measurement (see `LatencyLogger` below). It's `None` if Braid didn't supply one for that sample.
 
 **ZONE_EXIT** (from TriggerHandler):
 ```json
@@ -110,6 +113,7 @@ Key parameters (all in `configs/config.toml`):
 
 | Section | Key | Default | Purpose |
 |---|---|---|---|
+| `[zmq]` | `latency_port` | `5558` | PUSH/PULL port `OptoTriggerWorker`/`VisualProcess`/`LiquidLens` push `LATENCY` messages to; `LatencyLogger` binds it and writes `latency.csv` |
 | `[liquid_lens]` | `predictor` | `"none"` | `"none"` uses raw Braid z; `"linear"` extrapolates `z + vz * (system_latency + prediction_horizon)` |
 | `[liquid_lens]` | `max_diopter_step` | `0.0` | Per-update slew-rate limit on commanded diopter; `0.0` disables it. Ramps large jumps (esp. trial onset) so the lens's ~400 Hz resonance isn't excited |
 | `[liquid_lens.kalman]` | `system_latency` | `0.05` | Measured message + serial write delay (seconds); calibrate with `lens_latency_analyze`. Section name is legacy (predates removal of a Kalman-filter predictor mode) — still used by the `linear` predictor |
