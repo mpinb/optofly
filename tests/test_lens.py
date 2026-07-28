@@ -228,6 +228,38 @@ class FakeLatencySocket:
         self.sent.append(json.loads(raw))
 
 
+def test_zone_enter_payload_carries_record_frame_into_pending_first_update(lens):
+    lens.zmq_config = type("Config", (), {"zone_enter_topic": "ZONE_ENTER"})()
+    lens.is_tracking = False
+    lens.current_tracked_obj = None
+    lens._timing_rows = []
+    lens._recording_obj_id = None
+    lens._recording_frame = None
+    lens._log_csv = lambda *args, **kwargs: None
+    lens.logger = type("Logger", (), {"info": lambda *args, **kwargs: None})()
+    lens.trigger_socket = FakeSocket(
+        [
+            [
+                b"ZONE_ENTER",
+                json.dumps(
+                    {
+                        "obj_id": 7,
+                        "frame": 12,
+                        "record_frame": 12,
+                        "x": 0.1,
+                        "y": 0.2,
+                        "z": 0.3,
+                    }
+                ).encode("utf-8"),
+            ]
+        ]
+    )
+
+    lens._drain_trigger_socket()
+
+    assert lens._pending_first_update["record_frame"] == 12
+
+
 def test_publish_latency_sends_lens_system_message_never_sham(lens):
     lens.latency_socket = FakeLatencySocket()
     lens.logger = type("Logger", (), {"error": lambda *a, **k: None})()
@@ -236,6 +268,7 @@ def test_publish_latency_sends_lens_system_message_never_sham(lens):
         {
             "obj_id": 7,
             "frame": 12,
+            "record_frame": 12,
             "braid_timestamp": 500.0,
             "handler_timestamp": 500.01,
         },
@@ -247,6 +280,7 @@ def test_publish_latency_sends_lens_system_message_never_sham(lens):
         "system": "lens",
         "obj_id": 7,
         "frame": 12,
+        "record_frame": 12,
         "braid_timestamp": 500.0,
         "trigger_timestamp": 500.01,
         "activation_timestamp": 500.02,
