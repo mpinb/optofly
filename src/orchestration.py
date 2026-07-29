@@ -92,7 +92,9 @@ def _critical_names(app_config: AppConfig) -> set[str]:
 
 
 def _check_critical_processes_alive(
-    processes: list, critical: set[str] | None = None
+    processes: list,
+    critical: set[str] | None = None,
+    reported_reasons: dict[str, str] | None = None,
 ) -> list[str]:
     """Return one FATAL message per critical process that has died.
 
@@ -101,15 +103,22 @@ def _check_critical_processes_alive(
     else (Monitoring Server, VisualProcess, CameraProcess, LatencyLogger)
     dying is not fatal here. Callers that have an AppConfig should pass
     _critical_names(app_config) so config-disabled subsystems are excluded.
+
+    `reported_reasons` maps process name to the exception the child itself
+    reported through its failure queue. That always beats the static hint:
+    LiquidLens dies on a missing or malformed calibrations/liquid_lens.csv at
+    least as often as on a bad serial port, and telling someone to check the
+    hardware connection sends them to unplug a working lens. The hints remain
+    the fallback for processes that exit without raising.
     """
     if critical is None:
         critical = set(_CRITICAL_INIT_HINTS)
+    reported_reasons = reported_reasons or {}
     messages = []
     for name, proc in processes:
         if name in critical and not proc.is_alive():
-            messages.append(
-                f"{name} process exited during initialization. {_CRITICAL_INIT_HINTS[name]}"
-            )
+            detail = reported_reasons.get(name) or _CRITICAL_INIT_HINTS[name]
+            messages.append(f"{name} process exited during initialization. {detail}")
     return messages
 
 
@@ -143,6 +152,11 @@ class Experiment:
         self._failed_reasons: dict[str, str] = {}
         self._shutdown_state: dict[str, str] = {}
         self._known_dead: set[str] = set()
+        # Filled by workers that crash in _run(); drained by _drain_failures()
+        # so a fatal message can quote the child's real exception instead of a
+        # static per-process hint.
+        self._failure_queue: Optional[Any] = None
+        self._reported_reasons: dict[str, str] = {}
         # Which process names are fatal for the run currently configured;
         # populated by start() via _critical_names(). Empty before start().
         self._critical: set[str] = set()
@@ -242,9 +256,15 @@ class Experiment:
         self._shutdown_state = {}
         self._known_dead = set()
         self._critical = _critical_names(app_config)
+        self._failure_queue = mp.Queue()
+        self._reported_reasons = {}
 
         common = dict(
-            config_path=config_path, event=stop_event, log_path=log_path, log_level=log_level_str
+            config_path=config_path,
+            event=stop_event,
+            log_path=log_path,
+            log_level=log_level_str,
+            failure_queue=self._failure_queue,
         )
 
         logger.info("Starting core processes...")
@@ -339,13 +359,18 @@ class Experiment:
 
         time.sleep(1)
 
-        fatal_messages = _check_critical_processes_alive(self._processes, self._critical)
+        self._drain_failures()
+        fatal_messages = _check_critical_processes_alive(
+            self._processes, self._critical, self._reported_reasons
+        )
         if fatal_messages:
             for name, proc in self._processes:
                 if name in self._critical and not proc.is_alive():
+                    detail = (
+                        self._reported_reasons.get(name) or _CRITICAL_INIT_HINTS[name]
+                    )
                     self._failed_reasons[name] = (
-                        f"{name} process exited during initialization. "
-                        f"{_CRITICAL_INIT_HINTS[name]}"
+                        f"{name} process exited during initialization. {detail}"
                     )
             stop_event.set()
             raise ExperimentStartError("; ".join(fatal_messages))
@@ -387,6 +412,22 @@ class Experiment:
         self._braid_folder = None
         self._braid_proxy = None
 
+    def _drain_failures(self) -> None:
+        """Collect whatever crashing workers have reported since the last check.
+
+        Non-blocking and tolerant: a worker may die without reporting (killed,
+        or exiting via `return` rather than raising), in which case the static
+        hint stays the fallback.
+        """
+        if self._failure_queue is None:
+            return
+        while True:
+            try:
+                name, reason = self._failure_queue.get_nowait()
+            except Exception:
+                return
+            self._reported_reasons[name] = reason
+
     def check_health(self) -> None:
         """Passive/fatal mid-run health check -- call this once per iteration
         of the caller's wait loop.
@@ -404,13 +445,18 @@ class Experiment:
         if self._stop_event is None or self._stop_event.is_set():
             return
 
-        fatal_messages = _check_critical_processes_alive(self._processes, self._critical)
+        self._drain_failures()
+        fatal_messages = _check_critical_processes_alive(
+            self._processes, self._critical, self._reported_reasons
+        )
         if fatal_messages:
             for name, proc in self._processes:
                 if name in self._critical and not proc.is_alive():
+                    detail = (
+                        self._reported_reasons.get(name) or _CRITICAL_INIT_HINTS[name]
+                    )
                     self._failed_reasons[name] = (
-                        f"{name} process exited during the run. "
-                        f"{_CRITICAL_INIT_HINTS[name]}"
+                        f"{name} process exited during the run. {detail}"
                     )
                     logger.error(self._failed_reasons[name])
             self._stop_event.set()
@@ -423,7 +469,9 @@ class Experiment:
                 continue
             if not proc.is_alive():
                 self._known_dead.add(name)
+                reason = self._reported_reasons.get(name)
                 logger.warning(
                     f"{name} process exited during the run (non-critical -- "
                     "experiment continues, but this subsystem is no longer active)."
+                    + (f" Reason: {reason}" if reason else "")
                 )

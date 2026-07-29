@@ -202,6 +202,11 @@ class LiquidLens(WorkerProcess):
         self._recording_frame: Optional[int] = None
         self._pending_first_update: Optional[dict] = None
 
+        # Consecutive-duplicate suppression for the focus loop's error paths;
+        # see _log_error_throttled().
+        self._last_error_message: Optional[str] = None
+        self._suppressed_error_count: int = 0
+
     def initialize(self):
         self.logger.debug(f"Liquid Lens config: {self.lens_config}")
 
@@ -284,6 +289,34 @@ class LiquidLens(WorkerProcess):
         )
 
         self.logger.info("Liquid Lens process initialized.")
+
+    def _log_error_throttled(self, message: str) -> None:
+        """Log a per-iteration error without flooding the log.
+
+        The focus loop polls on a 10 ms timeout, so a fault that doesn't clear
+        (unplugged serial, wedged firmware) would otherwise write one line per
+        iteration into optofly.log for the rest of the run -- burying every
+        other diagnostic and competing for the disk the recordings go to.
+
+        Identical consecutive messages are counted rather than repeated; the
+        count is flushed as soon as the message changes, so a changing fault
+        is never hidden.
+        """
+        if message == self._last_error_message:
+            self._suppressed_error_count += 1
+            return
+        self._flush_suppressed_errors()
+        self._last_error_message = message
+        self.logger.error(message)
+
+    def _flush_suppressed_errors(self) -> None:
+        """Emit the tally for a run of suppressed identical errors, if any."""
+        if self._suppressed_error_count:
+            self.logger.error(
+                "(previous lens error repeated %d more time(s))",
+                self._suppressed_error_count,
+            )
+            self._suppressed_error_count = 0
 
     def _log_csv(self, event: str, **kwargs):
         if self.csv_writer is None:
@@ -543,11 +576,12 @@ class LiquidLens(WorkerProcess):
                     if is_first_command:
                         self._publish_latency(update, t_diopter_sent)
                 except Exception as e:
-                    self.logger.error(f"Error adjusting lens: {e}")
+                    self._log_error_throttled(f"Error adjusting lens: {e}")
 
             except Exception as e:
-                self.logger.error(f"Error in Liquid Lens process: {e}")
+                self._log_error_throttled(f"Error in Liquid Lens process: {e}")
 
+        self._flush_suppressed_errors()
         self.logger.info("Liquid Lens process stopped.")
         self.close()
 

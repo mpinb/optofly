@@ -12,13 +12,24 @@ class WorkerProcess(Process):
         log_level: str = "INFO",
         log_color: str | None = None,
         process_name: str = "WorkerProcess",
+        failure_queue=None,
     ):
+        """
+        Args:
+            failure_queue: Optional mp.Queue. When _run() raises, the worker
+                puts (process_name, "ExcType: message") on it before dying, so
+                the parent can report the actual cause instead of guessing from
+                a static per-process hint. Optional because the standalone
+                `python -m src.processes.<x>` entry points construct workers
+                without a parent to report to.
+        """
         super().__init__()
         self.event = event
         self.log_path = log_path
         self.log_level = log_level
         self.log_color = log_color
         self.process_name = process_name
+        self.failure_queue = failure_queue
         self.logger = logging.getLogger(self.__class__.__module__)
 
     def start(self):
@@ -38,10 +49,24 @@ class WorkerProcess(Process):
         self.logger = logging.getLogger(self.__class__.__module__)
         try:
             self._run()
-        except Exception:
+        except Exception as e:
+            self._report_failure(e)
             if self.logger:
                 self.logger.exception(f"{self.process_name} crashed in _run()")
             raise
+
+    def _report_failure(self, exc: Exception) -> None:
+        """Hand the parent the real reason this process is about to die.
+
+        Best-effort: a failure here must never mask the original exception,
+        which is about to propagate and be logged either way.
+        """
+        if self.failure_queue is None:
+            return
+        try:
+            self.failure_queue.put((self.process_name, f"{type(exc).__name__}: {exc}"))
+        except Exception:
+            pass
 
     def _run(self):
         raise NotImplementedError
