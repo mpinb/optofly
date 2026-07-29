@@ -118,7 +118,7 @@ class OptoTriggerWorker(WorkerProcess):
         self.logger.info("OptoTriggerWorker process initialized.")
 
     def _initialize_zmq(self):
-        """Initialize ZMQ sockets: SUB for ZONE_ENTER, PUSH for LATENCY."""
+        """Initialize ZMQ sockets: SUB for OPTO_ZONE_ENTER, PUSH for LATENCY."""
         try:
             self.context = zmq.Context()
             self.trigger_socket = self.context.socket(zmq.SUB)
@@ -126,11 +126,11 @@ class OptoTriggerWorker(WorkerProcess):
                 self.zmq_config.get_subscriber_address(self.zmq_config.trigger_port)
             )
             self.trigger_socket.setsockopt_string(
-                zmq.SUBSCRIBE, self.zmq_config.zone_enter_topic
+                zmq.SUBSCRIBE, self.zmq_config.opto_enter_topic
             )
             self.logger.debug(
                 f"Connected to TriggerHandler on port {self.zmq_config.trigger_port} "
-                f"(topic: {self.zmq_config.zone_enter_topic})"
+                f"(topic: {self.zmq_config.opto_enter_topic})"
             )
 
             # LATENCY reporting: PUSH connects to LatencyLogger's bound PULL
@@ -216,6 +216,7 @@ class OptoTriggerWorker(WorkerProcess):
             # Extract trigger information
             obj_id = trigger_data.get("obj_id")
             frame = trigger_data.get("frame")
+            record_frame = trigger_data.get("record_frame")
             timing = extract_trigger_timing(trigger_data)
             mean_heading = trigger_data.get("mean_heading")
 
@@ -252,7 +253,9 @@ class OptoTriggerWorker(WorkerProcess):
             self.csv_writer.append(row)
             self.logger.debug(f"Logged trigger event to CSV: {row}")
 
-            self._publish_latency(obj_id, frame, timing, activation_timestamp, was_sham)
+            self._publish_latency(
+                obj_id, frame, record_frame, timing, activation_timestamp, was_sham
+            )
 
             return success
 
@@ -264,6 +267,7 @@ class OptoTriggerWorker(WorkerProcess):
         self,
         obj_id,
         frame,
+        record_frame,
         timing: TriggerTiming,
         activation_timestamp,
         sham: bool,
@@ -274,6 +278,7 @@ class OptoTriggerWorker(WorkerProcess):
                 "system": "opto",
                 "obj_id": obj_id,
                 "frame": frame,
+                "record_frame": record_frame,
                 "braid_timestamp": timing.braid_timestamp,
                 "trigger_timestamp": timing.handler_timestamp,
                 "activation_timestamp": activation_timestamp,

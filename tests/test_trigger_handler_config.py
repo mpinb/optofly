@@ -46,3 +46,33 @@ def test_path_based_constructor_still_works():
     cfg = TriggerHandlerConfig.from_path("configs/config.example.toml")
     assert cfg.zone_timeout > 0
     assert cfg.zmq.braid_port > 0
+
+
+def test_from_section_defaults_zone_scales_to_expected_values():
+    cfg = TriggerHandlerConfig.from_section({}, camera=_camera(), zmq=_zmq())
+    assert cfg.opto_zone_scale == 0.5
+    assert cfg.visual_zone_scale == 1.0
+
+
+def test_from_section_reads_explicit_zone_scales():
+    cfg = TriggerHandlerConfig.from_section(
+        {"opto_zone_scale": 0.3, "visual_zone_scale": 0.8},
+        camera=_camera(),
+        zmq=_zmq(),
+    )
+    assert cfg.opto_zone_scale == 0.3
+    assert cfg.visual_zone_scale == 0.8
+
+
+def test_from_section_opto_zone_scale_zero_raises():
+    with pytest.raises(ValueError, match="opto_zone_scale must be in"):
+        TriggerHandlerConfig.from_section(
+            {"opto_zone_scale": 0.0}, camera=_camera(), zmq=_zmq()
+        )
+
+
+def test_from_section_visual_zone_scale_above_one_raises():
+    with pytest.raises(ValueError, match="visual_zone_scale must be in"):
+        TriggerHandlerConfig.from_section(
+            {"visual_zone_scale": 1.5}, camera=_camera(), zmq=_zmq()
+        )

@@ -118,3 +118,21 @@ def test_csv_write_failure_is_logged_not_raised():
     logger.csv_writer = RaisingWriter()
 
     logger._handle_message(json.dumps(_msg()).encode("utf-8"))  # must not raise
+
+
+def test_row_includes_record_frame_when_present():
+    logger = _make_logger()
+
+    logger._handle_message(json.dumps(_msg(record_frame=95)).encode("utf-8"))
+
+    row = logger.csv_writer.rows[0]
+    assert row["record_frame"] == 95
+
+
+def test_row_record_frame_is_none_when_message_omits_it():
+    logger = _make_logger()
+
+    logger._handle_message(json.dumps(_msg()).encode("utf-8"))
+
+    row = logger.csv_writer.rows[0]
+    assert row["record_frame"] is None

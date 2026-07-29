@@ -1,6 +1,6 @@
 """Panda3D visual stimuli process for OptoFly.
 
-Subscribes to ZONE_ENTER messages via ZMQ, converts Braid heading to
+Subscribes to VISUAL_ZONE_ENTER messages via ZMQ, converts Braid heading to
 world degrees, dispatches to registered stimuli, and drives the Panda3D
 render loop via the task manager.
 """
@@ -42,7 +42,7 @@ def braid_to_world_heading(braid_rad: float, offset_rad: float, flip: bool) -> f
 class VisualProcess(WorkerProcess):
     """Panda3D visual stimuli process.
 
-    Subscribes to ZONE_ENTER messages via ZMQ, converts Braid heading to
+    Subscribes to VISUAL_ZONE_ENTER messages via ZMQ, converts Braid heading to
     world degrees, dispatches to registered stimuli, and drives the Panda3D
     render loop at target_fps via the task manager.
     """
@@ -158,7 +158,7 @@ class VisualProcess(WorkerProcess):
         self._zmq_context = None
         self._zmq_socket = None
         self._latency_socket = None
-        self._zone_enter_topic = "ZONE_ENTER"
+        self._visual_enter_topic = "VISUAL_ZONE_ENTER"
         if self.standalone:
             self.logger.info("Standalone mode — skipping ZMQ setup")
             return
@@ -166,16 +166,16 @@ class VisualProcess(WorkerProcess):
 
         zmq_cfg = AppConfig.load(self._config_path).zmq
         address = zmq_cfg.get_subscriber_address(zmq_cfg.trigger_port)
-        self._zone_enter_topic = zmq_cfg.zone_enter_topic
+        self._visual_enter_topic = zmq_cfg.visual_enter_topic
         self.logger.info(
             "Connecting to %s messages at %s",
-            zmq_cfg.zone_enter_topic,
+            zmq_cfg.visual_enter_topic,
             address,
         )
         self._zmq_context = zmq.Context()
         self._zmq_socket = self._zmq_context.socket(zmq.SUB)
         self._zmq_socket.connect(address)
-        self._zmq_socket.setsockopt_string(zmq.SUBSCRIBE, zmq_cfg.zone_enter_topic)
+        self._zmq_socket.setsockopt_string(zmq.SUBSCRIBE, zmq_cfg.visual_enter_topic)
 
         # LATENCY reporting: PUSH connects to LatencyLogger's bound PULL socket.
         self._latency_socket = self._zmq_context.socket(zmq.PUSH)
@@ -241,7 +241,7 @@ class VisualProcess(WorkerProcess):
                     break
                 topic = parts[0].decode()
                 data = json.loads(parts[1])
-                if topic == self._zone_enter_topic:
+                if topic == self._visual_enter_topic:
                     self._handle_zone_enter(data)
         except Exception:
             self.logger.exception("Error in ZMQ poll task")
@@ -266,7 +266,7 @@ class VisualProcess(WorkerProcess):
         braid_rad = data.get("mean_heading", 0.0)
         world_heading = braid_to_world_heading(braid_rad, self._offset_rad, self._flip)
         self.logger.info(
-            "ZONE_ENTER obj=%s world_heading=%.1f deg",
+            "VISUAL_ZONE_ENTER obj=%s world_heading=%.1f deg",
             data.get("obj_id"),
             world_heading,
         )
@@ -317,6 +317,7 @@ class VisualProcess(WorkerProcess):
             "system": "visual",
             "obj_id": data.get("obj_id"),
             "frame": data.get("frame"),
+            "record_frame": data.get("record_frame"),
             "braid_timestamp": timing.braid_timestamp,
             "trigger_timestamp": timing.handler_timestamp,
             "activation_timestamp": time.time() if activated else None,

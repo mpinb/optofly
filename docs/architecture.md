@@ -18,12 +18,12 @@ TriggerHandler (src/processes/tracking.py)
       4. Velocity must be in [min_velocity, max_velocity] range
       5. Must be heading toward arena center (within heading_cone_deg)
     |
-    | ZMQ PUB (topics: ZONE_ENTER / ZONE_EXIT, port: 5556)
+    | ZMQ PUB (topics: ZONE_ENTER / ZONE_EXIT / OPTO_ZONE_ENTER / VISUAL_ZONE_ENTER, port: 5556)
     |
     +---> RustCameraProcess    (starts recording on ZONE_ENTER; stops on ZONE_EXIT)
     +---> LiquidLens           (starts on ZONE_ENTER; then follows ACTIVE_BRAID until ZONE_EXIT)
-    +---> OptoTriggerWorker    (one-shot LED on ZONE_ENTER only)
-    +---> VisualProcess        (Panda3D; renders stimuli on ZONE_ENTER, one-shot)
+    +---> OptoTriggerWorker    (one-shot LED on OPTO_ZONE_ENTER only)
+    +---> VisualProcess        (Panda3D; renders stimuli on VISUAL_ZONE_ENTER, one-shot)
     +---> Monitoring Server    (web dashboard, ZONE_ENTER only, optional)
     +---> BraidPublisher       (feedback: learns which object is active)
 
@@ -34,7 +34,7 @@ OptoTriggerWorker, VisualProcess, LiquidLens
 LatencyLogger  →  latency.csv in the braid folder
 ```
 
-TriggerHandler is the single admission controller. Each object can produce at most one `ZONE_ENTER`/`ZONE_EXIT` pair per visit to the trigger volume, with re-entry treated as a new cycle subject only to the global cooldown period.
+TriggerHandler is the single admission controller. Each object can produce at most one `ZONE_ENTER`/`ZONE_EXIT` pair per visit to the trigger volume, with re-entry treated as a new cycle subject only to the global cooldown period. `OPTO_ZONE_ENTER`/`VISUAL_ZONE_ENTER` are separate one-shot events fired once the object, already inside the outer `ZONE_ENTER` zone, reaches a smaller nested zone sized by `opto_zone_scale`/`visual_zone_scale`; at `scale=1.0` they fire on the same frame as `ZONE_ENTER`.
 
 `BraidPublisher` both publishes and subscribes: it forwards the full tracking stream on `BRAID`, and it also subscribes to `ZONE_ENTER`/`ZONE_EXIT` so it knows which object is currently active. Updates for that object are republished on the `ACTIVE_BRAID` fast lane (`SNDHWM = 1`, and consumers set `CONFLATE`), so the lens always focuses on the newest position rather than working through a backlog.
 
@@ -45,10 +45,10 @@ All processes inherit from `WorkerProcess` (`src/utils/worker.py`) and run as `m
 | Process | ZMQ Role | Source |
 |---------|----------|--------|
 | BraidPublisher | PUB on 5555 (BRAID) + PUB on 5557 (ACTIVE_BRAID) + SUB on 5556 (ZONE_ENTER, ZONE_EXIT) | `src/processes/braid.py` |
-| TriggerHandler | SUB on 5555 (BRAID), PUB on 5556 (ZONE_ENTER, ZONE_EXIT) | `src/processes/tracking.py` |
+| TriggerHandler | SUB on 5555 (BRAID), PUB on 5556 (ZONE_ENTER, ZONE_EXIT, OPTO_ZONE_ENTER, VISUAL_ZONE_ENTER) | `src/processes/tracking.py` |
 | RustCameraProcess | SUB on 5556 (ZONE_ENTER, ZONE_EXIT, kill) | `src/processes/camera.py` |
-| OptoTriggerWorker | SUB on 5556 (ZONE_ENTER) + PUSH on 5558 (LATENCY) | `src/processes/led.py` |
-| VisualProcess | SUB on 5556 (ZONE_ENTER) + PUSH on 5558 (LATENCY) | `src/visual/process.py` |
+| OptoTriggerWorker | SUB on 5556 (OPTO_ZONE_ENTER) + PUSH on 5558 (LATENCY) | `src/processes/led.py` |
+| VisualProcess | SUB on 5556 (VISUAL_ZONE_ENTER) + PUSH on 5558 (LATENCY) | `src/visual/process.py` |
 | LiquidLens | SUB on 5557 (ACTIVE_BRAID) + SUB on 5556 (ZONE_ENTER, ZONE_EXIT) + PUSH on 5558 (LATENCY) | `src/processes/lens.py` |
 | LatencyLogger | PULL bind on 5558 (LATENCY) | `src/processes/latency_logger.py` |
 | Monitoring Server | SUB on 5556 (ZONE_ENTER) | `src/monitoring/server.py` |
@@ -95,6 +95,7 @@ Port numbers above are the defaults from `[zmq]` in `configs/config.toml`; all f
   "system": "opto",
   "obj_id": 1,
   "frame": 12345,
+  "record_frame": 12280,
   "braid_timestamp": 123456.780,
   "trigger_timestamp": 123456.790,
   "activation_timestamp": 123456.812,
@@ -103,6 +104,8 @@ Port numbers above are the defaults from `[zmq]` in `configs/config.toml`; all f
 ```
 
 `system` is `"opto"`, `"visual"`, or `"lens"`. `LatencyLogger` computes `latency_ms = (activation_timestamp - braid_timestamp) * 1000` for non-sham trials. `LiquidLens` publishes only for the first commanded diopter per trial, not every subsequent tracking update.
+
+`frame` is the Braid frame at which *this* system fired (i.e. at `OPTO_ZONE_ENTER` / `VISUAL_ZONE_ENTER`), while `record_frame` is the frame at which the outer `ZONE_ENTER` fired and camera recording began. The two differ whenever `opto_zone_scale`/`visual_zone_scale` is below `1.0`; `record_frame` is what aligns a stimulus onset against the recorded video.
 
 **ZONE_EXIT topic** (TriggerHandler → camera, lens, monitoring):
 ```json
@@ -135,6 +138,8 @@ Key parameters in `[trigger_handler]`:
 | `min_tracking_age` | 0.1 s | Object age before it can trigger |
 | `zone_timeout` | 2.0 s | Auto-emit `ZONE_EXIT` if tracking is lost; also used by camera and liquid lens |
 | `cooldown_period` | 10.0 s | Global cooldown between `ZONE_ENTER` events |
+| `opto_zone_scale` | 0.5 | Inner zone for `OPTO_ZONE_ENTER`, as a fraction of the outer FOV (centered). Must be in (0.0, 1.0]; `1.0` fires on the same frame as `ZONE_ENTER` |
+| `visual_zone_scale` | 1.0 | Same, for `VISUAL_ZONE_ENTER` |
 
 The trigger zone's x/y bounds come from the camera FOV. `zone_timeout` is the single source of truth for follower processes.
 

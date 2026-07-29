@@ -71,6 +71,9 @@ class TrackedObject:
     # Zone membership tracking
     in_zone: bool = False  # ZONE_ENTER has been emitted for this object
     zone_enter_time: Optional[float] = None  # when ZONE_ENTER was emitted
+    zone_enter_frame: Optional[int] = None  # Braid frame at which ZONE_ENTER fired
+    opto_fired: bool = False  # OPTO_ZONE_ENTER emitted for this zone occupancy
+    visual_fired: bool = False  # VISUAL_ZONE_ENTER emitted for this zone occupancy
 
     # Braid's own detection timestamp for the most recent Update/Birth, kept
     # separate from the receipt-time clock used everywhere else on this
@@ -271,6 +274,8 @@ class TriggerHandler(WorkerProcess):
         # Global cooldown period — suppress ZONE_ENTER for this many seconds
         # after the last one was sent, regardless of object identity.
         self.cooldown_period: float = self.config.cooldown_period
+        self.opto_zone_scale: float = self.config.opto_zone_scale
+        self.visual_zone_scale: float = self.config.visual_zone_scale
         self._last_zone_enter_time: float = 0.0
 
         # Dictionary to track objects: {obj_id: TrackedObject}
@@ -344,6 +349,24 @@ class TriggerHandler(WorkerProcess):
             self._near_y_min + alpha * (self._far_y_min - self._near_y_min),
             self._near_y_max + alpha * (self._far_y_max - self._near_y_max),
         )
+
+    def _get_zone_at_z(self, z: float, scale: float) -> tuple:
+        """Return (x_min, x_max, y_min, y_max) for the outer FOV at the
+        given z, shrunk toward its own center by `scale` (1.0 = unchanged,
+        equal to the outer FOV)."""
+        x_min, x_max, y_min, y_max = self._get_fov_at_z(z)
+        if scale >= 1.0:
+            return x_min, x_max, y_min, y_max
+        cx = (x_min + x_max) / 2.0
+        cy = (y_min + y_max) / 2.0
+        half_w = (x_max - x_min) / 2.0 * scale
+        half_h = (y_max - y_min) / 2.0 * scale
+        return cx - half_w, cx + half_w, cy - half_h, cy + half_h
+
+    def _is_in_scaled_zone(self, x: float, y: float, z: float, scale: float) -> bool:
+        """Check if a point is within the FOV shrunk by `scale`, ignoring z bounds."""
+        x_min, x_max, y_min, y_max = self._get_zone_at_z(z, scale)
+        return x_min <= x <= x_max and y_min <= y <= y_max
 
     def is_in_trigger_zone(self, x: float, y: float, z: float) -> bool:
         """Check if a point is within the trigger zone (camera FOV x/y + z bounds)."""
@@ -524,6 +547,9 @@ class TriggerHandler(WorkerProcess):
             # All gates passed — emit ZONE_ENTER
             tracked_obj.in_zone = True
             tracked_obj.zone_enter_time = now
+            tracked_obj.zone_enter_frame = tracked_obj.current_frame
+            tracked_obj.opto_fired = False
+            tracked_obj.visual_fired = False
             self._send_zone_enter(tracked_obj, now)
 
         elif tracked_obj.in_zone and not in_xy_zone_now:
@@ -531,26 +557,49 @@ class TriggerHandler(WorkerProcess):
             self._send_zone_exit(tracked_obj, reason="left_fov", now=now)
             tracked_obj.in_zone = False
             tracked_obj.zone_enter_time = None
+            tracked_obj.zone_enter_frame = None
+            tracked_obj.opto_fired = False
+            tracked_obj.visual_fired = False
+
+        if tracked_obj.in_zone and in_zone_now:
+            if not tracked_obj.opto_fired and self._is_in_scaled_zone(
+                x, y, z, self.opto_zone_scale
+            ):
+                self._send_scaled_zone_enter(
+                    tracked_obj, now, self.config.zmq.opto_enter_topic
+                )
+                tracked_obj.opto_fired = True
+            if not tracked_obj.visual_fired and self._is_in_scaled_zone(
+                x, y, z, self.visual_zone_scale
+            ):
+                self._send_scaled_zone_enter(
+                    tracked_obj, now, self.config.zmq.visual_enter_topic
+                )
+                tracked_obj.visual_fired = True
+
+    def _build_trigger_payload(self, tracked_obj: TrackedObject, now: float) -> dict:
+        """Build the common trigger-event payload shared by ZONE_ENTER and
+        the scaled opto/visual inner-zone events."""
+        return {
+            "obj_id": tracked_obj.obj_id,
+            "frame": tracked_obj.current_frame,
+            "timestamp": now,
+            "braid_timestamp": tracked_obj.current_braid_timestamp,
+            "handler_timestamp": now,
+            "record_frame": tracked_obj.zone_enter_frame,
+            "x": tracked_obj.current_x,
+            "y": tracked_obj.current_y,
+            "z": tracked_obj.current_z,
+            "xvel": tracked_obj.velocities[-1][0] if tracked_obj.velocities else 0.0,
+            "yvel": tracked_obj.velocities[-1][1] if tracked_obj.velocities else 0.0,
+            "zvel": tracked_obj.velocities[-1][2] if tracked_obj.velocities else 0.0,
+            "mean_heading": tracked_obj.get_mean_heading(),
+        }
 
     def _send_zone_enter(self, tracked_obj: TrackedObject, now: float) -> None:
         """Emit a ZONE_ENTER event."""
         try:
-            mean_heading = tracked_obj.get_mean_heading()
-            message_data = {
-                "obj_id": tracked_obj.obj_id,
-                "frame": tracked_obj.current_frame,
-                "timestamp": now,
-                "braid_timestamp": tracked_obj.current_braid_timestamp,
-                "handler_timestamp": now,
-                "x": tracked_obj.current_x,
-                "y": tracked_obj.current_y,
-                "z": tracked_obj.current_z,
-                "xvel": tracked_obj.velocities[-1][0] if tracked_obj.velocities else 0.0,
-                "yvel": tracked_obj.velocities[-1][1] if tracked_obj.velocities else 0.0,
-                "zvel": tracked_obj.velocities[-1][2] if tracked_obj.velocities else 0.0,
-                "mean_heading": mean_heading,
-            }
-
+            message_data = self._build_trigger_payload(tracked_obj, now)
             message = json.dumps(message_data)
             topic = self.config.zmq.zone_enter_topic.encode("utf-8")
             self.publisher.send_multipart([topic, message.encode("utf-8")])
@@ -562,6 +611,20 @@ class TriggerHandler(WorkerProcess):
             )
         except Exception as e:
             self.logger.error(f"Error sending ZONE_ENTER: {e}")
+
+    def _send_scaled_zone_enter(self, tracked_obj: TrackedObject, now: float, topic: str) -> None:
+        """Emit an opto/visual inner-zone entry event. Same payload shape as
+        ZONE_ENTER (built via _build_trigger_payload)."""
+        try:
+            message_data = self._build_trigger_payload(tracked_obj, now)
+            message = json.dumps(message_data)
+            self.publisher.send_multipart([topic.encode("utf-8"), message.encode("utf-8")])
+            self.logger.info(
+                f"{topic} obj={tracked_obj.obj_id} pos=({tracked_obj.current_x:.3f}, "
+                f"{tracked_obj.current_y:.3f}, {tracked_obj.current_z:.3f})"
+            )
+        except Exception as e:
+            self.logger.error(f"Error sending {topic}: {e}")
 
     def _send_zone_exit(self, tracked_obj: TrackedObject, reason: str, now: float | None = None) -> None:
         """Emit a ZONE_EXIT event."""
@@ -602,6 +665,9 @@ class TriggerHandler(WorkerProcess):
                     self._send_zone_exit(obj, reason="timeout", now=current_time)
                     obj.in_zone = False
                     obj.zone_enter_time = None
+                    obj.zone_enter_frame = None
+                    obj.opto_fired = False
+                    obj.visual_fired = False
 
             if current_time - obj.last_check_time > MAX_OBJECT_AGE:
                 stale_ids.append(obj_id)

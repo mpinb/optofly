@@ -122,7 +122,7 @@ The subscription is vestigial; don't build on it without adding a publisher.
 frame_idx,nframe,ts_sec,ts_usec,cam_time_ns,trigger_frame_idx
 0,100,1234,567890,1234567890000,42
 ```
-`trigger_frame_idx` is written to every row and indicates which buffer frame corresponds to the real `ZONE_ENTER` moment. Frames before it are pre-stimulus baseline; frames after are the response.
+`trigger_frame_idx` is written to every row and indicates which buffer frame corresponds to the real `ZONE_ENTER` moment — that is, it marks **recording start**, not stimulus onset. Actual stimulus onset for opto/visual is in `latency.csv`'s `frame` field for that system's row (`"opto"`/`"visual"`); `record_frame` on that same row equals `trigger_frame_idx`/the outer entry frame, so `(row.frame - row.record_frame)` is the number of Braid frames between recording start and stimulus onset. Convert to camera frames via the fps ratio if needed for video alignment (Braid runs ~100Hz; camera fps is in `configs/config.toml`'s `[camera]` section).
 
 **Lens timing CSV:** `{save_folder}/obj_id_{obj_id}_frame_{frame}_lens_timing.csv`
 

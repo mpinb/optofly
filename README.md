@@ -73,6 +73,8 @@ active_braid_port = 5557
 braid_topic = "BRAID"
 zone_enter_topic = "ZONE_ENTER"
 zone_exit_topic = "ZONE_EXIT"
+opto_enter_topic = "OPTO_ZONE_ENTER"
+visual_enter_topic = "VISUAL_ZONE_ENTER"
 active_braid_topic = "ACTIVE_BRAID"
 
 braid_pub_hwm = 1000

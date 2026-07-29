@@ -413,6 +413,7 @@ class LiquidLens(WorkerProcess):
                         for key in (
                             "obj_id",
                             "frame",
+                            "record_frame",
                             "x",
                             "y",
                             "z",
@@ -450,6 +451,7 @@ class LiquidLens(WorkerProcess):
                 "system": "lens",
                 "obj_id": update.get("obj_id"),
                 "frame": update.get("frame"),
+                "record_frame": update.get("record_frame"),
                 "braid_timestamp": timing.braid_timestamp,
                 "trigger_timestamp": timing.handler_timestamp,
                 "activation_timestamp": activation_timestamp,

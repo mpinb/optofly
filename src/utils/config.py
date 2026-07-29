@@ -101,6 +101,8 @@ class TriggerHandlerConfig:
     min_velocity: float
     max_velocity: float
     min_tracking_age: float
+    opto_zone_scale: float
+    visual_zone_scale: float
     zmq: "ZMQConfig"
 
     @classmethod
@@ -113,6 +115,17 @@ class TriggerHandlerConfig:
             raise ValueError("trigger_handler.z_min must be less than z_max")
 
         heading_cone_deg = float(section.get("heading_cone_deg", 45.0))
+
+        opto_zone_scale = float(section.get("opto_zone_scale", 0.5))
+        visual_zone_scale = float(section.get("visual_zone_scale", 1.0))
+        if not (0.0 < opto_zone_scale <= 1.0):
+            raise ValueError(
+                f"trigger_handler.opto_zone_scale must be in (0.0, 1.0], got {opto_zone_scale}"
+            )
+        if not (0.0 < visual_zone_scale <= 1.0):
+            raise ValueError(
+                f"trigger_handler.visual_zone_scale must be in (0.0, 1.0], got {visual_zone_scale}"
+            )
 
         return cls(
             zone_timeout=float(section.get("zone_timeout", 2.0)),
@@ -139,6 +152,8 @@ class TriggerHandlerConfig:
             min_velocity=float(section.get("min_velocity", 0.01)),
             max_velocity=float(section.get("max_velocity", 2.0)),
             min_tracking_age=float(section.get("min_tracking_age", 0.1)),
+            opto_zone_scale=opto_zone_scale,
+            visual_zone_scale=visual_zone_scale,
             zmq=zmq,
         )
 
@@ -229,6 +244,8 @@ class ZMQConfig:
     braid_topic: str
     zone_enter_topic: str
     zone_exit_topic: str
+    opto_enter_topic: str
+    visual_enter_topic: str
     active_braid_topic: str
     braid_pub_hwm: int
     lens_update_conflate: bool
@@ -279,6 +296,8 @@ class ZMQConfig:
             braid_topic=braid_topic,
             zone_enter_topic=section.get("zone_enter_topic", "ZONE_ENTER"),
             zone_exit_topic=section.get("zone_exit_topic", "ZONE_EXIT"),
+            opto_enter_topic=section.get("opto_enter_topic", "OPTO_ZONE_ENTER"),
+            visual_enter_topic=section.get("visual_enter_topic", "VISUAL_ZONE_ENTER"),
             active_braid_topic=section.get("active_braid_topic", "ACTIVE_BRAID"),
             braid_pub_hwm=braid_pub_hwm,
             lens_update_conflate=bool(section.get("lens_update_conflate", True)),
