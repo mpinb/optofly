@@ -1,9 +1,10 @@
 import json
 
+import pytest
 import zmq
 
 from src.processes.led import OptoTriggerWorker
-from src.utils.config import ZMQConfig
+from src.utils.config import AppConfig, ZMQConfig
 
 
 class FakeLatencySocket:
@@ -113,6 +114,74 @@ def test_handle_trigger_publishes_latency_with_none_activation_for_sham():
     sent = worker.latency_socket.sent
     assert sent[0]["sham"] is True
     assert sent[0]["activation_timestamp"] is None
+
+
+class RecordingLogger:
+    def __init__(self):
+        self.warnings = []
+
+    def warning(self, msg, *args):
+        self.warnings.append(msg % args if args else msg)
+
+    def info(self, *a, **k):
+        pass
+
+    def debug(self, *a, **k):
+        pass
+
+    def error(self, *a, **k):
+        pass
+
+
+class UnopenableOptoTrigger:
+    """Stands in for hardware whose serial port cannot be opened."""
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def initialize(self):
+        return False
+
+    def set_backlight(self, intensity):
+        raise AssertionError("set_backlight must not run after a failed init")
+
+
+def _worker_for_initialize(monkeypatch, *, active):
+    monkeypatch.setattr("src.processes.led.OptoTrigger", UnopenableOptoTrigger)
+    worker = object.__new__(OptoTriggerWorker)
+    worker.config_path = "configs/config.example.toml"
+    worker.process_name = "OptoTriggerWorker"
+    worker.log_level = "INFO"
+    worker.log_color = "RED"
+    worker.opto_config = AppConfig.load("configs/config.example.toml").opto_trigger
+    worker.is_enabled = active
+    worker.opto_trigger = None
+    worker.logger = RecordingLogger()
+    return worker
+
+
+def test_unopenable_hardware_is_survivable_when_stimulation_is_disabled(monkeypatch):
+    """With opto_trigger.active = false the user has asked for no stimulation,
+    so a missing Arduino must not take the whole experiment down -- the
+    process stays up and only loses the backlight."""
+    worker = _worker_for_initialize(monkeypatch, active=False)
+
+    worker.initialize()  # must not raise
+
+    assert worker.opto_trigger is None
+    assert any(
+        "opto_trigger.active = false" in w for w in worker.logger.warnings
+    ), f"expected a warning naming the inactive flag, got {worker.logger.warnings}"
+    assert any("/dev/opto_trigger" in w for w in worker.logger.warnings)
+
+
+def test_unopenable_hardware_still_raises_when_stimulation_is_enabled(monkeypatch):
+    """With active = true the user asked for stimulation we cannot deliver,
+    so this must stay fatal."""
+    worker = _worker_for_initialize(monkeypatch, active=True)
+
+    with pytest.raises(RuntimeError, match="/dev/opto_trigger"):
+        worker.initialize()
 
 
 def test_initialize_zmq_configures_latency_socket_as_non_blocking():

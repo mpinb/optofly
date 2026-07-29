@@ -88,8 +88,21 @@ class OptoTriggerWorker(WorkerProcess):
         """
         self.logger.debug(f"OptoTrigger config: {self.opto_config}")
 
-        # Initialize OptoTrigger hardware first (needed for backlight regardless of active flag)
-        self._initialize_hardware()
+        # Initialize OptoTrigger hardware first (needed for backlight regardless
+        # of active flag). Whether a failure here is fatal depends on the flag:
+        # with active = false the user asked for no stimulation, so a missing
+        # Arduino costs only the backlight and must not abort the experiment.
+        try:
+            self._initialize_hardware()
+        except Exception:
+            if self.is_enabled:
+                raise
+            self.opto_trigger = None
+            self.logger.warning(
+                "OptoTrigger hardware unavailable at %s and opto_trigger.active = false. "
+                "Continuing without the backlight; stimulation was already disabled.",
+                self.opto_config.port,
+            )
 
         # Turn on backlight
         if self.opto_trigger:
@@ -152,25 +165,26 @@ class OptoTriggerWorker(WorkerProcess):
             raise
 
     def _initialize_hardware(self):
-        """Initialize OptoTrigger hardware controller."""
-        try:
-            self.opto_trigger = OptoTrigger(
-                config_path=self.config_path,
-                process_name=self.process_name,
-                log_level=self.log_level,
-                log_color=self.log_color,
+        """Initialize the OptoTrigger hardware controller.
+
+        Raises:
+            RuntimeError: naming the configured port, when the serial
+                connection cannot be opened. Reported once here rather than
+                re-logged at every level on the way up; initialize() decides
+                whether it is fatal.
+        """
+        self.opto_trigger = OptoTrigger(
+            config_path=self.config_path,
+            process_name=self.process_name,
+            log_level=self.log_level,
+            log_color=self.log_color,
+        )
+        if not self.opto_trigger.initialize():
+            raise RuntimeError(
+                f"Could not open the opto-trigger serial port {self.opto_config.port}. "
+                "Check the Arduino is connected and the udev symlink exists "
+                "(see the [opto_trigger] notes in configs/config.example.toml)."
             )
-            success = self.opto_trigger.initialize()
-            if not success:
-                self.logger.error(
-                    "OptoTrigger hardware initialization FAILED. "
-                    "Cannot open serial port — check opto_trigger.port in config. "
-                    "Backlight will not turn on. Aborting."
-                )
-                raise RuntimeError("OptoTrigger hardware initialization failed")
-        except Exception as e:
-            self.logger.error(f"Error initializing OptoTrigger hardware: {e}")
-            raise
 
     def _receive_message(self) -> Optional[Dict]:
         """

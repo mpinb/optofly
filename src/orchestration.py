@@ -66,16 +66,47 @@ class ExperimentStartError(Exception):
     than exiting immediately."""
 
 
-def _check_critical_processes_alive(processes: list) -> list[str]:
+def _critical_names(app_config: AppConfig) -> set[str]:
+    """Return the processes whose death is fatal *for this config*.
+
+    Criticality is config-dependent rather than fixed, because not every
+    process the pool spawns is one the experiment depends on:
+
+    - OptoTriggerWorker is started unconditionally (it also drives the
+      backlight), but with `opto_trigger.active = false` there is no
+      stimulation to lose. Treating its death as fatal there meant a rig with
+      no Arduino attached could not start at all -- even though the shipped
+      example config disables stimulation.
+    - LiquidLens is only spawned when `camera.active`, so it cannot be
+      critical when the camera is off.
+
+    BraidPublisher and TriggerHandler are always critical: without tracking
+    or zone events there is no experiment, whatever else is configured.
+    """
+    names = {"BraidPublisher", "TriggerHandler"}
+    if app_config.opto_trigger.active:
+        names.add("OptoTriggerWorker")
+    if app_config.camera.active:
+        names.add("LiquidLens")
+    return names
+
+
+def _check_critical_processes_alive(
+    processes: list, critical: set[str] | None = None
+) -> list[str]:
     """Return one FATAL message per critical process that has died.
 
-    `processes` is a list of (name, process) tuples. Only names in
-    _CRITICAL_INIT_HINTS are checked -- everything else (Monitoring Server,
-    VisualProcess, CameraProcess, LatencyLogger) dying is not fatal here.
+    `processes` is a list of (name, process) tuples. Only names in `critical`
+    (default: every name in _CRITICAL_INIT_HINTS) are checked -- everything
+    else (Monitoring Server, VisualProcess, CameraProcess, LatencyLogger)
+    dying is not fatal here. Callers that have an AppConfig should pass
+    _critical_names(app_config) so config-disabled subsystems are excluded.
     """
+    if critical is None:
+        critical = set(_CRITICAL_INIT_HINTS)
     messages = []
     for name, proc in processes:
-        if name in _CRITICAL_INIT_HINTS and not proc.is_alive():
+        if name in critical and not proc.is_alive():
             messages.append(
                 f"{name} process exited during initialization. {_CRITICAL_INIT_HINTS[name]}"
             )
@@ -112,6 +143,9 @@ class Experiment:
         self._failed_reasons: dict[str, str] = {}
         self._shutdown_state: dict[str, str] = {}
         self._known_dead: set[str] = set()
+        # Which process names are fatal for the run currently configured;
+        # populated by start() via _critical_names(). Empty before start().
+        self._critical: set[str] = set()
 
     def is_running(self) -> bool:
         return self._stop_event is not None and not self._stop_event.is_set()
@@ -207,6 +241,7 @@ class Experiment:
         self._failed_reasons = {}
         self._shutdown_state = {}
         self._known_dead = set()
+        self._critical = _critical_names(app_config)
 
         common = dict(
             config_path=config_path, event=stop_event, log_path=log_path, log_level=log_level_str
@@ -304,10 +339,10 @@ class Experiment:
 
         time.sleep(1)
 
-        fatal_messages = _check_critical_processes_alive(self._processes)
+        fatal_messages = _check_critical_processes_alive(self._processes, self._critical)
         if fatal_messages:
             for name, proc in self._processes:
-                if name in _CRITICAL_INIT_HINTS and not proc.is_alive():
+                if name in self._critical and not proc.is_alive():
                     self._failed_reasons[name] = (
                         f"{name} process exited during initialization. "
                         f"{_CRITICAL_INIT_HINTS[name]}"
@@ -369,10 +404,10 @@ class Experiment:
         if self._stop_event is None or self._stop_event.is_set():
             return
 
-        fatal_messages = _check_critical_processes_alive(self._processes)
+        fatal_messages = _check_critical_processes_alive(self._processes, self._critical)
         if fatal_messages:
             for name, proc in self._processes:
-                if name in _CRITICAL_INIT_HINTS and not proc.is_alive():
+                if name in self._critical and not proc.is_alive():
                     self._failed_reasons[name] = (
                         f"{name} process exited during the run. "
                         f"{_CRITICAL_INIT_HINTS[name]}"
@@ -382,7 +417,7 @@ class Experiment:
             return
 
         for name, proc in self._processes:
-            if name in _CRITICAL_INIT_HINTS:
+            if name in self._critical:
                 continue
             if name in self._known_dead:
                 continue
