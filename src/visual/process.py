@@ -132,15 +132,27 @@ class VisualProcess(WorkerProcess):
             self._zmq_context.term()
 
     def _load_config(self) -> dict:
-        from src.utils.config import AppConfig, ConfigBase
+        """Load the [visual_stimuli] tree from the configured stimuli file.
 
-        main_cfg = ConfigBase(self._config_path)._load_config()
+        Raises:
+            FileNotFoundError: when the configured file is absent. This used to
+                fall back to the main config's [visual_stimuli] section, which
+                holds only `active` and `config_file` -- so every stimulus
+                defaulted off except the always-on background, and the run
+                continued silently with the wrong stimuli. Forgetting the
+                second `cp` in the setup instructions is the single likeliest
+                setup mistake, and it must not quietly invalidate a session.
+        """
+        from src.utils.config import AppConfig, load_toml
+
         vs_path = Path(AppConfig.load(self._config_path).visual_stimuli.config_file)
-        if vs_path.exists():
-            raw = ConfigBase(str(vs_path))._load_config()
-        else:
-            raw = main_cfg
-        return raw.get("visual_stimuli", {})
+        if not vs_path.exists():
+            raise FileNotFoundError(
+                f"visual_stimuli.active is true but {vs_path} does not exist.\n"
+                f"  Create it with: cp configs/visual_stimuli.example.toml {vs_path}\n"
+                f"  (or set visual_stimuli.active = false in {self._config_path})"
+            )
+        return load_toml(str(vs_path)).get("visual_stimuli", {})
 
     def _setup_zmq(self) -> None:
         self._zmq_context = None

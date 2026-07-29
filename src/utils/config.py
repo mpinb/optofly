@@ -62,37 +62,15 @@ def _load_toml_cached(config_path: str) -> dict:
     return data
 
 
-class ConfigBase:
-    """Base class for all configuration objects."""
+def load_toml(config_path: str) -> dict:
+    """Parse a TOML file and return the raw tree (cached by path + mtime).
 
-    def __init__(self, config_path: str, section: str = None):
-        """Initialize the configuration.
-
-        Args:
-            config_path: Path to the configuration file
-            section: Optional section in the config file to load
-        """
-        self.config_path = config_path
-        self.section = section
-
-    def _load_config(self):
-        """Load configuration from file."""
-        try:
-            config = _load_toml_cached(self.config_path)
-
-            if self.section is not None:
-                if self.section not in config:
-                    raise ValueError(
-                        f"Section '{self.section}' not found in {self.config_path}"
-                    )
-                return config[self.section]
-            return config
-        except FileNotFoundError:
-            logger.error(f"Config file not found: {self.config_path}")
-            raise
-        except Exception as e:
-            logger.error(f"Error opening config file: {e}")
-            raise
+    For the one caller that legitimately needs untyped TOML: the visual
+    stimuli file, which has its own per-stimulus schema rather than a fixed
+    set of fields. Everything describing the main config should go through
+    AppConfig instead of reading TOML directly.
+    """
+    return _load_toml_cached(config_path)
 
 
 @dataclass(frozen=True)

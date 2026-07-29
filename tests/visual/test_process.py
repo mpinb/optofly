@@ -149,3 +149,53 @@ def test_setup_zmq_configures_latency_socket_as_non_blocking():
         proc._latency_socket.close()
         proc._zmq_socket.close()
         proc._zmq_context.term()
+
+
+def _config_pointing_at(tmp_path, visual_stimuli_path):
+    """A main config whose visual_stimuli.config_file points where we say."""
+    source = open("configs/config.example.toml").read().replace(
+        'config_file = "configs/visual_stimuli.toml"',
+        f'config_file = "{visual_stimuli_path}"',
+    )
+    out = tmp_path / "config.toml"
+    out.write_text(source)
+    return out
+
+
+def test_missing_visual_stimuli_file_fails_loudly(tmp_path):
+    """Forgetting `cp configs/visual_stimuli.example.toml ...` used to fall
+    back to the main config's [visual_stimuli] section -- which holds only
+    `active` and `config_file` -- so background.enabled defaulted to True and
+    everything else to False. The user got a grey screen with random squares,
+    no looming, and nothing in the logs. Silently running the wrong stimuli
+    invalidates an experiment rather than failing it."""
+    import pytest
+
+    config_path = _config_pointing_at(tmp_path, tmp_path / "not_created.toml")
+    proc = object.__new__(VisualProcess)
+    proc._config_path = str(config_path)
+
+    with pytest.raises(FileNotFoundError) as exc:
+        proc._load_config()
+
+    message = str(exc.value)
+    assert "not_created.toml" in message
+    assert "cp configs/visual_stimuli.example.toml" in message, (
+        f"must name the command that fixes it: {message}"
+    )
+
+
+def test_present_visual_stimuli_file_is_loaded(tmp_path):
+    stimuli = tmp_path / "visual_stimuli.toml"
+    stimuli.write_text(
+        "[visual_stimuli]\nlog_file = \"stim.csv\"\n\n"
+        "[visual_stimuli.looming]\nenabled = true\ninitial_size_deg = 7.5\n"
+    )
+    config_path = _config_pointing_at(tmp_path, stimuli)
+    proc = object.__new__(VisualProcess)
+    proc._config_path = str(config_path)
+
+    cfg = proc._load_config()
+
+    assert cfg["looming"]["enabled"] is True
+    assert cfg["looming"]["initial_size_deg"] == 7.5
