@@ -35,7 +35,7 @@ Default settings (3s, 500fps, 2112x2112): ~8.5GB.
 - Locates the binary in `optofly-camera/target/{release,debug}/` or `PATH`
 - Launches it with `--config`, `--save-folder`, and `--log-level` arguments
 - Monitors the subprocess and the shared `stop_event`
-- On shutdown: sends a ZMQ `kill` message, waits for graceful exit, then SIGTERM/SIGKILL
+- On shutdown: sends SIGTERM, waits up to 30s for graceful exit, then SIGKILL
 
 ## Dependencies
 
@@ -101,7 +101,9 @@ Subscribes to topics `ZONE_ENTER`, `ZONE_EXIT`, and `kill` on port 5556 (multipa
 [b"ZONE_EXIT",      b'{"obj_id": 123, "reason": "left_fov", "timestamp": 1234.80, "duration": 0.20}']
 ```
 
-Kill signal: `[b"kill", b""]`
+The binary also subscribes to a bare `kill` topic, but **nothing in this
+codebase publishes to it** — shutdown is by SIGTERM from the Python wrapper.
+The subscription is vestigial; don't build on it without adding a publisher.
 
 **State machine:**
 
@@ -127,9 +129,9 @@ frame_idx,nframe,ts_sec,ts_usec,cam_time_ns,trigger_frame_idx
 Written by the Python `LiquidLens` process. One row per commanded diopter change while tracking an object (updates that fall below the slew-rate threshold or arrive within the 25ms hardware rate limit are skipped and don't produce a row).
 ```csv
 t_braid,t_relay,t_lens_recv,t_serial_start,t_diopter_sent,delay_ms,frame,obj_id,x,y,z,focus_z,diopter,target_diopter,predictor
-1234567.888,1234567.889,1234567.890,1234567.891,1234567.893,2.1,4589,123,0.01,-0.02,0.18,0.18,3.2,3.2,kalman
+1234567.888,1234567.889,1234567.890,1234567.891,1234567.893,2.1,4589,123,0.01,-0.02,0.18,0.18,3.2,3.2,linear
 ```
-`delay_ms` = time from `t_serial_start` to `t_diopter_sent`, i.e. the USB serial write itself. `predictor` records which mode (`none`, `linear`, `kalman`) produced `focus_z` for that row. `diopter` is the slew-rate-limited value actually sent to the lens; `target_diopter` is what the calibration curve returned before limiting. Compare the two to see how much `max_diopter_step` is holding back a given trial. Feed this file to `uv run python -m src.tools.lens_latency_analyze` for latency percentile breakdowns and a recommended `system_latency`.
+`delay_ms` = time from `t_serial_start` to `t_diopter_sent`, i.e. the USB serial write itself. `predictor` records which mode (`none` or `linear`) produced `focus_z` for that row. `diopter` is the slew-rate-limited value actually sent to the lens; `target_diopter` is what the calibration curve returned before limiting. Compare the two to see how much `max_diopter_step` is holding back a given trial. Feed this file to `uv run python -m src.tools.lens_latency_analyze` for latency percentile breakdowns and a recommended `system_latency`.
 
 **Debug histograms:** Generate offline with `src/tools/generate_camera_histograms.py`
 - Reads CSV files and produces PNG histograms showing frame counter diffs, inter-frame interval, jitter, timeline
