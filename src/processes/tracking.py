@@ -373,8 +373,14 @@ class TriggerHandler(WorkerProcess):
         except Exception as e:
             self.logger.error(f"Error processing message: {e}")
 
-    def _process_birth(self, data: Dict[str, Any]) -> None:
-        """Process a Birth message for a new tracked object."""
+    def _process_birth(self, data: Dict[str, Any]) -> Optional[TrackedObject]:
+        """Process a Birth message for a new tracked object.
+
+        Returns:
+            The newly tracked object, or None if the payload was malformed
+            (already logged here). Callers must check rather than assuming
+            tracked_objects now contains obj_id.
+        """
         try:
             obj_id = data["obj_id"]
             frame = data["frame"]
@@ -399,10 +405,12 @@ class TriggerHandler(WorkerProcess):
                 f"Started tracking object {obj_id} at position "
                 f"({data['x']:.3f}, {data['y']:.3f}, {data['z']:.3f})"
             )
+            return tracked_obj
         except KeyError as e:
             self.logger.error(f"Missing field in Birth message: {e}")
         except Exception as e:
             self.logger.error(f"Error processing Birth message: {e}")
+        return None
 
     def _process_update(self, data: Dict[str, Any]) -> None:
         """Process an Update message for an existing tracked object."""
@@ -415,7 +423,16 @@ class TriggerHandler(WorkerProcess):
                 self.logger.debug(
                     f"Received Update for unknown object {obj_id}, creating new tracking entry"
                 )
-                self._process_birth(data)
+                # _process_birth() logs and swallows its own failures, so a
+                # malformed payload leaves nothing in tracked_objects. Bail out
+                # here rather than indexing it: that raised a second KeyError,
+                # reported as "Missing field in Update message: <obj_id>", which
+                # named a field that was present and a message that hadn't
+                # failed -- sending anyone debugging a Braid feed to the wrong
+                # place entirely.
+                tracked_obj = self._process_birth(data)
+                if tracked_obj is None:
+                    return
             else:
                 tracked_obj = self.tracked_objects[obj_id]
                 tracked_obj.update(
@@ -430,7 +447,6 @@ class TriggerHandler(WorkerProcess):
                     min_velocity=self.config.min_velocity,
                 )
 
-            tracked_obj = self.tracked_objects[obj_id]
             tracked_obj.current_braid_timestamp = data.get("braid_timestamp")
             self._evaluate_zone_transitions(tracked_obj, now)
 

@@ -453,3 +453,54 @@ def test_check_health_logs_once_for_non_critical_process_death(config_path, capl
     assert len(matching) == 1
     assert exp.is_running() is True  # non-critical death is never fatal
     exp.stop()
+
+
+class _RecordingBraidProxy:
+    def __init__(self):
+        self.stopped = False
+
+    def stop_csv_recording(self):
+        self.stopped = True
+
+
+def test_stop_ends_the_braid_recording_when_start_failed_before_the_stop_event(
+    monkeypatch, config_path, patch_processes
+):
+    """prepare_braid_folder() starts a Braid recording. If start() then raises
+    before it assigns _stop_event -- writing metadata, copying configs,
+    configuring logging, constructing the first process -- stop() used to
+    return immediately at `if self._stop_event is None`, never reaching the
+    braid_proxy teardown. Braid then records forever with nobody to stop it,
+    and the next run starts a second one alongside it."""
+    exp = Experiment()
+    exp.prepare_braid_folder(config_path)
+    proxy = _RecordingBraidProxy()
+    exp._braid_proxy = proxy
+
+    def explode(*a, **kw):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(orchestration, "write_metadata", explode)
+
+    with pytest.raises(OSError):
+        exp.start(config_path, metadata={"experiment_duration": 1})
+
+    exp.stop()
+
+    assert proxy.stopped is True, "a half-started experiment must still stop recording"
+
+
+def test_stop_ends_the_braid_recording_after_a_normal_run(config_path, patch_processes):
+    exp = Experiment()
+    exp.prepare_braid_folder(config_path)
+    proxy = _RecordingBraidProxy()
+    exp._braid_proxy = proxy
+
+    exp.start(config_path, metadata=None)
+    exp.stop()
+
+    assert proxy.stopped is True
+
+
+def test_stop_is_still_a_no_op_with_nothing_started():
+    Experiment().stop()  # must not raise

@@ -39,6 +39,30 @@ enum State {
     Recording,
 }
 
+/// Offsets that centre a `width` x `height` ROI on a `sensor_w` x `sensor_h` sensor.
+///
+/// These are all `u32`, so computing the offsets directly as
+/// `(sensor_w - width) / 2` wraps to roughly 4.29e9 whenever the configured
+/// resolution exceeds the sensor: a release build then fails inside the SDK
+/// with an opaque numeric code, and a debug build panics with "attempt to
+/// subtract with overflow". Neither tells the user their `camera.resolution`
+/// is simply larger than the camera.
+fn centered_roi(
+    sensor_w: u32,
+    sensor_h: u32,
+    width: u32,
+    height: u32,
+) -> Result<(u32, u32), String> {
+    if width > sensor_w || height > sensor_h {
+        return Err(format!(
+            "camera.resolution = [{}, {}] is larger than the sensor [{}, {}]. \
+             Reduce resolution in the config to fit the camera.",
+            width, height, sensor_w, sensor_h
+        ));
+    }
+    Ok(((sensor_w - width) / 2, (sensor_h - height) / 2))
+}
+
 pub fn run(cfg: AppConfig) -> Result<(), String> {
     // --- SIGTERM handler ---
     let shutdown = Arc::new(AtomicBool::new(false));
@@ -104,9 +128,10 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
     let sensor_h = cam
         .height()
         .map_err(|e| format!("Get height error: {}", e))?;
+    let (offset_x, offset_y) = centered_roi(sensor_w, sensor_h, cfg.width, cfg.height)?;
     let roi = xiapi::Roi {
-        offset_x: (sensor_w - cfg.width) / 2,
-        offset_y: (sensor_h - cfg.height) / 2,
+        offset_x,
+        offset_y,
         width: cfg.width,
         height: cfg.height,
     };
@@ -489,4 +514,43 @@ fn finish_recording(
         trigger_info,
         reason
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::centered_roi;
+
+    #[test]
+    fn centers_a_smaller_roi_on_the_sensor() {
+        let (x, y) = centered_roi(2112, 2112, 1024, 512).unwrap();
+        assert_eq!(x, 544);
+        assert_eq!(y, 800);
+    }
+
+    #[test]
+    fn full_sensor_roi_has_zero_offset() {
+        assert_eq!(centered_roi(2112, 2112, 2112, 2112).unwrap(), (0, 0));
+    }
+
+    #[test]
+    fn width_larger_than_the_sensor_is_rejected_not_underflowed() {
+        // (sensor_w - cfg.width) on u32 wraps to ~4.29e9 in release, which the
+        // SDK then rejects with an opaque numeric code; debug builds panic with
+        // "attempt to subtract with overflow". Neither says the resolution is
+        // simply too big.
+        let err = centered_roi(2112, 2112, 4000, 2112).unwrap_err();
+        assert!(err.contains("4000"), "must name the requested width: {}", err);
+        assert!(err.contains("2112"), "must name the sensor size: {}", err);
+        assert!(
+            err.to_lowercase().contains("resolution"),
+            "must point at the config key: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn height_larger_than_the_sensor_is_rejected() {
+        let err = centered_roi(2112, 2112, 2112, 4000).unwrap_err();
+        assert!(err.contains("4000"), "must name the requested height: {}", err);
+    }
 }

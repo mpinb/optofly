@@ -376,29 +376,37 @@ class Experiment:
             raise ExperimentStartError("; ".join(fatal_messages))
 
     def stop(self) -> None:
-        if self._stop_event is None:
-            return
+        """Shut down the process pool and end the Braid recording.
 
-        self._stop_event.set()
-        time.sleep(1)
+        The two are deliberately independent. prepare_braid_folder() starts a
+        recording before start() ever runs, so an exception anywhere in start()
+        before the stop event is assigned would previously return at the guard
+        below and never reach the braid_proxy teardown -- leaving Braid
+        recording indefinitely with nobody to stop it, and the next run
+        starting a second recording alongside it. Safe to call repeatedly and
+        safe to call having started nothing.
+        """
+        if self._stop_event is not None:
+            self._stop_event.set()
+            time.sleep(1)
 
-        for name, process in self._processes:
-            if process.is_alive():
-                timeout = _SHUTDOWN_TIMEOUTS.get(name, 5)
-                logger.info(f"  Waiting for {name} to terminate...")
-                process.join(timeout=timeout)
+            for name, process in self._processes:
                 if process.is_alive():
-                    logger.info(f"  Force terminating {name}...")
-                    process.terminate()
-                    process.join(timeout=2)
-                    self._shutdown_state[name] = "forced"
+                    timeout = _SHUTDOWN_TIMEOUTS.get(name, 5)
+                    logger.info(f"  Waiting for {name} to terminate...")
+                    process.join(timeout=timeout)
+                    if process.is_alive():
+                        logger.info(f"  Force terminating {name}...")
+                        process.terminate()
+                        process.join(timeout=2)
+                        self._shutdown_state[name] = "forced"
+                    else:
+                        self._shutdown_state[name] = "clean"
                 else:
                     self._shutdown_state[name] = "clean"
-            else:
-                self._shutdown_state[name] = "clean"
 
-        if self._braid_folder:
-            verify_csv_files_in_braid(self._braid_folder)
+            if self._braid_folder:
+                verify_csv_files_in_braid(self._braid_folder)
 
         if self._braid_proxy is not None:
             logger.info("Stopping Braid recording...")

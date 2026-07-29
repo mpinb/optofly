@@ -438,3 +438,58 @@ def test_velocity_and_age_bookkeeping_still_use_receipt_clock_not_braid_timestam
     tracked = handler.tracked_objects[7]
     assert tracked.get_tracking_duration(fake_clock.now) == 0.0
     assert tracked.current_braid_timestamp == 1_000_000.0
+
+
+class _CapturingLogger:
+    def __init__(self):
+        self.errors = []
+
+    def error(self, msg, *args):
+        self.errors.append(msg % args if args else msg)
+
+    def warning(self, *a, **k):
+        pass
+
+    def info(self, *a, **k):
+        pass
+
+    def debug(self, *a, **k):
+        pass
+
+
+def test_malformed_update_for_unknown_object_names_the_missing_field(monkeypatch):
+    """An Update for an unknown obj_id delegates to _process_birth(), which
+    swallows its own KeyError. Control then fell through to
+    self.tracked_objects[obj_id], raising a *second* KeyError that the outer
+    handler reported as "Missing field in Update message: 'obj_id'" -- naming
+    the wrong field and the wrong message type, so anyone debugging a Braid
+    feed was sent looking for a field that was present."""
+    handler = object.__new__(TriggerHandler)
+    handler.tracked_objects = {}
+    handler.logger = _CapturingLogger()
+    handler.config = type("C", (), {"min_velocity": 0.01})()
+
+    # 'zvel' is genuinely absent; obj_id is present.
+    handler._process_update(
+        {"obj_id": 3, "frame": 1, "x": 0.0, "y": 0.0, "z": 0.1, "xvel": 0.0, "yvel": 0.0}
+    )
+
+    errors = handler.logger.errors
+    assert len(errors) == 1, (
+        f"one failure must produce one message, not a real one followed by a "
+        f"spurious 'Missing field in Update message: 3': {errors}"
+    )
+    assert "zvel" in errors[0], f"must name the field that is actually missing: {errors}"
+    assert "Birth" in errors[0], f"must name the message that actually failed: {errors}"
+    assert 3 not in handler.tracked_objects
+
+
+def test_failed_birth_does_not_leave_a_half_tracked_object(monkeypatch):
+    handler = object.__new__(TriggerHandler)
+    handler.tracked_objects = {}
+    handler.logger = _CapturingLogger()
+    handler.config = type("C", (), {"min_velocity": 0.01})()
+
+    handler._process_birth({"obj_id": 9, "frame": 1, "x": 0.0})
+
+    assert handler.tracked_objects == {}
