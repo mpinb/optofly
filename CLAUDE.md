@@ -33,10 +33,10 @@ uv run python -m src.tools.calibrate_frustum_fov
 uv run python -m src.tools.lens_latency_analyze /mnt/data/videos/<braid_dir>
 
 # Simulate Braid tracking data (development)
-python -m src.tools.braid_simulator
+uv run python -m src.tools.braid_simulator
 
 # Real-time tracking visualization (ReRun)
-python -m src.tools.braid_visualizer
+uv run python -m src.tools.braid_visualizer
 ```
 
 ## Configuration
