@@ -31,9 +31,23 @@ def load_config(config_path: str) -> AppConfig:
         return AppConfig.load(config_path)
     except FileNotFoundError:
         print(f"ERROR: Config file not found: {config_path}")
+        print("  Create it with: cp configs/config.example.toml configs/config.toml")
+        sys.exit(1)
+    except tomllib.TOMLDecodeError as e:
+        # Distinguished from a ValueError below so the line/column tomllib
+        # reports isn't flattened into a generic "failed to load" message.
+        print(f"ERROR: {config_path} is not valid TOML.")
+        print(f"  {e}")
+        sys.exit(1)
+    except ValueError as e:
+        # The message already opens with the config path (AppConfig.load adds
+        # it), so don't repeat it in the header.
+        print("ERROR: invalid configuration")
+        for line in str(e).splitlines():
+            print(f"  {line}")
         sys.exit(1)
     except Exception as e:
-        print(f"ERROR: Failed to load config: {e}")
+        print(f"ERROR: Failed to load config {config_path}: {e}")
         sys.exit(1)
 
 

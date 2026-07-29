@@ -26,6 +26,31 @@ logger = logging.getLogger(__name__)
 _TOML_CACHE: dict[str, tuple[float, dict]] = {}
 
 
+def _required_section(data: dict, name: str, config_path: str) -> dict:
+    """Return section `name`, or explain precisely what's missing.
+
+    Only for sections carrying at least one key with no sensible default
+    (`zmq`, `camera`, `liquid_lens`, `opto_trigger`). Omitting one of those is
+    a mistake rather than a request for defaults -- and because AppConfig.load()
+    validates every section regardless of active flags, the omission stops the
+    whole run, so the message has to point straight at the fix.
+
+    Sections that are fully defaulted (`monitoring`, `logging`,
+    `visual_stimuli`, `trigger_handler`, `braid_publisher`) stay optional.
+    """
+    if name not in data:
+        # No config path in the message: AppConfig.load() prefixes it once, so
+        # naming it here too would print it three times by the time main.py
+        # has added its own header.
+        raise ValueError(
+            f"Section [{name}] not found.\n"
+            f"  Every section must be present even when its subsystem is "
+            f"inactive, because the whole file is validated in one pass.\n"
+            f"  Copy the [{name}] block from configs/config.example.toml."
+        )
+    return data[name]
+
+
 def _load_toml_cached(config_path: str) -> dict:
     mtime = os.stat(config_path).st_mtime
     cached = _TOML_CACHE.get(config_path)
@@ -677,24 +702,38 @@ class AppConfig:
     def load(cls, config_path: str = "configs/config.toml") -> "AppConfig":
         data = _load_toml_cached(config_path)
 
-        zmq = ZMQConfig.from_section(data.get("zmq", {}))
-        camera = CameraConfig.from_section(data.get("camera", {}))
-        trigger_handler = TriggerHandlerConfig.from_section(
-            data.get("trigger_handler", {}), camera=camera, zmq=zmq
-        )
-        liquid_lens = LiquidLensConfig.from_section(
-            data.get("liquid_lens", {}),
-            trigger_handler=trigger_handler,
-            camera=camera,
-            zmq=zmq,
-        )
-        braid_publisher = BraidPublisherConfig.from_section(
-            data.get("braid_publisher", {}), zmq=zmq, trigger_handler=trigger_handler
-        )
-        opto_trigger = OptoTriggerConfig.from_section(data.get("opto_trigger", {}))
-        monitoring = MonitoringConfig.from_section(data.get("monitoring", {}))
-        logging_cfg = LoggingConfig.from_section(data.get("logging", {}))
-        visual_stimuli = VisualStimuliConfig.from_section(data.get("visual_stimuli", {}))
+        try:
+            zmq = ZMQConfig.from_section(_required_section(data, "zmq", config_path))
+            camera = CameraConfig.from_section(
+                _required_section(data, "camera", config_path)
+            )
+            trigger_handler = TriggerHandlerConfig.from_section(
+                data.get("trigger_handler", {}), camera=camera, zmq=zmq
+            )
+            liquid_lens = LiquidLensConfig.from_section(
+                _required_section(data, "liquid_lens", config_path),
+                trigger_handler=trigger_handler,
+                camera=camera,
+                zmq=zmq,
+            )
+            braid_publisher = BraidPublisherConfig.from_section(
+                data.get("braid_publisher", {}), zmq=zmq, trigger_handler=trigger_handler
+            )
+            opto_trigger = OptoTriggerConfig.from_section(
+                _required_section(data, "opto_trigger", config_path)
+            )
+            monitoring = MonitoringConfig.from_section(data.get("monitoring", {}))
+            logging_cfg = LoggingConfig.from_section(data.get("logging", {}))
+            visual_stimuli = VisualStimuliConfig.from_section(
+                data.get("visual_stimuli", {})
+            )
+        except ValueError as e:
+            # Re-raise with the file named. Individual from_section() validators
+            # know the key but not which of the several configs in play (example,
+            # local, per-experiment copies in braid folders) is being loaded.
+            if str(e).startswith(config_path):
+                raise
+            raise ValueError(f"{config_path}: {e}") from e
 
         return cls(
             camera=camera,
