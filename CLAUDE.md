@@ -130,6 +130,23 @@ Key parameters (all in `configs/config.toml`):
 
 `LiquidLens` also enforces a hardware floor of 25ms between serial commands regardless of `predictor` or `max_diopter_step` (~40 Hz max update rate).
 
+### Which processes are started, and which failures are fatal
+
+Not every process has an `active` flag, and criticality is derived from config rather than fixed:
+
+| Process | Started when | Death is fatal when |
+|---|---|---|
+| `BraidPublisher` | always | always |
+| `TriggerHandler` | always | always |
+| `LatencyLogger` | always | never (only latency data is lost) |
+| `VisualProcess` | `visual_stimuli.active` | never |
+| `CameraProcess` | `camera.active` | never |
+| `LiquidLens` | **`camera.active`** — it has no `active` flag of its own, since autofocus is only meaningful while the camera records | `camera.active` |
+| `OptoTriggerWorker` | always — it also drives the backlight | **`opto_trigger.active`** only |
+| `Monitoring Server` | `monitoring.active` | never |
+
+The two bolded rows are the surprising ones. Searching for `[liquid_lens] active` to disable the lens will find nothing; disable the camera instead. And `OptoTriggerWorker` is spawned even with `opto_trigger.active = false`, but a hardware failure there is then survivable — the process keeps running without the backlight rather than aborting a rig that has no Arduino attached. See `_critical_names()` in `src/orchestration.py`.
+
 ### Visual Stimuli (Panda3D)
 
 Plugin-based pattern in `src/visual/stimuli/`. Included stimuli: `BackgroundStimulus`, `LoomingStimulus`, `OscillatingSquare`. The process is `VisualProcess` (`src/visual/process.py`). To add a stimulus:

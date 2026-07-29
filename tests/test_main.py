@@ -103,3 +103,59 @@ def test_summary_prints_lens_predictor(capsys, tmp_path):
     # The old code printed nothing about the predictor unless the
     # nonexistent kalman.enabled/prediction.enabled keys were set.
     assert "Kalman filter (predictive focus)" not in out
+
+
+def test_dead_process_summary_names_the_process_and_the_reason():
+    """"A critical process died during the run" named nothing, even though
+    Experiment.status() already carries the reason. On a 24-hour run the
+    operator comes back to a terminal holding only that sentence."""
+    from main import format_critical_failures
+
+    status = {
+        "processes": {
+            "BraidPublisher": {"alive": True, "failed_reason": None, "shutdown": None},
+            "LiquidLens": {
+                "alive": False,
+                "failed_reason": (
+                    "LiquidLens process exited during the run. RuntimeError: "
+                    "field named dpt not found in calibrations/liquid_lens.csv"
+                ),
+                "shutdown": None,
+            },
+        }
+    }
+
+    lines = format_critical_failures(status)
+
+    assert len(lines) == 1
+    assert "LiquidLens" in lines[0]
+    assert "liquid_lens.csv" in lines[0]
+
+
+def test_dead_process_summary_is_empty_when_nothing_failed():
+    from main import format_critical_failures
+
+    status = {
+        "processes": {
+            "BraidPublisher": {"alive": True, "failed_reason": None, "shutdown": None}
+        }
+    }
+
+    assert format_critical_failures(status) == []
+
+
+def test_dead_process_summary_reports_every_failure():
+    from main import format_critical_failures
+
+    status = {
+        "processes": {
+            "BraidPublisher": {"alive": False, "failed_reason": "braid is unreachable"},
+            "TriggerHandler": {"alive": False, "failed_reason": "trigger_port in use"},
+        }
+    }
+
+    lines = format_critical_failures(status)
+
+    assert len(lines) == 2
+    assert any("braid is unreachable" in line for line in lines)
+    assert any("trigger_port in use" in line for line in lines)

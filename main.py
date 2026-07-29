@@ -68,6 +68,20 @@ def check_recording_time_sufficient(app_config: AppConfig) -> str | None:
     return None
 
 
+def format_critical_failures(status: dict) -> list[str]:
+    """Return one line per process that recorded a failure reason.
+
+    Experiment already stores why each process died; without this the operator
+    returning to a finished 24-hour run saw only "A critical process died",
+    with the actual cause somewhere up the scrollback (or gone).
+    """
+    return [
+        f"✗ {info['failed_reason']}"
+        for info in status["processes"].values()
+        if info.get("failed_reason")
+    ]
+
+
 def print_experiment_config(app_config: AppConfig, active_processes: list):
     """Print experiment configuration summary."""
     print("\n" + "=" * 70)
@@ -210,6 +224,8 @@ def main():
             experiment.check_health()
             if not experiment.is_running():
                 print("\n\nA critical process died during the run, shutting down...")
+                for line in format_critical_failures(experiment.status()):
+                    print(f"  {line}")
                 break
             time.sleep(0.1)
     except ExperimentStartError as e:

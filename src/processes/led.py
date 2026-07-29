@@ -173,12 +173,7 @@ class OptoTriggerWorker(WorkerProcess):
                 re-logged at every level on the way up; initialize() decides
                 whether it is fatal.
         """
-        self.opto_trigger = OptoTrigger(
-            config_path=self.config_path,
-            process_name=self.process_name,
-            log_level=self.log_level,
-            log_color=self.log_color,
-        )
+        self.opto_trigger = OptoTrigger(config_path=self.config_path)
         if not self.opto_trigger.initialize():
             raise RuntimeError(
                 f"Could not open the opto-trigger serial port {self.opto_config.port}. "
