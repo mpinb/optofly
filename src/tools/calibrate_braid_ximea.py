@@ -415,7 +415,7 @@ def main() -> None:
 
     # --- Lens ---
     try:
-        lens_cfg = LiquidLensConfig(args.config)
+        lens_cfg = LiquidLensConfig.from_path(args.config)
         lens_cal = setup_lens_calibration(lens_cfg.calibration_file, lens_cfg.calibration_model)
         lens = LensDriver(lens_cfg.port)
         lens.to_focal_power_mode()
@@ -425,7 +425,7 @@ def main() -> None:
         sys.exit(1)
 
     # --- Braid ---
-    braid_cfg = BraidPublisherConfig(args.config)
+    braid_cfg = BraidPublisherConfig.from_path(args.config)
     stop_event = threading.Event()
     try:
         tracker = _BraidTracker(braid_cfg.url, stop_event)

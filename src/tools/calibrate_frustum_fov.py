@@ -444,7 +444,7 @@ def main() -> None:
 
     # --- Lens calibration ---
     try:
-        lens_cfg = LiquidLensConfig(args.config)
+        lens_cfg = LiquidLensConfig.from_path(args.config)
     except Exception as e:
         print(f"ERROR: Cannot load liquid lens config: {e}")
         sys.exit(1)
@@ -474,7 +474,7 @@ def main() -> None:
         sys.exit(1)
 
     # --- BRAID tracker (SSE) ---
-    braid_cfg = BraidPublisherConfig(args.config)
+    braid_cfg = BraidPublisherConfig.from_path(args.config)
     stop_event = threading.Event()
     try:
         tracker = _BraidTracker(braid_cfg.url, stop_event)

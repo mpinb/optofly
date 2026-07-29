@@ -191,7 +191,7 @@ def test_initialize_zmq_configures_latency_socket_as_non_blocking():
     _initialize_zmq() setup path (not a fake socket) against the checked-in
     example config, so getsockopt reflects genuine zmq behavior."""
     worker = object.__new__(OptoTriggerWorker)
-    worker.zmq_config = ZMQConfig("configs/config.example.toml")
+    worker.zmq_config = ZMQConfig.from_path("configs/config.example.toml")
     worker.logger = type(
         "Logger",
         (),

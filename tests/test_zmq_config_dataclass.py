@@ -47,5 +47,5 @@ def test_address_helpers_still_work():
 
 
 def test_path_based_constructor_still_works():
-    cfg = ZMQConfig("configs/config.example.toml")
+    cfg = ZMQConfig.from_path("configs/config.example.toml")
     assert cfg.braid_port > 0

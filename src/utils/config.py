@@ -111,8 +111,7 @@ class TriggerHandlerConfig:
 
         heading_cone_deg = float(section.get("heading_cone_deg", 45.0))
 
-        instance = object.__new__(cls)
-        object.__setattr__(instance, "__dict__", dict(
+        return cls(
             zone_timeout=float(section.get("zone_timeout", 2.0)),
             cooldown_period=float(section.get("cooldown_period", 10.0)),
             fov_x_min=camera.fov_x_min,
@@ -138,12 +137,11 @@ class TriggerHandlerConfig:
             max_velocity=float(section.get("max_velocity", 2.0)),
             min_tracking_age=float(section.get("min_tracking_age", 0.1)),
             zmq=zmq,
-        ))
-        return instance
+        )
 
-    def __init__(self, config_path: str = "configs/config.toml"):
-        built = AppConfig.load(config_path).trigger_handler
-        object.__setattr__(self, "__dict__", dict(built.__dict__))
+    @classmethod
+    def from_path(cls, config_path: str = "configs/config.toml") -> "TriggerHandlerConfig":
+        return AppConfig.load(config_path).trigger_handler
 
 
 @dataclass(frozen=True)
@@ -195,8 +193,7 @@ class LiquidLensConfig:
 
         kalman_config = section.get("kalman", {})
 
-        instance = object.__new__(cls)
-        object.__setattr__(instance, "__dict__", dict(
+        return cls(
             port=port,
             mode=section.get("mode", "diopter"),
             calibration_file=section.get("calibration_file", "calibrations/liquid_lens.csv"),
@@ -211,12 +208,11 @@ class LiquidLensConfig:
             system_latency=kalman_config.get("system_latency", 0.05),
             prediction_horizon=kalman_config.get("prediction_horizon", 0.05),
             zmq=zmq,
-        ))
-        return instance
+        )
 
-    def __init__(self, config_path: str = "configs/config.toml"):
-        built = AppConfig.load(config_path).liquid_lens
-        object.__setattr__(self, "__dict__", dict(built.__dict__))
+    @classmethod
+    def from_path(cls, config_path: str = "configs/config.toml") -> "LiquidLensConfig":
+        return AppConfig.load(config_path).liquid_lens
 
 
 @dataclass(frozen=True)
@@ -272,8 +268,7 @@ class ZMQConfig:
         if braid_pub_hwm <= 0:
             raise ValueError("zmq.braid_pub_hwm must be positive")
 
-        instance = object.__new__(cls)
-        object.__setattr__(instance, "__dict__", dict(
+        return cls(
             braid_port=braid_port,
             trigger_port=trigger_port,
             active_braid_port=active_braid_port,
@@ -285,12 +280,11 @@ class ZMQConfig:
             braid_pub_hwm=braid_pub_hwm,
             lens_update_conflate=bool(section.get("lens_update_conflate", True)),
             transport=transport,
-        ))
-        return instance
+        )
 
-    def __init__(self, config_path: str = "configs/config.toml"):
-        built = AppConfig.load(config_path).zmq
-        object.__setattr__(self, "__dict__", dict(built.__dict__))
+    @classmethod
+    def from_path(cls, config_path: str = "configs/config.toml") -> "ZMQConfig":
+        return AppConfig.load(config_path).zmq
 
     def get_subscriber_address(self, port: int) -> str:
         """Get the subscriber address for a given port."""
@@ -336,8 +330,7 @@ class BraidPublisherConfig:
         if reconnect_delay <= 0:
             raise ValueError("braid_publisher.reconnect_delay must be positive")
 
-        instance = object.__new__(cls)
-        object.__setattr__(instance, "__dict__", dict(
+        return cls(
             host=host,
             callback_port=callback_port,
             experiments_path=experiments_path,
@@ -347,12 +340,11 @@ class BraidPublisherConfig:
             reconnect_delay=reconnect_delay,
             zmq=zmq,
             zone_timeout=trigger_handler.zone_timeout,
-        ))
-        return instance
+        )
 
-    def __init__(self, config_path: str = "configs/config.toml"):
-        built = AppConfig.load(config_path).braid_publisher
-        object.__setattr__(self, "__dict__", dict(built.__dict__))
+    @classmethod
+    def from_path(cls, config_path: str = "configs/config.toml") -> "BraidPublisherConfig":
+        return AppConfig.load(config_path).braid_publisher
 
     def __str__(self) -> str:
         return (
@@ -418,8 +410,7 @@ class OptoTriggerConfig:
             if int(v) < 0:
                 raise ValueError(f"opto_trigger.duration values must be >= 0, got {v}")
 
-        instance = object.__new__(cls)
-        instance.__dict__.update(
+        return cls(
             active=section.get("active", False),
             port=port,
             baudrate=int(section.get("baudrate", 115200)),
@@ -432,22 +423,10 @@ class OptoTriggerConfig:
             color=cls._normalize_color(section.get("color", "white")),
             sham_probability=sham_probability,
         )
-        return instance
 
-    def __init__(self, config_path: str = "configs/config.toml"):
-        """Path-based constructor delegating to AppConfig.load().
-
-        Dataclass note: @dataclass only auto-generates __init__ when a class
-        doesn't define one itself; since this class defines __init__
-        explicitly (for the path-based call form), @dataclass leaves it
-        alone and supplies __repr__/__eq__/field annotations only. That
-        means from_section() above cannot build instances via cls(...) --
-        it would recurse into this path-based __init__, not a field-based
-        one -- so it constructs via object.__new__() + direct __dict__
-        update instead, exactly like this __init__ does for its own case.
-        """
-        built = AppConfig.load(config_path).opto_trigger
-        self.__dict__.update(built.__dict__)
+    @classmethod
+    def from_path(cls, config_path: str = "configs/config.toml") -> "OptoTriggerConfig":
+        return AppConfig.load(config_path).opto_trigger
 
     def get_trigger_command(self) -> str:
         """Return the formatted command string expected by the Arduino firmware."""
@@ -576,8 +555,7 @@ class CameraConfig:
             if fov_y_min >= fov_y_max:
                 raise ValueError("camera.FOV.y_min must be less than y_max")
 
-        instance = object.__new__(cls)
-        object.__setattr__(instance, "__dict__", dict(
+        return cls(
             active=section.get("active", False),
             sensor_width_px=sensor_width_px,
             sensor_height_px=sensor_height_px,
@@ -603,12 +581,11 @@ class CameraConfig:
             fov_far_x_max=fov_far_x_max,
             fov_far_y_min=fov_far_y_min,
             fov_far_y_max=fov_far_y_max,
-        ))
-        return instance
+        )
 
-    def __init__(self, config_path: str = "configs/config.toml"):
-        built = AppConfig.load(config_path).camera
-        object.__setattr__(self, "__dict__", dict(built.__dict__))
+    @classmethod
+    def from_path(cls, config_path: str = "configs/config.toml") -> "CameraConfig":
+        return AppConfig.load(config_path).camera
 
     def __str__(self):
         fov_width_mm = (self.fov_x_max - self.fov_x_min) * 1000
@@ -639,6 +616,10 @@ class MonitoringConfig:
             port=int(section.get("port", 5000)),
         )
 
+    @classmethod
+    def from_path(cls, config_path: str = "configs/config.toml") -> "MonitoringConfig":
+        return AppConfig.load(config_path).monitoring
+
 
 @dataclass(frozen=True)
 class LoggingConfig:
@@ -649,6 +630,10 @@ class LoggingConfig:
     @classmethod
     def from_section(cls, section: dict) -> "LoggingConfig":
         return cls(level=section.get("level", "INFO").upper())
+
+    @classmethod
+    def from_path(cls, config_path: str = "configs/config.toml") -> "LoggingConfig":
+        return AppConfig.load(config_path).logging
 
     def level_int(self) -> int:
         return getattr(logging, self.level, logging.INFO)
@@ -667,6 +652,10 @@ class VisualStimuliConfig:
             active=section.get("active", False),
             config_file=section.get("config_file", "configs/visual_stimuli.toml"),
         )
+
+    @classmethod
+    def from_path(cls, config_path: str = "configs/config.toml") -> "VisualStimuliConfig":
+        return AppConfig.load(config_path).visual_stimuli
 
 
 @dataclass(frozen=True)
@@ -707,8 +696,7 @@ class AppConfig:
         logging_cfg = LoggingConfig.from_section(data.get("logging", {}))
         visual_stimuli = VisualStimuliConfig.from_section(data.get("visual_stimuli", {}))
 
-        instance = object.__new__(cls)
-        object.__setattr__(instance, "__dict__", dict(
+        return cls(
             camera=camera,
             trigger_handler=trigger_handler,
             liquid_lens=liquid_lens,
@@ -718,5 +706,4 @@ class AppConfig:
             monitoring=monitoring,
             logging=logging_cfg,
             visual_stimuli=visual_stimuli,
-        ))
-        return instance
+        )

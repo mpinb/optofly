@@ -59,6 +59,6 @@ def test_config_object_stays_mutable_for_set_parameters():
 
 
 def test_path_based_constructor_still_works():
-    cfg = OptoTriggerConfig("configs/config.example.toml")
+    cfg = OptoTriggerConfig.from_path("configs/config.example.toml")
     assert cfg.port
     assert cfg.color in OptoTriggerConfig.valid_colors()

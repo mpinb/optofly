@@ -79,7 +79,7 @@ class OptoTrigger:
             log_color: Color for log messages
         """
 
-        self.config = OptoTriggerConfig(config_path)
+        self.config = OptoTriggerConfig.from_path(config_path)
         self.serial_conn = None
         self.is_initialized = False
 

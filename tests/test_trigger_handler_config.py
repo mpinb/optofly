@@ -43,6 +43,6 @@ def test_frozen_instance_cannot_be_mutated():
 
 
 def test_path_based_constructor_still_works():
-    cfg = TriggerHandlerConfig("configs/config.example.toml")
+    cfg = TriggerHandlerConfig.from_path("configs/config.example.toml")
     assert cfg.zone_timeout > 0
     assert cfg.zmq.braid_port > 0

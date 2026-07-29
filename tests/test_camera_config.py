@@ -63,5 +63,5 @@ def test_frozen_instance_cannot_be_mutated():
 
 
 def test_path_based_constructor_still_works():
-    cfg = CameraConfig("configs/config.example.toml")
+    cfg = CameraConfig.from_path("configs/config.example.toml")
     assert cfg.fps > 0

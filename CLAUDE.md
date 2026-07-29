@@ -107,7 +107,16 @@ Death carries the bare obj_id as an integer, not an object.
 
 `src/utils/config.py` has typed config classes (e.g. `LiquidLensConfig`, `ZMQConfig`) that load from TOML sections. Pass `config_path` to each process; don't read TOML directly elsewhere. `trigger_handler.zone_timeout` is the single global timeout used by TriggerHandler, CameraProcess (buffer sizing), and LiquidLens (focus tracking).
 
-Every `*Config` class's path-based constructor routes through `AppConfig.load()`, which builds and validates all nine config sections in one pass — regardless of any given section's own `active` flag. This means `configs/config.toml` must always have valid `[liquid_lens]`, `[opto_trigger]`, etc. sections present (each with its required `port` key) even when that subsystem is disabled via `active = false`, and even if you only ever construct a single config class (e.g. `ZMQConfig(path)`). Standalone tools that only need one section (e.g. `src/tools/braid_visualizer.py`, `src/tools/braid_simulator.py`) still need a fully valid config file for this reason.
+Each config class has exactly two constructors, and no others:
+
+- `Cls.from_section(section_dict, ...)` — builds from an already-parsed TOML table. Called only by `AppConfig.load()`, which passes in the dependencies (`camera`, `zmq`, `trigger_handler`) explicitly so no config class ever constructs another.
+- `Cls.from_path(config_path)` — convenience for standalone tools and processes that need one section. Delegates to `AppConfig.load()` and returns the corresponding attribute.
+
+Both end at the dataclass-generated `__init__`, so **the declared fields are the construction interface**: add a field to the dataclass and forget it in `from_section()` and you get a `TypeError` naming the field at config-load time, not an `AttributeError` inside a child process at trigger time. Never construct these via `object.__new__` + `__dict__` assignment — that was the previous pattern and it made the two lists drift silently. `tests/test_config_construction.py` pins this.
+
+`AppConfig.load()` builds and validates all nine config sections in one pass — regardless of any given section's own `active` flag. This means `configs/config.toml` must always have valid `[liquid_lens]`, `[opto_trigger]`, etc. sections present (each with its required `port` key) even when that subsystem is disabled via `active = false`, and even if you only ever need a single section (e.g. `ZMQConfig.from_path(path)`). Standalone tools that only need one section (e.g. `src/tools/braid_visualizer.py`, `src/tools/braid_simulator.py`) still need a fully valid config file for this reason.
+
+Every config is frozen except `OptoTriggerConfig`, which `OptoTrigger.set_parameters()` mutates once per trigger to record the balanced-randomization-selected trial parameters.
 
 Key parameters (all in `configs/config.toml`):
 

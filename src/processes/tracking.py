@@ -242,7 +242,7 @@ class TriggerHandler(WorkerProcess):
             process_name=process_name,
         )
 
-        self.config = TriggerHandlerConfig(config_path)
+        self.config = TriggerHandlerConfig.from_path(config_path)
         self.stop_event = event if event is not None else mp.Event()
         self.is_initialized = False
 
