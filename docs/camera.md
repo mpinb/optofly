@@ -65,11 +65,15 @@ Set `[camera] active = true` in `configs/config.toml`, then `uv run python main.
 **Pre-flight checks:**
 ```python
 from src.processes.camera import check_camera_prerequisites
-results = check_camera_prerequisites("configs/config.toml")
-if not results["overall"]:
-    for error in results["errors"]:
-        print(error)
+
+for name, result in check_camera_prerequisites("configs/config.toml").items():
+    print(name, result)
 ```
+
+Returns a `dict[str, CheckResult]` covering `camera_binary`, `ffmpeg`,
+`save_folder_writable`, and `trigger_port`. Each `CheckResult` has `.ok` (bool)
+and `.detail` (what to do if it failed). A failing `trigger_port` just means the
+experiment isn't running. See [troubleshooting.md](troubleshooting.md#runtime).
 
 ## Configuration
 
@@ -158,11 +162,19 @@ netstat -tulpn | grep 5556
 ## Testing
 
 ```bash
-# Integration test (requires hardware)
-python tests/test_camera_integration.py
+# Python-side unit tests (no hardware)
+uv run pytest tests/test_camera_config.py tests/test_camera_prerequisites.py
 
-# Check Rust compilation
-cd optofly-camera && cargo check
+# Rust unit tests + compile check
+cd optofly-camera && cargo test && cargo check
 ```
 
-`test_camera_integration.py` exercises the pure-Python `CameraProcess` class in `src/processes/camera.py` (talks to the camera directly via `ximea-py`), not `RustCameraProcess`. The two are separate implementations in the same file. `main.py` runs `RustCameraProcess` (imported under the alias `CameraProcess`) for actual experiments, so passing this test does not confirm the Rust binary path works. Verify that by running `main.py` with `[camera] active = true` and checking a recording is produced.
+There is no automated end-to-end camera test: capture needs a real XIMEA device,
+so nothing above proves the binary can actually record. Verify that by hand —
+run `main.py` with `[camera] active = true` and confirm an
+`obj_id_{N}_frame_{M}.mp4` appears in `camera.save_folder` after a trigger.
+
+`RustCameraProcess` is the only camera implementation. An earlier pure-Python
+`CameraProcess` that drove the sensor directly via `ximea-py` was removed;
+`main.py` imports `RustCameraProcess` under the alias `CameraProcess`, which is
+all that name now refers to.

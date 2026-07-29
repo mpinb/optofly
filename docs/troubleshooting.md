@@ -45,13 +45,33 @@ level = "DEBUG"
 - For Panda3D: ensure `unstash()` is called in `on_trigger()` — stashed nodes are invisible
 
 **Camera not recording:**
-```python
-from src.processes.camera import check_camera_prerequisites
-results = check_camera_prerequisites("configs/config.toml")
-print(results)
+
+Run the preflight check first — it reports all four prerequisites and what to do about each:
+
+```bash
+uv run python -c "from src.processes.camera import check_camera_prerequisites as c; \
+[print(k, v) for k, v in c('configs/config.toml').items()]"
 ```
 
-`check_camera_prerequisites` checks four things: the `optofly-camera` Rust binary is findable, `ffmpeg` is on PATH, the save folder is writable, and the ZMQ trigger port is reachable. Common causes: binary not built (`cd optofly-camera && cargo build --release`), camera not detected at the hardware level (`lsusb | grep Ximea`), user not in `video` group, insufficient disk space.
+Typical output:
+
+```
+camera_binary ✓ optofly-camera found at .../target/release/optofly-camera
+ffmpeg ✓ ffmpeg found at /usr/bin/ffmpeg
+save_folder_writable ✓ save folder /mnt/data/videos exists and is writable
+trigger_port ✗ nothing is bound to trigger port 5556 — the experiment is not running.
+```
+
+A failing `trigger_port` is expected unless `main.py` is live; the other three should all be `✓`.
+The check creates nothing and touches no hardware, so it is safe to run at any time.
+
+If all four pass and the camera still doesn't record, the cause is usually below this layer:
+
+```bash
+lsusb | grep -i ximea        # camera detected at all?
+groups | grep -q video && echo "in video group"
+df -h /mnt/data              # disk space
+```
 
 **Video encoding slow:**
 ```bash
@@ -62,10 +82,24 @@ ffmpeg -encoders | grep nvenc
 
 **Liquid lens not responding:**
 ```bash
-ls -l /dev/ttyUSB*
-sudo chmod 666 /dev/ttyUSB1
+ls -l /dev/optotune_ld        # udev symlink present? (see configs/config.example.toml)
+ls -l /dev/ttyUSB*            # ...and what it should point at
+groups | grep -q dialout && echo "in dialout group"
 ls calibrations/liquid_lens.csv
 ```
+
+If the symlink is missing, create the udev rule documented in the `[liquid_lens]`
+section of `configs/config.example.toml` rather than pointing `port` at a bare
+`/dev/ttyUSBn` — that number changes between reboots and between devices.
+
+If the device is there but you get permission denied, add yourself to `dialout`
+(`sudo usermod -a -G dialout $USER`, then log out and back in) rather than
+`chmod 666` — the latter is undone on every replug.
+
+The lens also fails to start on a bad calibration file. `calibrations/liquid_lens.csv`
+must have exactly two columns named `z` and `dpt`. The
+[`liquid-lens-calibration`](https://github.com/elhananby/liquid-lens-calibration)
+repo emits a `diopter` column instead — rename it to `dpt` before use.
 
 ## Performance
 

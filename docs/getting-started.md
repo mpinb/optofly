@@ -182,8 +182,8 @@ intensity = [0, 51, 102, 153, 204, 255]
 color = "red"
 
 [liquid_lens]
-# Activates automatically when camera is active
-port = "/dev/ttyUSB1"
+# Activates automatically when camera is active — no active flag of its own
+port = "/dev/optotune_ld"   # udev symlink; see configs/config.example.toml
 calibration_file = "calibrations/liquid_lens.csv"
 
 [visual_stimuli]
@@ -263,14 +263,15 @@ With `--skip-metadata`, `experiment_duration` defaults to 24 hours. The launcher
 # Python unit tests
 uv run pytest
 
-# Camera integration test (requires hardware)
-python tests/test_camera_integration.py
+# Camera preflight (no hardware needed — reports what's missing)
+uv run python -c "from src.processes.camera import check_camera_prerequisites as c; \
+[print(k, v) for k, v in c('configs/config.toml').items()]"
 
 # Visual stimuli standalone (no hardware)
 uv run python -m src.visual --standalone
 
 # Simulate Braid tracking data (development)
-python -m src.tools.braid_simulator
+uv run python -m src.tools.braid_simulator
 ```
 
 ## Where to Go Deeper

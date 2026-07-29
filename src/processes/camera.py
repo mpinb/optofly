@@ -6,13 +6,155 @@ triggered high-speed video capture.
 import multiprocessing as mp
 import os
 import shutil
+import socket
 import subprocess
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 from src.utils.config import AppConfig
 from src.utils.worker import WorkerProcess
+
+BINARY_NAME = "optofly-camera"
+
+
+def find_camera_binary() -> str:
+    """Locate the optofly-camera binary.
+
+    Raises:
+        FileNotFoundError: with the build command, when it isn't there.
+    """
+    project_root = Path(__file__).parent.parent.parent
+    candidates = [
+        project_root / "optofly-camera" / "target" / "release" / BINARY_NAME,
+        project_root / "optofly-camera" / "target" / "debug" / BINARY_NAME,
+    ]
+    for path in candidates:
+        if path.exists():
+            return str(path)
+
+    found = shutil.which(BINARY_NAME)
+    if found:
+        return found
+
+    raise FileNotFoundError(
+        f"Cannot find {BINARY_NAME}. "
+        f"Build with: cd optofly-camera && cargo build --release"
+    )
+
+
+@dataclass
+class CheckResult:
+    """One preflight check: whether it passed, and what to do if it didn't."""
+
+    ok: bool
+    detail: str
+
+    def __repr__(self) -> str:  # printed directly by the documented usage
+        return f"{'✓' if self.ok else '✗'} {self.detail}"
+
+
+def _check_ffmpeg() -> CheckResult:
+    path = shutil.which("ffmpeg")
+    if path:
+        return CheckResult(True, f"ffmpeg found at {path}")
+    return CheckResult(
+        False,
+        "ffmpeg is not on PATH — video encoding will fail. "
+        "Install it with: sudo apt-get install -y ffmpeg",
+    )
+
+
+def _check_camera_binary() -> CheckResult:
+    try:
+        return CheckResult(True, f"{BINARY_NAME} found at {find_camera_binary()}")
+    except FileNotFoundError:
+        return CheckResult(
+            False,
+            f"{BINARY_NAME} is not built — the camera cannot record. "
+            "Build it with: cd optofly-camera && cargo build --release",
+        )
+
+
+def _check_save_folder(save_folder: str) -> CheckResult:
+    """Could the camera create this folder and write into it?
+
+    The folder not existing yet is fine -- the camera creates it on start.
+    Deliberately creates nothing itself: a preflight check with side effects
+    left a stray camera_videos/ behind every time it ran. Tests the nearest
+    existing ancestor instead, which is exactly what os.makedirs() needs
+    write access to.
+    """
+    target = Path(save_folder).expanduser()
+    ancestor = target
+    while not ancestor.exists() and ancestor.parent != ancestor:
+        ancestor = ancestor.parent
+
+    if not ancestor.is_dir():
+        return CheckResult(
+            False,
+            f"save folder {save_folder} cannot be created: {ancestor} is a file, "
+            "not a directory.",
+        )
+    if not os.access(ancestor, os.W_OK | os.X_OK):
+        return CheckResult(
+            False,
+            f"save folder {save_folder} is not writable — no write permission on "
+            f"{ancestor}. Check you own that path and the disk is not full.",
+        )
+    if target == ancestor:
+        return CheckResult(True, f"save folder {save_folder} exists and is writable")
+    return CheckResult(
+        True, f"save folder {save_folder} does not exist yet but can be created"
+    )
+
+
+def _check_trigger_port(port: int) -> CheckResult:
+    """Report whether TriggerHandler is currently publishing.
+
+    A free port is not a fault to fix -- it just means the experiment isn't
+    running yet -- so the wording has to say so.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.settimeout(0.5)
+        if probe.connect_ex(("127.0.0.1", port)) == 0:
+            return CheckResult(
+                True, f"something is publishing on trigger port {port} (stack is up)"
+            )
+    return CheckResult(
+        False,
+        f"nothing is bound to trigger port {port} — the experiment is not running. "
+        "Expected unless main.py is live; start it and re-run this check.",
+    )
+
+
+def check_camera_prerequisites(
+    config_path: str = "configs/config.toml",
+    save_folder: Optional[str] = None,
+) -> dict[str, CheckResult]:
+    """Preflight the four things that stop the camera from recording.
+
+    Args:
+        config_path: Path to the TOML config.
+        save_folder: Override the folder to test for writability. Defaults to
+            the configured ``camera.save_folder``.
+
+    Returns:
+        Mapping of check name to CheckResult. Print it directly:
+
+        >>> from src.processes.camera import check_camera_prerequisites
+        >>> print(check_camera_prerequisites("configs/config.toml"))
+    """
+    app_config = AppConfig.load(config_path)
+    return {
+        "camera_binary": _check_camera_binary(),
+        "ffmpeg": _check_ffmpeg(),
+        "save_folder_writable": _check_save_folder(
+            save_folder if save_folder is not None else app_config.camera.save_folder
+        ),
+        "trigger_port": _check_trigger_port(app_config.zmq.trigger_port),
+    }
 
 
 class RustCameraProcess(WorkerProcess):
@@ -20,7 +162,7 @@ class RustCameraProcess(WorkerProcess):
     Camera process that launches the Rust optofly-camera binary as a subprocess.
     """
 
-    BINARY_NAME = "optofly-camera"
+    BINARY_NAME = BINARY_NAME
 
     def __init__(
         self,
@@ -46,24 +188,8 @@ class RustCameraProcess(WorkerProcess):
         self._proc: Optional[subprocess.Popen] = None
 
     def _find_binary(self) -> str:
-        """Locate the optofly-camera binary."""
-        project_root = Path(__file__).parent.parent.parent
-        candidates = [
-            project_root / "optofly-camera" / "target" / "release" / self.BINARY_NAME,
-            project_root / "optofly-camera" / "target" / "debug" / self.BINARY_NAME,
-        ]
-        for path in candidates:
-            if path.exists():
-                return str(path)
-
-        found = shutil.which(self.BINARY_NAME)
-        if found:
-            return found
-
-        raise FileNotFoundError(
-            f"Cannot find {self.BINARY_NAME}. "
-            f"Build with: cd optofly-camera && cargo build --release"
-        )
+        """Locate the optofly-camera binary (see find_camera_binary)."""
+        return find_camera_binary()
 
     def _run(self) -> None:
         """Launch the Rust binary and wait for it to finish."""
