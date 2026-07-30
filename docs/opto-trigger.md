@@ -6,9 +6,10 @@ Controls LED stimulation via Arduino serial interface.
 
 - Arduino board (Uno, Nano, or compatible)
 - Three PWM-capable output pins wired to a PicoBuck (or similar) constant-current LED driver:
-  - Pin 9 — Red channel
-  - Pin 10 — Green channel
-  - Pin 11 — Blue channel
+  - Pin 5 — Red channel
+  - Pin 3 — Green channel
+  - Pin 6 — Blue channel
+- Pin 9 — Backlight channel (independent of the stimulus LEDs; see the backlight command below)
 
 ## Firmware Installation
 
@@ -37,6 +38,16 @@ Commands are sent at **115200 baud** in the format:
 - `<500,128,10,green>` — 50% green pulsing at 10 Hz for 0.5 seconds
 - `<2000,200,0,white>` — ~78% intensity across all channels for 2 seconds
 
+**Backlight command:**
+
+A second protocol drives the backlight pin (9) directly, with no duration or color:
+
+```
+[intensity]
+```
+
+`[255]` turns the backlight fully on, `[0]` turns it off (range 0–255). The `OptoTriggerWorker` sends `[255]` when the experiment starts and `[0]` on shutdown, so the arena stays lit for tracking between trials without any manual control.
+
 **Performance:**
 - Command parsing: <1 ms
 - Total latency before PWM activation: ~1 ms
@@ -46,10 +57,13 @@ Commands are sent at **115200 baud** in the format:
 
 The `OptoTriggerWorker` process (`src/processes/led.py`) handles:
 - Subscribing to OPTO_ZONE_ENTER messages from TriggerHandler
-- Randomizing duration, intensity, and frequency from config lists
+- Selecting duration, intensity, and frequency from config lists via **balanced randomization** — it tracks usage counts of every parameter combination and always picks a least-used one (random tie-break), so counts differ by at most 1 across combinations. This is *not* uniform-at-random sampling
 - Sham trial support (configurable probability)
 - Constructing and sending serial commands
 - Logging all stimulation events to `opto.csv` in the Braid recording folder
+- Driving the backlight: on (`[255]`) at startup, off (`[0]`) at shutdown
+
+**Always started, even when `active = false`.** The worker runs in *backlight-only* mode when stimulation is disabled (no ZMQ subscription, no `opto.csv`). Hardware-failure semantics depend on the flag: with `active = true` an unopenable Arduino port aborts experiment startup (the worker is a critical process); with `active = false` it logs a warning and the experiment continues without the backlight.
 
 **`opto.csv` columns:**
 `obj_id, frame, braid_timestamp, trigger_timestamp, mean_heading, duration, intensity, frequency, color, sham`
@@ -90,10 +104,10 @@ Document any inter-channel brightness imbalance for future calibration.
 - Confirm baud rate is 115200
 
 **Inaccurate timing at high frequencies:**
-- For >10 kHz, timing precision degrades
+- Above 500 Hz the firmware switches from millisecond to microsecond delay loops; at very high frequencies the per-cycle overhead (`analogWrite` + loop) distorts the pulse width
 - Minimize serial output during time-critical experiments
 
 **PWM signal issues:**
-- Verify wiring to pins 9, 10, 11
+- Verify wiring to pins 5, 3, 6 (red, green, blue)
 - Confirm intensity values are 0–255
 - Check LED driver power supply can source requested current

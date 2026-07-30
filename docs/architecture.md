@@ -15,8 +15,8 @@ TriggerHandler (src/processes/tracking.py)
       1. Object must exist for ≥ min_tracking_age (filters noise)
       2. Must satisfy global cooldown_period since last ZONE_ENTER
       3. Must be within trigger zone (camera FOV x/y + z bounds)
-      4. Velocity must be in [min_velocity, max_velocity] range
-      5. Must be heading toward arena center (within heading_cone_deg)
+      4. Mean xy-plane speed (over the heading history window) must be in [min_velocity, max_velocity]
+      5. Must be heading toward the FOV center (within heading_cone_deg)
     |
     | ZMQ PUB (topics: ZONE_ENTER / ZONE_EXIT / OPTO_ZONE_ENTER / VISUAL_ZONE_ENTER, port: 5556)
     |
@@ -40,7 +40,7 @@ TriggerHandler is the single admission controller. Each object can produce at mo
 
 ## Process Model
 
-All processes inherit from `WorkerProcess` (`src/utils/worker.py`) and run as `multiprocessing.Process` instances.
+All worker processes inherit from `WorkerProcess` (`src/utils/worker.py`) and run as `multiprocessing.Process` instances; the one exception is the Monitoring Server, a plain daemon `mp.Process`. The pool's lifecycle (spawn order, startup failure detection, mid-run health checks, ordered shutdown) is owned by `Experiment` in `src/orchestration.py` — `main.py` is only a thin CLI over it. See CLAUDE.md's Orchestration section for the lifecycle details.
 
 | Process | ZMQ Role | Source |
 |---------|----------|--------|
@@ -64,11 +64,14 @@ Port numbers above are the defaults from `[zmq]` in `configs/config.toml`; all f
 {"Update": {"obj_id": 1, "x": 0.01, "y": -0.02, "z": 0.18, "...": "..."}}
 ```
 
+Before publishing, `BraidPublisher` injects two extra fields into every Birth/Update payload: `t_relay` (its own wall-clock receipt time — the lens timing pipeline compares it against serial-write timestamps) and `braid_timestamp` (see the timestamp note below). The `ACTIVE_BRAID` feed on 5557 carries the same Update payloads, restricted to the in-zone object.
+
 **ZONE_ENTER topic** (TriggerHandler → consumers):
 ```json
 {
   "obj_id": 1,
   "frame": 12345,
+  "record_frame": 12345,
   "timestamp": 123456.790,
   "braid_timestamp": 123456.780,
   "handler_timestamp": 123456.790,
@@ -82,6 +85,8 @@ Port numbers above are the defaults from `[zmq]` in `configs/config.toml`; all f
 }
 ```
 
+`record_frame` is the Braid frame of the outer `ZONE_ENTER` for this occupancy. On `ZONE_ENTER` itself it equals `frame`; on the one-shot `OPTO_ZONE_ENTER`/`VISUAL_ZONE_ENTER` events (same payload shape) it is earlier than `frame`, giving the recording-start → stimulus-onset offset.
+
 `xvel`/`yvel`/`zvel` are the object's most recent instantaneous velocity (not the mean over `HEADING_HISTORY_SIZE` used for `mean_heading`). `LiquidLens` uses them to seed its first focus command immediately on `ZONE_ENTER`, without waiting for the next `ACTIVE_BRAID` update.
 
 **The two timestamps are on different clocks and must not be conflated:**
@@ -89,7 +94,7 @@ Port numbers above are the defaults from `[zmq]` in `configs/config.toml`; all f
 - `timestamp` and `handler_timestamp` are both TriggerHandler's own local receipt-time clock. All velocity, age, and cooldown arithmetic uses these.
 - `braid_timestamp` is the Triggerbox-clock-model value that Braid itself computed, lifted from the SSE envelope's `trigger_timestamp`. It exists solely so `LatencyLogger` can measure end-to-end latency. It is `null` when Braid supplied none for that sample — note Braid serializes an unset value as the JSON token `NaN`, which `json.loads` parses to `float('nan')`, not `None`, so `BraidPublisher` normalizes it explicitly.
 
-**LATENCY** (OptoTriggerWorker / VisualProcess / LiquidLens → LatencyLogger, PUSH/PULL):
+**LATENCY** (OptoTriggerWorker / VisualProcess / LiquidLens → LatencyLogger, PUSH/PULL). Unlike every other channel, these are sent as a single JSON frame with no topic prefix:
 ```json
 {
   "system": "opto",
@@ -136,18 +141,18 @@ Key parameters in `[trigger_handler]`:
 | `min_velocity` | 0.01 m/s | Minimum speed to consider object moving |
 | `max_velocity` | 2.0 m/s | Maximum speed, used to reject tracking noise |
 | `min_tracking_age` | 0.1 s | Object age before it can trigger |
-| `zone_timeout` | 2.0 s | Auto-emit `ZONE_EXIT` if tracking is lost; also used by camera and liquid lens |
+| `zone_timeout` | 2.0 s | Auto-emit `ZONE_EXIT` if tracking is lost; also used by BraidPublisher to expire the ACTIVE_BRAID active object when zone events stop |
 | `cooldown_period` | 10.0 s | Global cooldown between `ZONE_ENTER` events |
 | `opto_zone_scale` | 0.5 | Inner zone for `OPTO_ZONE_ENTER`, as a fraction of the outer FOV (centered). Must be in (0.0, 1.0]; `1.0` fires on the same frame as `ZONE_ENTER` |
 | `visual_zone_scale` | 1.0 | Same, for `VISUAL_ZONE_ENTER` |
 
-The trigger zone's x/y bounds come from the camera FOV. `zone_timeout` is the single source of truth for follower processes.
+The trigger zone's x/y bounds come from the camera FOV. Note `zone_timeout` is *not* used for camera buffer sizing — that is `camera.max_recording_time`, which should be set ≥ `zone_timeout` (`main.py` warns at startup when it isn't).
 
 ## Trigger Lifecycle
 
 When an object crosses into the spatial trigger zone, `TriggerHandler` applies the five entry gates above. If they pass, it emits `ZONE_ENTER` once and marks the object active. While active, heading and velocity are not re-checked; only spatial membership matters. `ZONE_EXIT` is emitted when the object:
 
-1. Leaves the trigger zone.
+1. Leaves the trigger zone's x/y bounds (z drift alone does not trigger an exit).
 2. Dies in BRAID.
 3. Times out due to missing updates.
 
@@ -155,7 +160,7 @@ After exit, the same object can trigger again if it re-enters the zone after the
 
 ## Important Notes
 
-- The ZMQ BRAID feed is only live when the full stack is running. Standalone tools that need tracking data must connect directly to the Braid HTTP SSE endpoint (`http://<braid_url>/events`).
+- The ZMQ BRAID feed is only live when the full stack is running. Standalone tools that need tracking data must connect directly to the Braid HTTP SSE endpoint (`http://<braid_url>/events`) — except `braid_visualizer`, which consumes the ZMQ feed, and `braid_simulator`, which binds the BRAID PUB port itself (so the visualizer also works against the simulator).
 - BraidPublisher reads from `http://<url>/events` as a streaming SSE connection and republishes via ZMQ.
 - Zone events are one-way pub/sub: processes never acknowledge them. The one exception to PUB/SUB in the whole codebase is the `LATENCY` channel, which is PUSH/PULL — a many-producer, one-consumer fan-in rather than a broadcast, so each message is delivered to exactly one reader.
 - Camera and liquid lens are lifecycle followers only: start on `ZONE_ENTER`, stop on `ZONE_EXIT`, keep no pre-zone state.

@@ -2,12 +2,6 @@ import os
 
 import pytest
 
-# Interactive test scripts that require a display — skip in headless/CI environments
-collect_ignore = []
-
-if not os.environ.get("DISPLAY"):
-    collect_ignore.append("test_looming_edge_wrapping.py")
-
 
 def pytest_collection_modifyitems(config, items):
     """Skip @pytest.mark.display tests when no DISPLAY is set.

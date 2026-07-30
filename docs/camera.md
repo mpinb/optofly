@@ -6,7 +6,7 @@ High-speed triggered video recording using the `optofly-camera` Rust binary.
 - 500fps at 2112x2112 pixels (configurable)
 - H.264 encoding with NVENC hardware acceleration (x264 fallback)
 - Linear double-buffer design for zero-copy, race-free operation
-- ~8GB memory footprint (default settings, 2 buffers)
+- ~18GB memory footprint (default settings, 2 buffers)
 
 ## Architecture
 
@@ -24,10 +24,10 @@ Single-process design with a background encoder thread:
 3. **Encoder thread** (`encoder.rs`) — pipes raw frames to ffmpeg stdin (single contiguous write), writes CSV metadata
 4. **Config** (`config.rs`) — reads `[camera]` and `[zmq]` sections from the shared TOML config
 
-**Double-buffer pattern:** Two pre-allocated `Vec<u8>` buffers sized for `max_recording_time + 1s`. On recording completion, the active buffer is swapped via `std::mem::replace` and enqueued for encoding. The encoder reads the old buffer while capture continues into the new one.
+**Double-buffer pattern:** Two pre-allocated `Vec<u8>` buffers sized for `max_recording_time + 1s`. On recording completion, the active buffer is taken (`Option::take`) and enqueued for encoding. The encoder reads the old buffer while capture continues into the new one.
 
 **Memory:** `2 x (max_recording_time + 1s) x fps x width x height`
-Default settings (3s, 500fps, 2112x2112): ~8.5GB.
+Default settings (3s, 500fps, 2112x2112): ~17.8GB total (~8.9GB per buffer).
 
 ### Python Wrapper (`src/processes/camera.py`)
 
@@ -84,8 +84,14 @@ The Rust binary reads from the shared `configs/config.toml`:
 active = true
 resolution = [2112, 2112]
 fps = 500
-exposure_time = 900
+exposure_time = 2000
 max_recording_time = 3.0   # seconds, controls buffer size
+
+# Rust-binary-only keys (all optional; ignored by Python):
+# buffers_queue_size = 32   # XIMEA driver buffer queue depth
+# aeag = false              # auto-exposure/gain (gain locked at 0 dB)
+# aeag_level = 50           # AEAG target brightness level
+# ae_max_limit = 1900.0     # max AE exposure in µs (default: 95% of frame period)
 
 [zmq]
 trigger_port = 5556
@@ -120,9 +126,9 @@ The subscription is vestigial; don't build on it without adding a publisher.
 **Metadata CSV:** `{save_folder}/obj_id_{obj_id}_frame_{frame}.csv`
 ```csv
 frame_idx,nframe,ts_sec,ts_usec,cam_time_ns,trigger_frame_idx
-0,100,1234,567890,1234567890000,42
+0,100,1234,567890,1234567890000,0
 ```
-`trigger_frame_idx` is written to every row and indicates which buffer frame corresponds to the real `ZONE_ENTER` moment — that is, it marks **recording start**, not stimulus onset. Actual stimulus onset for opto/visual is in `latency.csv`'s `frame` field for that system's row (`"opto"`/`"visual"`); `record_frame` on that same row equals `trigger_frame_idx`/the outer entry frame, so `(row.frame - row.record_frame)` is the number of Braid frames between recording start and stimulus onset. Convert to camera frames via the fps ratio if needed for video alignment (Braid runs ~100Hz; camera fps is in `configs/config.toml`'s `[camera]` section).
+`trigger_frame_idx` is written to every row and indicates which buffer frame corresponds to the real `ZONE_ENTER` moment — that is, it marks **recording start**, not stimulus onset. Since the capture buffer resets at `ZONE_ENTER`, it is always `0` (there are no pre-trigger frames). Actual stimulus onset for opto/visual is in `latency.csv`'s `frame` field for that system's row (`"opto"`/`"visual"`); `record_frame` on that same row is the Braid frame at which the outer `ZONE_ENTER` fired — the same moment `trigger_frame_idx` marks, but on the Braid frame counter — so `(row.frame - row.record_frame)` is the number of Braid frames between recording start and stimulus onset. Convert to camera frames via the fps ratio if needed for video alignment (Braid runs ~100Hz; camera fps is in `configs/config.toml`'s `[camera]` section).
 
 **Lens timing CSV:** `{save_folder}/obj_id_{obj_id}_frame_{frame}_lens_timing.csv`
 
@@ -178,5 +184,5 @@ run `main.py` with `[camera] active = true` and confirm an
 
 `RustCameraProcess` is the only camera implementation. An earlier pure-Python
 `CameraProcess` that drove the sensor directly via `ximea-py` was removed;
-`main.py` imports `RustCameraProcess` under the alias `CameraProcess`, which is
-all that name now refers to.
+`src/orchestration.py` imports `RustCameraProcess` under the alias
+`CameraProcess`, which is all that name now refers to.

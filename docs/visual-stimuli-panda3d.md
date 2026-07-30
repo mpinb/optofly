@@ -149,7 +149,7 @@ def test_integration():
 
 ### BackgroundStimulus (`src/visual/stimuli/background.py`)
 
-Open-loop. Textured cylinder at `viewing_distance_cm` radius with a procedural random-square pattern, plus a ground plane. Always visible. No trigger/update logic — demonstrates the simplest possible `setup()`-only stimulus. Uses `_build_cylinder_geom` factory and loads textures via the Panda3D API directly.
+Open-loop. Textured cylinder at `viewing_distance_cm` radius with a procedural random-square pattern. Always visible. No trigger/update logic — demonstrates the simplest possible `setup()`-only stimulus. Uses `_build_cylinder_geom` factory and loads textures via the Panda3D API directly.
 
 ```toml
 [visual_stimuli.background]
@@ -295,17 +295,25 @@ def setup(self) -> None:
 
 Creating geometry in `setup()` and toggling with `stash()`/`unstash()` is more efficient than creating/destroying nodes on each trigger.
 
-**Implement `on_trigger()`.** Pick a random offset from `positions_deg`, compute the world heading, and place the square:
+**Implement `on_trigger()`.** Pick a random offset from `positions_deg`, compute the world heading, and place the square. Return a dict of the parameters used — `VisualProcess` merges it into the `stim.csv` row for this trigger (return `None` when the stimulus doesn't activate):
 
 ```python
-def on_trigger(self, heading_deg: float, trigger_data: dict) -> None:
+def on_trigger(self, heading_deg: float, trigger_data: dict) -> dict | None:
     if self._state != self.IDLE:
-        return
+        return None
     self._state = self.ACTIVE
     self._base_heading = heading_deg
     self._offset_deg = self._rng.choice(self._positions_deg)
     self._elapsed_ms = 0.0
     self._place_square(heading_deg + self._offset_deg)
+    return {
+        "square_stimulus_heading_deg": heading_deg + self._offset_deg,
+        "square_offset_deg": self._offset_deg,
+        "square_size_deg": self._size_deg,
+        "square_amplitude_deg": self._amplitude_deg,
+        "square_frequency_hz": self._frequency_hz,
+        "square_duration_ms": self._duration_ms,
+    }
 ```
 
 **Helper: `_place_square()`.** Converts heading to world position, scales the square to the correct angular size, un-stashes it:
@@ -559,9 +567,13 @@ class BaseStimulus(ABC):
         Stash nodes that start invisible."""
 
     @abstractmethod
-    def on_trigger(self, heading_deg: float, trigger_data: dict) -> None:
-        """Called on ZONE_ENTER. heading_deg is Braid→world converted (0=North, 90=East).
-        trigger_data has: obj_id, frame, timestamp, x, y, z, xvel, yvel, zvel, mean_heading (Braid radians)."""
+    def on_trigger(self, heading_deg: float, trigger_data: dict) -> dict | None:
+        """Called on VISUAL_ZONE_ENTER. heading_deg is Braid→world converted (0=North, 90=East).
+        trigger_data has: obj_id, frame, record_frame, timestamp, braid_timestamp,
+        handler_timestamp, x, y, z, xvel, yvel, zvel, mean_heading (Braid radians).
+
+        Return a dict of stimulus parameters to log (merged into the stim.csv row
+        for this trigger), or None if the stimulus didn't activate."""
 
     @abstractmethod
     def update(self, dt: float) -> None:
@@ -591,6 +603,10 @@ def angular_size_to_radius(size_deg, distance_cm) -> float:
 def _make_unit_disk(color, num_segments=32) -> GeomNode:
     """Create a flat disk (radius=1) in the XZ plane. Returns a GeomNode."""
 ```
+
+### What VisualProcess does with the return value
+
+On each `VISUAL_ZONE_ENTER`, `VisualProcess` calls every registered stimulus's `on_trigger` and merges the returned dicts into one `stim.csv` row (plus `timestamp`, `obj_id`, `frame`, `braid_heading_rad`, `world_heading_deg`). `stim.csv` is only written when at least one stimulus returns a non-empty dict — an always-on stimulus like `BackgroundStimulus` returns `None`, so a background-only setup produces no file at all. The same "did anything activate" verdict feeds the `LATENCY` message `VisualProcess` pushes to `LatencyLogger`: with no activation, `activation_timestamp` is `None` and the row is recorded as `sham`.
 
 ## Troubleshooting
 

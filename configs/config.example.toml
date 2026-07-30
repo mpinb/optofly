@@ -78,7 +78,8 @@ max_recording_time = 3.0         # Max seconds per recording (sizes buffer)
 [camera.FOV]
 # Camera field of view in tracking coordinates (meters).
 # These values can be computed automatically with the BRAID-to-camera calibration tool
-# (src/tools/calibrate_braid_ximea.py) — press 'v' then 's' during the calibration session.
+# (src/tools/calibrate_braid_ximea.py) — collect edge points with SPACE, press 'n' to
+# finalise the plane, then 's' to save into configs/config.toml.
 #
 # Flat mode (default): single set of x/y bounds applied at all z heights.
 x_min = -0.0218
@@ -155,7 +156,7 @@ calibration_file = "calibrations/liquid_lens.csv"
 # Model used to fit the z → diopter calibration curve (fit once at startup):
 #   "linear"    — dpt = a·z + b                      (fast, R²≈0.94)
 #   "quadratic" — dpt = a·z² + b·z + c               (recommended, R²≈0.995)
-#   "power"     — dpt = a·(z + shift)^b + c          (physically motivated)
+#   "power"     — dpt = a·z^b + c                    (physically motivated)
 #   "inverse"   — dpt = a/(z − b) + c                (thin-lens theory)
 calibration_model = "quadratic"
 

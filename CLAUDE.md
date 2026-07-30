@@ -32,11 +32,17 @@ uv run python -m src.tools.calibrate_frustum_fov
 # Liquid lens focusing latency report (recommends system_latency for [liquid_lens.kalman])
 uv run python -m src.tools.lens_latency_analyze /mnt/data/videos/<braid_dir>
 
-# Simulate Braid tracking data (development)
+# Simulate Braid tracking data (development; binds the BRAID PUB port itself)
 uv run python -m src.tools.braid_simulator
 
-# Real-time tracking visualization (ReRun)
+# Real-time tracking visualization (ReRun; consumes the ZMQ BRAID feed)
 uv run python -m src.tools.braid_visualizer
+
+# Braid↔XIMEA camera calibration (DLT; also drives frustum FOV point picking)
+uv run python -m src.tools.calibrate_braid_ximea
+
+# Camera CSV QA plots (frame-counter gaps, inter-frame intervals, jitter)
+uv run python -m src.tools.generate_camera_histograms /mnt/data/videos/<braid_dir>
 ```
 
 ## Configuration
@@ -49,7 +55,7 @@ cp configs/visual_stimuli.example.toml configs/visual_stimuli.toml
 
 `configs/config.toml` controls hardware (Braid URL, trigger zone, camera, opto, lens).
 `configs/visual_stimuli.toml` controls display layout, screen mapping, stimuli parameters.
-Each process checks its own `active = true/false` flag before starting.
+Which processes start is gated by `active` flags in config — with two exceptions (`OptoTriggerWorker` always starts, `LiquidLens` rides on `camera.active`); see the process table under Architecture.
 
 ## Architecture
 
@@ -58,31 +64,44 @@ Each process checks its own `active = true/false` flag before starting.
 ```
 Braid HTTP SSE (http://host:8397/events)
     ↓
-BraidPublisher  →  ZMQ PUB  topic=BRAID  port=5555
+BraidPublisher  →  ZMQ PUB  topic=BRAID         port=5555   (full stream)
+                →  ZMQ PUB  topic=ACTIVE_BRAID  port=5557   (updates for the in-zone object only; gated by
+                                                             ZONE_ENTER/ZONE_EXIT it SUBs to on port=5556)
     ↓
-TriggerHandler  →  ZMQ PUB  topics=ZONE_ENTER/ZONE_EXIT/OPTO_ZONE_ENTER/VISUAL_ZONE_ENTER  port=5556
+TriggerHandler (SUB 5555)  →  ZMQ PUB  topics=ZONE_ENTER/ZONE_EXIT/OPTO_ZONE_ENTER/VISUAL_ZONE_ENTER  port=5556
     ↓
     ├── RustCameraProcess    (starts recording on ZONE_ENTER; stamps trigger_frame_idx on ZONE_ENTER)
-    ├── LiquidLens           (starts focusing on ZONE_ENTER via BRAID; writes lens_timing.csv per video) ─┐
+    ├── LiquidLens           (starts focusing on ZONE_ENTER via ACTIVE_BRAID; writes lens_timing.csv per video) ─┐
     ├── OptoTriggerWorker    (fires LED on OPTO_ZONE_ENTER, one-shot)                                     ├─→ ZMQ PUSH  port=latency_port ─→ LatencyLogger (ZMQ PULL, writes latency.csv)
     ├── VisualProcess        (Panda3D; renders stimuli on VISUAL_ZONE_ENTER, one-shot)                    ─┘
     └── Monitoring Server    (web dashboard, optional)
 ```
 
-The ZMQ BRAID feed is only live when the full stack is running. Standalone tools (calibration, simulators) that need tracking data must connect directly to the Braid HTTP SSE endpoint (`/events`).
+The ZMQ BRAID feed is only live when the full stack is running. Standalone tools (calibration, simulators) that need tracking data must connect directly to the Braid HTTP SSE endpoint (`/events`) — with two exceptions: `braid_visualizer` consumes the ZMQ BRAID feed, and `braid_simulator` binds the BRAID PUB port itself, so the visualizer works against either the full stack or the simulator.
 
 `ZONE_ENTER`/`ZONE_EXIT` still gate the camera and lens exactly as before — recording starts as soon as an object enters the outer trigger zone. `OPTO_ZONE_ENTER`/`VISUAL_ZONE_ENTER` are separate, one-shot events emitted by `TriggerHandler` only once a tracked object — already inside the outer `ZONE_ENTER` zone — reaches a smaller zone nested inside it, sized by `opto_zone_scale`/`visual_zone_scale` in `[trigger_handler]` (fraction of the outer FOV, centered). Setting either scale to `1.0` reproduces today's same-frame behavior for that system (fires on the same frame as `ZONE_ENTER`).
 
-`LatencyLogger` is core and always-on (started right after `TriggerHandler`, before any optional process) — a dead `LatencyLogger` only loses latency data, it never aborts the experiment. It's the one place in the codebase using ZMQ PUSH/PULL instead of PUB/SUB: `OptoTriggerWorker`, `VisualProcess`, and `LiquidLens` each PUSH one `LATENCY` message per trigger to `zmq.latency_port` (a many-producer/one-consumer fan-in, not a broadcast), and `LatencyLogger` is the sole writer of `latency.csv` in the braid folder. Each `LATENCY` message carries `system` (`"opto"` | `"visual"` | `"lens"`), `obj_id`, `frame`, `record_frame`, `braid_timestamp`, `activation_timestamp`, and `sham`; `LatencyLogger` computes `latency_ms = (activation_timestamp - braid_timestamp) * 1000` for non-sham trials. `LiquidLens` only publishes latency for the first commanded diopter per trial (not every subsequent tracking update).
+`LatencyLogger` is core and always-on (started right after `TriggerHandler`, before any optional process) — a dead `LatencyLogger` only loses latency data, it never aborts the experiment. It's the one place in the codebase using ZMQ PUSH/PULL instead of PUB/SUB: `OptoTriggerWorker`, `VisualProcess`, and `LiquidLens` each PUSH one `LATENCY` message per trigger to `zmq.latency_port` (a many-producer/one-consumer fan-in, not a broadcast), and `LatencyLogger` is the sole writer of `latency.csv` in the braid folder. Each `LATENCY` message carries `system` (`"opto"` | `"visual"` | `"lens"`), `obj_id`, `frame`, `record_frame`, `braid_timestamp`, `trigger_timestamp`, `activation_timestamp`, and `sham`; `LatencyLogger` computes `latency_ms = (activation_timestamp - braid_timestamp) * 1000` for non-sham trials. `LiquidLens` only publishes latency for the first commanded diopter per trial (not every subsequent tracking update).
+
+### Orchestration
+
+`main.py` is a thin CLI (`--config`, `--skip-metadata`) over `Experiment` (`src/orchestration.py`), which owns the full process lifecycle: `prepare_braid_folder()` (starts a fresh Braid recording via the callback API) → `collect_metadata()` (prompt; writes `experiment_data.toml` into the braid folder and appends a row to `~/optofly_experiments.csv`) → `start()` → poll `is_running()`/`check_health()` → `stop()` from a `finally`.
+
+`Experiment.start()`:
+- Copies `config.toml` (and `visual_stimuli.toml` when visual is active) into the braid folder, and attaches the main-process log to `optofly.log` there.
+- Spawns in fixed order with a 0.5 s stagger: `BraidPublisher` → `TriggerHandler` → `LatencyLogger` → optional processes → `OptoTriggerWorker` (always last).
+- Waits 1 s, then treats a dead critical process as `ExperimentStartError`, quoting the child's own reported exception (workers report crashes through an `mp.Queue` failure channel) before falling back to the static per-process hints in `_CRITICAL_INIT_HINTS`.
+
+`check_health()` is the mid-run equivalent: a critical death sets the stop event (fatal); a non-critical death is logged once and the run continues. `stop()` signals the shared event, joins each process (`_SHUTDOWN_TIMEOUTS`: 35 s for the camera, 5 s default; `terminate()` fallback), verifies Braid CSVs, and stops the Braid recording. `main.py` also warns at startup when `camera.max_recording_time < trigger_handler.zone_timeout`.
 
 ### Process Model
 
-All processes inherit `WorkerProcess` (`src/utils/worker.py`) and run as `multiprocessing.Process` instances. They:
+All worker processes inherit `WorkerProcess` (`src/utils/worker.py`) and run as `multiprocessing.Process` instances (the one exception is the Monitoring Server, a plain daemon `mp.Process`). They:
 - Accept a shared `mp.Event` for coordinated shutdown
 - Initialize ZMQ sockets inside `_run()` (not `__init__`) to avoid fork issues
-- Receive multipart ZMQ messages: `[topic_bytes, json_bytes]`
+- Receive multipart ZMQ messages: `[topic_bytes, json_bytes]` (exception: the LATENCY PUSH/PULL channel is a single JSON frame, no topic prefix)
 
-**Logging**: each child process calls `configure_process_logging()` (`src/utils/logger.py`) at entry inside `WorkerProcess.run()`, which clears all inherited root-logger handlers and attaches a fresh colored stream handler + optional file handler. Subclasses override `_run()`, not `run()`. Pass `log_path=` to the constructor to get per-process log files. `main.py` calls `configure_process_logging` directly for the main process.
+**Logging**: each child process calls `configure_process_logging()` (`src/utils/logger.py`) at entry inside `WorkerProcess.run()`, which clears all inherited root-logger handlers and attaches a fresh colored stream handler + optional file handler. Subclasses override `_run()`, not `run()`. Pass `log_path=` to the constructor to get per-process log files. `Experiment.start()` (`src/orchestration.py`) calls it for the main process, writing `optofly.log` into the braid folder.
 
 ### ZMQ Message Formats
 
@@ -92,13 +111,13 @@ All processes inherit `WorkerProcess` (`src/utils/worker.py`) and run as `multip
 {"Update": {"obj_id": 1, "x": 0.01, "y": -0.02, "z": 0.18, "xvel": ..., ...}}
 {"Death": 1}
 ```
-Death carries the bare obj_id as an integer, not an object.
+Death carries the bare obj_id as an integer, not an object. Before publishing, `BraidPublisher` injects two fields into every Birth/Update payload: `t_relay` (its own wall-clock receipt time, used by the lens timing pipeline) and `braid_timestamp` (the Triggerbox-clock timestamp from Braid's SSE envelope, `None` when absent). The `ACTIVE_BRAID` feed on port 5557 carries the same Update payloads (injected fields included), but only for the object currently inside the trigger zone.
 
 **ZONE_ENTER** (from TriggerHandler):
 ```json
-{"obj_id": 1, "frame": 12345, "timestamp": 1234.56, "braid_timestamp": 1234.50, "handler_timestamp": 1234.56, "x": 0.01, "y": -0.02, "z": 0.18, "xvel": 0.05, "yvel": -0.12, "zvel": 0.01, "mean_heading": 0.52}
+{"obj_id": 1, "frame": 12345, "record_frame": 12345, "timestamp": 1234.56, "braid_timestamp": 1234.50, "handler_timestamp": 1234.56, "x": 0.01, "y": -0.02, "z": 0.18, "xvel": 0.05, "yvel": -0.12, "zvel": 0.01, "mean_heading": 0.52}
 ```
-`timestamp`/`handler_timestamp` are both the handler's local receipt-time clock (used for velocity/age/cooldown math); `braid_timestamp` is the Triggerbox-clock-model timestamp from Braid's SSE envelope, kept separate since it's on a different clock and is only used for latency measurement (see `LatencyLogger` below). It's `None` if Braid didn't supply one for that sample.
+`timestamp`/`handler_timestamp` are both the handler's local receipt-time clock (used for velocity/age/cooldown math); `braid_timestamp` is the Triggerbox-clock-model timestamp from Braid's SSE envelope, kept separate since it's on a different clock and is only used for latency measurement (see `LatencyLogger` below). It's `None` if Braid didn't supply one for that sample. `record_frame` is the Braid frame of the outer `ZONE_ENTER` for this occupancy — equal to `frame` on `ZONE_ENTER` itself, but earlier than `frame` on the one-shot `OPTO_ZONE_ENTER`/`VISUAL_ZONE_ENTER` events (which share this payload shape), letting consumers measure recording-start → stimulus-onset offset.
 
 **ZONE_EXIT** (from TriggerHandler):
 ```json
@@ -107,7 +126,7 @@ Death carries the bare obj_id as an integer, not an object.
 
 ### Configuration Loading
 
-`src/utils/config.py` has typed config classes (e.g. `LiquidLensConfig`, `ZMQConfig`) that load from TOML sections. Pass `config_path` to each process; don't read TOML directly elsewhere. `trigger_handler.zone_timeout` is the single global timeout used by TriggerHandler, CameraProcess (buffer sizing), and LiquidLens (focus tracking).
+`src/utils/config.py` has typed config classes (e.g. `LiquidLensConfig`, `ZMQConfig`) that load from TOML sections. Pass `config_path` to each process; don't read TOML directly elsewhere. `trigger_handler.zone_timeout` is the tracker's dead-reckoning timeout, used by TriggerHandler (declaring a fly has left the zone) and by BraidPublisher (expiring the ACTIVE_BRAID active object when zone events stop). Camera buffer sizing uses `camera.max_recording_time` instead; `LiquidLensConfig.zone_timeout` exists but is currently unused by `src/processes/lens.py`.
 
 Each config class has exactly two constructors, and no others:
 
@@ -125,10 +144,15 @@ Key parameters (all in `configs/config.toml`):
 | Section | Key | Default | Purpose |
 |---|---|---|---|
 | `[zmq]` | `latency_port` | `5558` | PUSH/PULL port `OptoTriggerWorker`/`VisualProcess`/`LiquidLens` push `LATENCY` messages to; `LatencyLogger` binds it and writes `latency.csv` |
+| `[zmq]` | `active_braid_port` | `5557` | PUB port for the `ACTIVE_BRAID` fast lane (only the in-zone object's updates); consumed by `LiquidLens` |
+| `[zmq]` | `lens_update_conflate` | `true` | Sets `CONFLATE`+`RCVHWM=1` on the lens's `ACTIVE_BRAID` socket so stale focus updates are dropped instead of queued |
+| `[zmq]` | `transport` | `"tcp"` | `"tcp"` (`tcp://localhost:PORT`) or `"ipc"` (per-port socket files under `/tmp`); used by `get_publisher_address`/`get_subscriber_address` |
 | `[liquid_lens]` | `predictor` | `"none"` | `"none"` uses raw Braid z; `"linear"` extrapolates `z + vz * (system_latency + prediction_horizon)` |
 | `[liquid_lens]` | `max_diopter_step` | `0.0` | Per-update slew-rate limit on commanded diopter; `0.0` disables it. Ramps large jumps (esp. trial onset) so the lens's ~400 Hz resonance isn't excited |
 | `[liquid_lens.kalman]` | `system_latency` | `0.05` | Measured message + serial write delay (seconds); calibrate with `lens_latency_analyze`. Section name is legacy (predates removal of a Kalman-filter predictor mode) — still used by the `linear` predictor |
 | `[liquid_lens.kalman]` | `prediction_horizon` | `0.05` | Additional lookahead beyond `system_latency` (seconds) |
+| `[opto_trigger]` | `sham_probability` | `0.0` | Fraction of triggers that become sham trials (no LED pulse; recorded as `sham` in `opto.csv`/`latency.csv`) |
+| `[camera]` | `aeag`, `aeag_level`, `ae_max_limit` | `false`, `50`, 95% of frame period | Rust-binary-only auto-exposure/gain (AEAG) settings; read by `optofly-camera`, ignored by Python. `buffers_queue_size` (default `32`) is likewise Rust-only |
 
 `LiquidLens` also enforces a hardware floor of 25ms between serial commands regardless of `predictor` or `max_diopter_step` (~40 Hz max update rate).
 
@@ -164,7 +188,7 @@ Coordinate system: fly at origin, North=+Y, East=+X, Z=up, units in cm. Use `ang
 
 ### Camera
 
-`RustCameraProcess` (`src/processes/camera.py`) launches the `optofly-camera` Rust binary (`optofly-camera/`) as a subprocess. The binary captures frames via the XIMEA SDK (`xiapi` crate) into a linear double-buffer and pipes raw frames to ffmpeg for H.264 encoding (NVENC with x264 fallback). On shutdown, the Python wrapper sends SIGTERM to the subprocess for graceful exit (the binary also subscribes to a ZMQ `kill` topic, but nothing in this codebase currently publishes to it). Requires `ffmpeg` on PATH and the XIMEA SDK. Build: `cd optofly-camera && cargo build --release`. `main.py` imports this class under the alias `CameraProcess`.
+`RustCameraProcess` (`src/processes/camera.py`) launches the `optofly-camera` Rust binary (`optofly-camera/`) as a subprocess. The binary captures frames via the XIMEA SDK (`xiapi` crate) into a linear double-buffer and pipes raw frames to ffmpeg for H.264 encoding (NVENC with x264 fallback). On shutdown, the Python wrapper sends SIGTERM to the subprocess for graceful exit (the binary also subscribes to a ZMQ `kill` topic, but nothing in this codebase currently publishes to it). Requires `ffmpeg` on PATH and the XIMEA SDK. Build: `cd optofly-camera && cargo build --release`. `src/orchestration.py` imports this class under the alias `CameraProcess`.
 
 State machine (Rust binary):
 - **IDLE + `ZONE_ENTER`** → start recording; `trigger_frame_idx = 0`
@@ -172,7 +196,7 @@ State machine (Rust binary):
 
 Output files per trial (all in `camera.save_folder`):
 - `obj_id_{N}_frame_{M}.mp4` — encoded video
-- `obj_id_{N}_frame_{M}.csv` — per-frame metadata (`frame_idx`, `nframe`, `ts_sec`, `ts_usec`, `cam_time_ns`, `trigger_frame_idx`). `trigger_frame_idx` repeats on every row — it is the buffer index at which `ZONE_ENTER` fired, marking **recording start**, not stimulus onset. Actual stimulus onset for opto/visual is in `latency.csv`'s `frame` field for that system's row (`"opto"`/`"visual"`); `record_frame` on that same row equals the camera's `trigger_frame_idx`/recording-start frame, so `(row.frame - row.record_frame)` is the number of Braid frames between recording start and stimulus onset — convert to camera frames via the fps ratio if needed for video alignment (Braid runs ~100Hz; camera fps is in `configs/config.toml`'s `[camera]` section).
+- `obj_id_{N}_frame_{M}.csv` — per-frame metadata (`frame_idx`, `nframe`, `ts_sec`, `ts_usec`, `cam_time_ns`, `trigger_frame_idx`). `trigger_frame_idx` repeats on every row — it is the buffer index at which `ZONE_ENTER` fired, marking **recording start**, not stimulus onset. Actual stimulus onset for opto/visual is in `latency.csv`'s `frame` field for that system's row (`"opto"`/`"visual"`); `record_frame` on that same row is the Braid frame at which the outer `ZONE_ENTER` fired — the same moment `trigger_frame_idx` marks, but on the Braid frame counter — so `(row.frame - row.record_frame)` is the number of Braid frames between recording start and stimulus onset — convert to camera frames via the fps ratio if needed for video alignment (Braid runs ~100Hz; camera fps is in `configs/config.toml`'s `[camera]` section).
 - `obj_id_{N}_frame_{M}_lens_timing.csv`: per-adjustment lens timing (`t_braid`, `t_relay`, `t_lens_recv`, `t_serial_start`, `t_diopter_sent`, `delay_ms`, `z`, `focus_z`, `diopter`, `target_diopter`, `predictor`, ...)
 
 **`max_recording_time` vs `zone_timeout`**: `camera.max_recording_time` is a frame-buffer size limit — it counts from `ZONE_ENTER`. `trigger_handler.zone_timeout` is the tracker's dead-reckoning timeout for declaring a fly has left the zone. Set `max_recording_time` ≥ `zone_timeout`.

@@ -98,7 +98,7 @@ With Braid tracking and recording:
 uv run python main.py
 ```
 
-The launcher confirms the active Braid recording folder, then prompts for experiment metadata (experimenter, cross, dates, fly count, duration, notes) before starting all enabled processes. Skip the prompt for a quick test run:
+The launcher starts a fresh Braid recording via Braid's callback API, then prompts for experiment metadata (experimenter, cross, dates, fly count, duration, notes) before starting all enabled processes. Skip the prompt for a quick test run:
 
 ```bash
 uv run python main.py --skip-metadata
@@ -121,7 +121,7 @@ uv sync
 Option 2: conda/mamba
 ```bash
 mamba env create -f environment.yml
-conda activate optofly
+conda activate optofly_env
 ```
 
 **System dependencies** (Ubuntu/Debian)
@@ -162,12 +162,12 @@ experiments_path = "/mnt/data/experiments/" # Where .braid folders are saved
 [trigger_handler]
 min_tracking_age = 0.1      # Min object age before triggering (s)
 cooldown_period = 10.0      # Global cooldown between ZONE_ENTER (s)
-z_min = 0.15                # Minimum z for trigger (m)
+z_min = 0.10                # Minimum z for trigger (m)
 z_max = 0.25                # Maximum z for trigger (m)
-heading_cone_deg = 45.0     # Heading tolerance from center-directed (degrees)
+heading_cone_deg = 30.0     # Heading tolerance from center-directed (degrees)
 min_velocity = 0.01         # Min velocity threshold (m/s)
-max_velocity = 2.0          # Max velocity threshold, rejects tracking noise (m/s)
-zone_timeout = 2.0          # Auto ZONE_EXIT if no updates for this long (s)
+max_velocity = 1.0          # Max velocity threshold, rejects tracking noise (m/s)
+zone_timeout = 3.0          # Auto ZONE_EXIT if no updates for this long (s)
 opto_zone_scale = 0.5       # Opto fires only once the fly reaches this fraction of the FOV, centered (0-1]
 visual_zone_scale = 1.0     # Visual fires at this fraction of the FOV, centered (0-1]; 1.0 = same as camera FOV
 
@@ -177,9 +177,9 @@ resolution = [2112, 2112]
 fps = 500
 
 [opto_trigger]
-active = true
-port = "/dev/opto_trigger"
-duration = [100, 200, 300]          # ms, randomly selected
+active = false                     # set true once the Arduino is wired up
+port = "/dev/opto_trigger"         # required even when active = false (AppConfig validates all sections)
+duration = [100, 200, 300]         # ms — balanced randomization per trigger
 intensity = [0, 51, 102, 153, 204, 255]
 color = "red"
 
@@ -255,13 +255,15 @@ See `configs/visual_stimuli.example.toml` for all available options.
 uv run python main.py
 ```
 
-The launcher checks for an active Braid recording folder (or starts one automatically), then prompts interactively for experiment metadata: experimenter name, genetic cross, cross/F1/ATR dates, fly count, `experiment_duration` (hours, default 24), and free-text notes. It writes the answers to `experiment_data.toml` and an appended CSV row in the Braid folder, alongside a snapshot of `config.toml` and `visual_stimuli.toml`. Skip the prompt for quick tests:
+The launcher starts a fresh Braid recording via the callback API (it never reuses an existing same-day folder), then prompts interactively for experiment metadata: experimenter name, genetic cross, cross/F1/ATR dates, fly count, `experiment_duration` (hours, default 24), and free-text notes. It writes the answers to `experiment_data.toml` in the Braid folder (alongside a snapshot of `config.toml` and `visual_stimuli.toml`) and appends a row to the central `~/optofly_experiments.csv` log in your home directory. Skip the prompt for quick tests:
 
 ```bash
 uv run python main.py --skip-metadata
 ```
 
-With `--skip-metadata`, `experiment_duration` defaults to 24 hours. The launcher starts all enabled processes and runs until Ctrl+C or `experiment_duration` elapses.
+With `--skip-metadata`, `experiment_duration` defaults to 24 hours. The launcher starts all enabled processes and runs until Ctrl+C or `experiment_duration` elapses. Use `--config <path>` to run against a different TOML file than `configs/config.toml`.
+
+Note that `OptoTriggerWorker` starts even when `[opto_trigger] active = false` (it drives the arena backlight). A missing Arduino is then survivable — the run continues without the backlight; with `active = true` it aborts startup instead.
 
 ## Development
 

@@ -1,11 +1,13 @@
 """
 Latency Logger process — the single writer of latency.csv.
 
-Subscribes to LATENCY messages published by OptoTriggerWorker, VisualProcess,
-and LiquidLens (one message per (trigger, system) pair) and writes them to a
-single latency.csv in the braid folder. A dedicated process avoids the
-header race that three independent processes concurrently appending to the
-same file would have on the very first trigger.
+Binds a ZMQ PULL socket on zmq.latency_port and receives LATENCY messages
+PUSHed by OptoTriggerWorker, VisualProcess, and LiquidLens (one message per
+(trigger, system) pair) — a many-producer, one-consumer fan-in, and the only
+non-PUB/SUB channel in the codebase. Writes them to a single latency.csv in
+the braid folder. A dedicated process avoids the header race that three
+independent processes concurrently appending to the same file would have on
+the very first trigger.
 """
 
 import json

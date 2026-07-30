@@ -25,7 +25,7 @@ braid_heading_offset_rad = 0.0        # Braid heading that corresponds to North 
 braid_heading_flip = false            # True if Braid heading increases opposite to arena
 
 # ------------------------------------------------------------------------------
-# Stimulus: Background — textured walls + ground plane
+# Stimulus: Background — textured cylinder walls
 # ------------------------------------------------------------------------------
 
 [visual_stimuli.background]

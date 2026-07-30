@@ -44,6 +44,17 @@ level = "DEBUG"
 - Verify `"Registered: <StimulusName>"` appears in startup logs
 - For Panda3D: ensure `unstash()` is called in `on_trigger()` — stashed nodes are invisible
 
+**Experiment aborts at startup with an `OptoTriggerWorker` error:**
+
+With `[opto_trigger] active = true` the worker is a critical process, so an unopenable Arduino port aborts the whole startup. Check the symlink and permissions:
+
+```bash
+ls -l /dev/opto_trigger       # udev symlink present? (see configs/config.example.toml)
+groups | grep -q dialout && echo "in dialout group"
+```
+
+With `active = false` a missing Arduino is *not* fatal: the worker logs a warning and the experiment continues without the arena backlight.
+
 **Camera not recording:**
 
 Run the preflight check first — it reports all four prerequisites and what to do about each:

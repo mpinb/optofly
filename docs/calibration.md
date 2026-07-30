@@ -42,7 +42,7 @@ Maps fly z-position (meters) to lens focal power (diopters) so the lens tracks f
 
 ### Prerequisites
 
-- Lens connected and serial port confirmed (default: `/dev/ttyUSB1`)
+- Lens connected and serial port confirmed (required `port` key in `[liquid_lens]`; the example config uses the udev symlink `/dev/optotune_ld` — see the udev comments in `configs/config.example.toml`)
 - Braid running with a tracked object visible
 - OptoFly environment activated
 
@@ -54,7 +54,7 @@ Maps fly z-position (meters) to lens focal power (diopters) so the lens tracks f
 
    ```python
    from optotune_lens import Lens
-   lens = Lens(port="/dev/ttyUSB1")
+   lens = Lens(port="/dev/optotune_ld")
    lens.to_focal_power_mode()
    ```
 
@@ -140,7 +140,7 @@ It reads every `*_lens_timing.csv` in the folder and prints percentile breakdown
 
 ### Troubleshooting
 
-- **Serial port not found**: run `ls -l /dev/ttyUSB*` and check permissions with `sudo chmod 666 /dev/ttyUSB1`
+- **Serial port not found**: confirm the symlink with `ls -l /dev/optotune_ld` (or find the raw device with `ls -l /dev/ttyUSB*`); check permissions, e.g. `sudo chmod 666 /dev/ttyUSB1` on the underlying device
 - **Lens not responding**: verify the handshake by running `Lens` interactively with `debug=True`
 - **Poor focus across z-range**: add more calibration points, especially at the extremes
 
@@ -255,11 +255,13 @@ The `calibrate_braid_ximea.py` `a`-key path is described below.
    grep -A 15 "\[camera\.FOV\]" configs/config.toml
    ```
 
-   The far-plane bounds should be visibly wider than the near-plane bounds. Restart the main stack and confirm:
+   The far-plane bounds should be visibly wider than the near-plane bounds. `TriggerHandler` picks the mode up from the config at startup — frustum mode is active whenever both `[camera.FOV.near]` and `[camera.FOV.far]` tables are present. Confirm what was parsed:
 
+   ```bash
+   uv run python -c "from src.utils.config import AppConfig; c = AppConfig.load('configs/config.toml'); print('frustum:', c.camera.fov_frustum, '| near z:', c.camera.fov_near_z, '| far z:', c.camera.fov_far_z)"
    ```
-   TriggerHandler: frustum FOV mode  near z=0.1000 m  far z=0.2500 m
-   ```
+
+   Then restart the main stack.
 
 ### Troubleshooting
 
