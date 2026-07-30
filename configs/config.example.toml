@@ -2,7 +2,7 @@
 # OPTOFLY CONFIGURATION
 # ==============================================================================
 # Main configuration file for the OptoFly closed-loop optogenetics system
-# Documentation: https://github.com/mpinb/optofly
+# Documentation: https://github.com/elhananby/optofly
 
 # ==============================================================================
 # SYSTEM CONFIGURATION
@@ -82,10 +82,10 @@ max_recording_time = 3.0         # Max seconds per recording (sizes buffer)
 # finalise the plane, then 's' to save into configs/config.toml.
 #
 # Flat mode (default): single set of x/y bounds applied at all z heights.
-x_min = -0.0218
-x_max = 0.039
-y_min = -0.025
-y_max = 0.041
+# x_min = -0.0218
+# x_max = 0.039
+# y_min = -0.025
+# y_max = 0.041
 
 # Frustum mode (perspective-correct): define FOV at two z reference planes.
 # The zone check interpolates x/y bounds at the fly's actual z, matching the
@@ -94,26 +94,26 @@ y_max = 0.041
 # To enable manually, replace the flat keys above with these two sub-tables
 # (remove x_min/x_max/y_min/y_max from [camera.FOV] first):
 #
-# [camera.FOV.near]
-# z     = 0.10      # z where these bounds were measured
-# x_min = -0.015
-# x_max = 0.025
-# y_min = -0.018
-# y_max = 0.030
-#
-# [camera.FOV.far]
-# z     = 0.25      # z where these bounds were measured
-# x_min = -0.0218
-# x_max = 0.039
-# y_min = -0.025
-# y_max = 0.041
+[camera.FOV.near]
+z     = 0.1830      # z where these bounds were measured
+x_min = -0.01988
+x_max = 0.04192
+y_min = -0.02764
+y_max = 0.03568
+
+[camera.FOV.far]
+z     = 0.2499      # z where these bounds were measured
+x_min = -0.01690
+x_max = 0.03627
+y_min = -0.02266
+y_max = 0.02833
 # ==============================================================================
 # HARDWARE CONTROL
 # ==============================================================================
 
 [opto_trigger]
 # LED optogenetic stimulation
-active = false
+active = true
 # NOTE: 'port' is required below even when active = false. AppConfig.load()
 # validates every section on every load regardless of its active flag, so
 # this key must stay present (even as a placeholder) or config loading
@@ -126,17 +126,17 @@ port = "/dev/opto_trigger"
 baudrate = 115200
 
 # Stimulus parameters (single values or lists for randomization)
-duration = [100, 200, 300]   # Pulse duration (ms)
+duration = [300]   # Pulse duration (ms)
 # duration = [100, 200, 300, 400]  # Example: random selection
 
-intensity = [  0,  51, 102, 153, 204, 255] # LED brightness (0-255)
+intensity = [128] # LED brightness (0-255)
 # intensity = [128, 192, 255]    # Example: random intensity
 
 frequency = 0                    # Pulse frequency (Hz, 0=continuous)
 # frequency = [0, 10, 20, 50]    # Example: random frequency
 
 color = "red"                    # LED color
-sham_probability = 0.0           # Probability of sham trials (0.0-1.0)
+sham_probability = 0.1           # Probability of sham trials (0.0-1.0)
 
 [liquid_lens]
 # Liquid lens auto-focus system (activates automatically with camera; no
@@ -176,7 +176,7 @@ max_diopter_step = 0.0
 # Predictor mode — controls how the lens target depth is computed each update:
 #   "none"   — use raw z from Braid directly (no lookahead)
 #   "linear" — z + vz * (system_latency + prediction_horizon)
-predictor = "none"
+predictor = "linear"
 
 [liquid_lens.kalman]
 # Prediction parameters — used by the "linear" predictor. Section name is

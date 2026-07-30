@@ -21,8 +21,8 @@ window_x_offset = 3840                # X position of leftmost screen on the des
 # Screen mapping: physical screens left-to-right → compass direction
 # Valid directions: North, East, South, West
 screen_mapping = ["South", "West", "North", "East"]
-braid_heading_offset_rad = 0.0        # Braid heading that corresponds to North screen
-braid_heading_flip = false            # True if Braid heading increases opposite to arena
+braid_heading_offset_rad = 1.547060
+braid_heading_flip = true
 
 # ------------------------------------------------------------------------------
 # Stimulus: Background — textured cylinder walls
@@ -61,7 +61,7 @@ color = [0, 0, 0]                     # RGB (0–255)
 
 # Position offsets from fly heading (degrees)
 # 0 = ahead, 90 = right, -90 = left, 180 = behind
-positions_deg = [-90, -45, 0, 45, 90]
+positions_deg = [0]
 
 # Sham trials: fraction of triggers with no stimulus (0.0–1.0)
 sham_probability = 0.0
