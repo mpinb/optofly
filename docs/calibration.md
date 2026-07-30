@@ -8,7 +8,7 @@ The sections below are ordered the way you'll actually do them: each one depends
 | 2 | [Braid Multi-Camera Calibration](#braid-multi-camera-extrinsic-calibration) | Step 1, done for every tracking camera | Braid's own tooling |
 | 3 | [Liquid Lens Calibration](#liquid-lens-calibration) | Braid tracking live | `optotune_lens`, or [`liquid-lens-calibration`](https://github.com/mpinb/liquid-lens-calibration) (separate repo) |
 | 4 | [Camera FOV Calibration](#camera-fov-calibration) | Step 3 | `src.tools.calibrate_braid_ximea` |
-| 5 | [Frustum FOV Calibration](#frustum-fov-calibration) | Step 3 (optional refinement of step 4) | `src.tools.calibrate_braid_ximea` or `calibrate_frustum_fov` |
+| 5 | [Frustum FOV Calibration](#frustum-fov-calibration) | Step 3 (optional refinement of step 4) | `src.tools.calibrate_braid_ximea` |
 | 6 | [Panda3D Heading Calibration](#panda3d-heading-calibration) | Braid tracking live | `src.tools.calibrate_heading` |
 
 ## Camera Intrinsic Calibration
@@ -223,19 +223,7 @@ Same as Camera FOV Calibration above.
 
 ### Procedure
 
-Two tools produce the same `[camera.FOV.near]` / `[camera.FOV.far]` result. Pick one:
-
-- **`calibrate_braid_ximea.py`**: the two-plane workflow is built into the same tool used for flat FOV calibration. After finalising plane 1, press `a` instead of `s` to add a second plane.
-- **`calibrate_frustum_fov.py`**: a standalone tool dedicated to the two-plane workflow. Use it when you know upfront you want a frustum and don't need the single-plane branch:
-
-  ```bash
-  uv run python -m src.tools.calibrate_frustum_fov
-  uv run python -m src.tools.calibrate_frustum_fov --near-z 0.10 --far-z 0.25
-  ```
-
-  It refocuses the lens to each z automatically and drives the same SPACE-to-record / `n`-to-finalise / `s`-to-save flow.
-
-The `calibrate_braid_ximea.py` `a`-key path is described below.
+`calibrate_braid_ximea.py` produces `[camera.FOV.near]` / `[camera.FOV.far]` with the same two-plane workflow used for flat FOV calibration above — after finalising plane 1, press `a` instead of `s` to add a second plane:
 
 1. Run `calibrate_braid_ximea` and collect ≥ 4 edge points at the **near height** (lowest typical flight z). Press **`n`** to finalise.
 

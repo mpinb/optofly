@@ -26,9 +26,6 @@ uv run python -m src.visual --standalone             # small 1280×320 window, n
 # Panda3D heading calibration (fits braid_heading_offset_rad / braid_heading_flip)
 uv run python -m src.tools.calibrate_heading
 
-# Frustum FOV calibration (near/far z planes for camera.FOV)
-uv run python -m src.tools.calibrate_frustum_fov
-
 # Liquid lens focusing latency report (recommends system_latency for [liquid_lens.kalman])
 uv run python -m src.tools.lens_latency_analyze /mnt/data/videos/<braid_dir>
 
