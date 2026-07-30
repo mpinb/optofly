@@ -25,6 +25,7 @@ def lens():
     instance = object.__new__(LiquidLens)
     instance.current_tracked_obj = 7
     instance.active_braid_socket = FakeSocket()
+    instance._trial_count = 0
     return instance
 
 
