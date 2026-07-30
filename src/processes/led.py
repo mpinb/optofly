@@ -75,6 +75,7 @@ class OptoTriggerWorker(WorkerProcess):
         self.trigger_socket = None
         self.latency_socket = None
         self.context = None
+        self._trial_count = 0
 
         # Check if it's enabled
         self.is_enabled = self.opto_config.active
@@ -224,14 +225,31 @@ class OptoTriggerWorker(WorkerProcess):
                 self.logger.warning(f"Incomplete trigger data received: {trigger_data}")
                 return False
 
-            self.logger.info(
-                f"Received trigger for object {obj_id} on frame {frame} "
-                f"(heading={mean_heading})"
+            self.logger.debug(
+                "Received trigger for object %d on frame %d (heading=%s)",
+                obj_id,
+                frame,
+                mean_heading,
             )
 
             # Trigger the hardware (it will determine sham based on probability)
             success, was_sham, activation_timestamp = self.opto_trigger.trigger(
                 sham=None
+            )
+
+            self._trial_count += 1
+
+            dur = self.opto_trigger.config.duration
+            if isinstance(dur, list):
+                dur = dur[0] if dur else 300
+            intensity = self.opto_trigger.config.intensity
+            if isinstance(intensity, list):
+                intensity = intensity[0] if intensity else 128
+            color = self.opto_trigger.config.color
+            sham_label = "sham" if was_sham else "real"
+            print(
+                "  opto:    %s  %s/255  %dms  %s   frame=%s"
+                % (color, intensity, dur, sham_label, frame)
             )
 
             # Prepare CSV row
@@ -245,7 +263,7 @@ class OptoTriggerWorker(WorkerProcess):
                 "duration": self.opto_trigger.config.duration,
                 "intensity": self.opto_trigger.config.intensity,
                 "frequency": self.opto_trigger.config.frequency,
-                "color": self.opto_trigger.config.color,
+                "color": color,
                 "sham": was_sham,
             }
 

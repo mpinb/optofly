@@ -53,7 +53,9 @@ def test_missing_section_names_the_section_the_file_and_the_fix(tmp_path, sectio
     message = str(exc.value)
     assert f"[{section}]" in message, f"must name the missing section: {message}"
     assert str(path) in message, f"must name the config file: {message}"
-    assert "config.example.toml" in message, f"must say where to copy it from: {message}"
+    assert "config.example.toml" in message, (
+        f"must say where to copy it from: {message}"
+    )
 
 
 def test_invalid_value_names_the_config_file(tmp_path):
@@ -62,7 +64,8 @@ def test_invalid_value_names_the_config_file(tmp_path):
     message is useless without it."""
     source = open(EXAMPLE).read()
     import re
-    source = re.sub(r'(sham_probability\s*=\s*)-?\d+\.?\d*', r'\g<1>5.0', source)
+
+    source = re.sub(r"(sham_probability\s*=\s*)-?\d+\.?\d*", r"\g<1>5.0", source)
     path = tmp_path / "bad_value.toml"
     path.write_text(source)
 
@@ -124,7 +127,9 @@ class TestMainCliMessages:
             load_config(str(path))
 
         combined = " ".join(r.message for r in caplog.records)
-        assert "not valid TOML" in combined, f"must distinguish a syntax error: {combined}"
+        assert "not valid TOML" in combined, (
+            f"must distinguish a syntax error: {combined}"
+        )
         assert str(path) in combined
 
     def test_invalid_configuration_is_distinguished_from_a_syntax_error(

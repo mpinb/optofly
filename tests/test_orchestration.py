@@ -45,7 +45,6 @@ def patch_processes(monkeypatch, tmp_path):
         "LiquidLens",
     ):
         monkeypatch.setattr(orchestration, name, FakeProcess)
-    monkeypatch.setattr(orchestration, "run_server", lambda *a, **kw: None)
     monkeypatch.setattr(orchestration.time, "sleep", lambda *_: None)
 
     braid_folder = tmp_path / "20260101_000000.braid"
@@ -199,8 +198,10 @@ def test_active_opto_trigger_is_critical(tmp_path, config_path):
     source = Path(config_path).read_text()
     active_config = tmp_path / "opto_active.toml"
     active_config.write_text(
-        source.replace("[opto_trigger]\n# LED optogenetic stimulation\nactive = false",
-                       "[opto_trigger]\n# LED optogenetic stimulation\nactive = true")
+        source.replace(
+            "[opto_trigger]\n# LED optogenetic stimulation\nactive = false",
+            "[opto_trigger]\n# LED optogenetic stimulation\nactive = true",
+        )
     )
 
     app_config = AppConfig.load(str(active_config))
@@ -223,8 +224,10 @@ def test_liquid_lens_is_not_critical_when_camera_is_inactive(tmp_path, config_pa
     source = Path(config_path).read_text()
     no_camera = tmp_path / "no_camera.toml"
     no_camera.write_text(
-        source.replace("# High-speed camera settings\nactive = true",
-                       "# High-speed camera settings\nactive = false")
+        source.replace(
+            "# High-speed camera settings\nactive = true",
+            "# High-speed camera settings\nactive = false",
+        )
     )
 
     app_config = AppConfig.load(str(no_camera))
@@ -366,7 +369,9 @@ def test_needs_cleanup_true_when_stop_event_set_externally(config_path):
     assert exp.is_running() is False  # is_running() flips immediately...
 
     exp.stop()
-    assert exp.needs_cleanup() is False  # ...but needs_cleanup() clears once stop() actually runs
+    assert (
+        exp.needs_cleanup() is False
+    )  # ...but needs_cleanup() clears once stop() actually runs
 
 
 def test_start_writes_metadata_when_provided(monkeypatch, config_path):
@@ -376,17 +381,22 @@ def test_start_writes_metadata_when_provided(monkeypatch, config_path):
     monkeypatch.setattr(
         orchestration,
         "write_metadata",
-        lambda metadata, braid_folder: write_metadata_calls.append((metadata, braid_folder)),
+        lambda metadata, braid_folder: write_metadata_calls.append(
+            (metadata, braid_folder)
+        ),
     )
     monkeypatch.setattr(
         orchestration,
         "extract_config_columns",
-        lambda config_path: extract_config_columns_calls.append(config_path) or ["researcher"],
+        lambda config_path: extract_config_columns_calls.append(config_path)
+        or ["researcher"],
     )
     monkeypatch.setattr(
         orchestration,
         "append_metadata_to_csv",
-        lambda metadata, braid_folder, config_columns: append_metadata_to_csv_calls.append(
+        lambda metadata,
+        braid_folder,
+        config_columns: append_metadata_to_csv_calls.append(
             (metadata, braid_folder, config_columns)
         ),
     )
@@ -426,14 +436,18 @@ def test_check_health_sets_stop_event_when_critical_process_dies_mid_run(config_
     exp.stop()
 
 
-def test_check_health_logs_once_for_non_critical_process_death(config_path, caplog, monkeypatch):
+def test_check_health_logs_once_for_non_critical_process_death(
+    config_path, caplog, monkeypatch
+):
     import logging
 
     # start() calls the real configure_process_logging(), which -- by design,
     # to give each spawned process a clean handler set -- clears every handler
     # on the root logger, including pytest's caplog capture handler. Stub it
     # out here so caplog can still observe log records emitted after start().
-    monkeypatch.setattr(orchestration, "configure_process_logging", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        orchestration, "configure_process_logging", lambda *a, **kw: None
+    )
 
     exp = Experiment()
     exp.start(config_path, metadata=None)

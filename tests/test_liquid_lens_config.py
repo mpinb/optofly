@@ -4,7 +4,12 @@ import pytest
 import tomli_w
 import tomllib
 
-from src.utils.config import CameraConfig, LiquidLensConfig, TriggerHandlerConfig, ZMQConfig
+from src.utils.config import (
+    CameraConfig,
+    LiquidLensConfig,
+    TriggerHandlerConfig,
+    ZMQConfig,
+)
 
 
 def _config_with_predictor(tmp_path: Path, predictor: str) -> str:
@@ -53,7 +58,9 @@ def _zmq():
 
 
 def _trigger_handler():
-    return TriggerHandlerConfig.from_section({"zone_timeout": 3.0}, camera=_camera(), zmq=_zmq())
+    return TriggerHandlerConfig.from_section(
+        {"zone_timeout": 3.0}, camera=_camera(), zmq=_zmq()
+    )
 
 
 def test_from_section_builds_expected_fields():

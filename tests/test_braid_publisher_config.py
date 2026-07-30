@@ -1,6 +1,11 @@
 import pytest
 
-from src.utils.config import BraidPublisherConfig, CameraConfig, TriggerHandlerConfig, ZMQConfig
+from src.utils.config import (
+    BraidPublisherConfig,
+    CameraConfig,
+    TriggerHandlerConfig,
+    ZMQConfig,
+)
 
 
 def _camera():
@@ -16,7 +21,9 @@ def _zmq():
 
 
 def _trigger_handler():
-    return TriggerHandlerConfig.from_section({"zone_timeout": 3.0}, camera=_camera(), zmq=_zmq())
+    return TriggerHandlerConfig.from_section(
+        {"zone_timeout": 3.0}, camera=_camera(), zmq=_zmq()
+    )
 
 
 def test_from_section_builds_expected_fields():
@@ -39,7 +46,9 @@ def test_from_section_builds_expected_fields():
 
 
 def test_from_section_defaults():
-    cfg = BraidPublisherConfig.from_section({}, zmq=_zmq(), trigger_handler=_trigger_handler())
+    cfg = BraidPublisherConfig.from_section(
+        {}, zmq=_zmq(), trigger_handler=_trigger_handler()
+    )
     assert cfg.host == "127.0.0.1"
     assert cfg.experiments_path == "/mnt/data/experiments/"
 
@@ -52,6 +61,8 @@ def test_from_section_non_positive_timeout_raises():
 
 
 def test_frozen_instance_cannot_be_mutated():
-    cfg = BraidPublisherConfig.from_section({}, zmq=_zmq(), trigger_handler=_trigger_handler())
+    cfg = BraidPublisherConfig.from_section(
+        {}, zmq=_zmq(), trigger_handler=_trigger_handler()
+    )
     with pytest.raises(Exception):
         cfg.host = "somewhere-else"

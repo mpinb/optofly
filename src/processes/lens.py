@@ -185,6 +185,7 @@ class LiquidLens(WorkerProcess):
         self.is_running = False
         self.is_tracking = False
         self.current_tracked_obj = None
+        self._trial_count = 0
         self.braid_folder = braid_folder
         self.video_folder = video_folder
         self.csv_writer = None
@@ -338,7 +339,7 @@ class LiquidLens(WorkerProcess):
                 writer.writeheader()
                 writer.writerows(self._timing_rows)
             delays = [r["delay_ms"] for r in self._timing_rows]
-            self.logger.info(
+            self.logger.debug(
                 f"Lens timing CSV written: {csv_path} ({len(delays)} rows, "
                 f"mean delay={statistics.mean(delays):.2f} ms, "
                 f"max delay={max(delays):.2f} ms)"
@@ -401,7 +402,12 @@ class LiquidLens(WorkerProcess):
             if topic == self.zmq_config.zone_enter_topic and not self.is_tracking:
                 obj_id = msg.get("obj_id")
                 if obj_id is not None:
-                    self.logger.info(f"ZONE_ENTER: start tracking object {obj_id}")
+                    self._trial_count += 1
+                    self.logger.info(
+                        "[#%d obj=%d] start tracking",
+                        self._trial_count,
+                        obj_id,
+                    )
                     self.is_tracking = True
                     self.current_tracked_obj = obj_id
                     self._log_csv("zone_enter", obj_id=obj_id)
@@ -432,7 +438,10 @@ class LiquidLens(WorkerProcess):
                 if msg.get("obj_id") == self.current_tracked_obj:
                     reason = msg.get("reason", "unknown")
                     self.logger.info(
-                        f"ZONE_EXIT: stop tracking object {self.current_tracked_obj} reason={reason}"
+                        "[#%d obj=%d] stop tracking (reason=%s)",
+                        self._trial_count,
+                        self.current_tracked_obj,
+                        reason,
                     )
                     self._log_csv(
                         "zone_exit",

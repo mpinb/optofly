@@ -126,7 +126,9 @@ class OptoTrigger:
             self.logger.error(f"Failed to initialize OptoTrigger: {e}")
             return False
 
-    def trigger(self, sham: Optional[bool] = None) -> tuple[bool, bool, Optional[float]]:
+    def trigger(
+        self, sham: Optional[bool] = None
+    ) -> tuple[bool, bool, Optional[float]]:
         """
         Send trigger command to the Arduino.
 
@@ -492,7 +494,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     configure_process_logging(
-        None, "OptoTriggerCLI", "RED", level=getattr(logging, args.log_level.upper(), logging.INFO)
+        None,
+        "OptoTriggerCLI",
+        "RED",
+        level=getattr(logging, args.log_level.upper(), logging.INFO),
     )
 
     with OptoTrigger(config_path=args.config) as trigger:

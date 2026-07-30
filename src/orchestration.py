@@ -243,7 +243,9 @@ class Experiment:
 
         _copy_config_to_braid_folder(config_path, braid_folder)
         if app_config.visual_stimuli.active:
-            _copy_config_to_braid_folder(app_config.visual_stimuli.config_file, braid_folder)
+            _copy_config_to_braid_folder(
+                app_config.visual_stimuli.config_file, braid_folder
+            )
 
         log_path = str(Path(braid_folder) / "optofly.log")
         self._log_path = log_path
@@ -283,7 +285,9 @@ class Experiment:
             print("  ✓ LiquidLens")
         print("  ✓ OptoTriggerWorker")
         if app_config.camera.active:
-            print(f"\nCamera: {app_config.camera.resolution[0]}×{app_config.camera.resolution[1]} @ {app_config.camera.fps}fps")
+            print(
+                f"\nCamera: {app_config.camera.resolution[0]}×{app_config.camera.resolution[1]} @ {app_config.camera.fps}fps"
+            )
         if app_config.camera.active:
             predictor = app_config.liquid_lens.predictor
             lens_detail = f"diopter, {predictor} predictor"
@@ -294,7 +298,9 @@ class Experiment:
             dur = app_config.opto_trigger.duration
             if isinstance(dur, list):
                 dur = f"[{', '.join(str(d) for d in dur)}]"
-            print(f"\nOpto Trigger: {app_config.opto_trigger.color}, {app_config.opto_trigger.intensity}/255, {dur}ms")
+            print(
+                f"\nOpto Trigger: {app_config.opto_trigger.color}, {app_config.opto_trigger.intensity}/255, {dur}ms"
+            )
         if app_config.visual_stimuli.active:
             enabled_stimuli = []
             try:
@@ -328,8 +334,11 @@ class Experiment:
         time.sleep(0.5)
 
         latency_logger = LatencyLogger(
-            config_path=config_path, event=stop_event, braid_folder=braid_folder,
-            log_path=log_path, log_level=log_level_str,
+            config_path=config_path,
+            event=stop_event,
+            braid_folder=braid_folder,
+            log_path=log_path,
+            log_level=log_level_str,
         )
         latency_logger.start()
         self._processes.append(("LatencyLogger", latency_logger))

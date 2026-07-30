@@ -122,6 +122,8 @@ def test_from_path_returns_the_same_section_as_app_config(cls, app_config):
 
 
 def test_app_config_is_constructible_from_its_declared_fields(app_config):
-    values = {f.name: getattr(app_config, f.name) for f in dataclasses.fields(AppConfig)}
+    values = {
+        f.name: getattr(app_config, f.name) for f in dataclasses.fields(AppConfig)
+    }
 
     assert AppConfig(**values) == app_config

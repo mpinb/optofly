@@ -25,7 +25,10 @@ def _simulate_measurements(true_offset_rad: float, true_flip: bool):
     for world_rad in _WORLD_RAD.values():
         # Invert world = (atan2(y,x) - offset) * sign  ->  atan2(y,x) = world/sign + offset
         math_angle = world_rad * sign + true_offset_rad
-        bx, by = math.cos(math_angle), math.sin(math_angle)  # atan2(by, bx) == math_angle
+        bx, by = (
+            math.cos(math_angle),
+            math.sin(math_angle),
+        )  # atan2(by, bx) == math_angle
         measurements.append((world_rad, (bx, by)))
     return measurements
 
@@ -82,7 +85,8 @@ def test_fit_applies_correctly_to_headings_between_calibration_points(
 
         err = math.degrees(
             math.atan2(
-                math.sin(world_computed - world_true), math.cos(world_computed - world_true)
+                math.sin(world_computed - world_true),
+                math.cos(world_computed - world_true),
             )
         )
         assert err == pytest.approx(0.0, abs=1e-4), (

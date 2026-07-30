@@ -48,7 +48,7 @@ def make_publisher():
                     "zone_enter_topic": "ZONE_ENTER",
                     "zone_exit_topic": "ZONE_EXIT",
                 },
-            )()
+            )(),
         },
     )()
     pub.logger = type(
@@ -64,7 +64,9 @@ def make_publisher():
 
 
 def sent_payloads(socket):
-    return [(topic.decode("utf-8"), json.loads(payload)) for topic, payload in socket.sent]
+    return [
+        (topic.decode("utf-8"), json.loads(payload)) for topic, payload in socket.sent
+    ]
 
 
 def test_trigger_messages_set_and_clear_active_object():
@@ -227,7 +229,9 @@ def test_reentry_after_prior_trial_is_not_immediately_expired(monkeypatch):
     # value.
     pub._handle_trigger_message("ZONE_ENTER", {"obj_id": 1})
     clock["t"] = 1.0
-    pub._dispatch_event(json.dumps({"msg": {"Update": {"obj_id": 1, "x": 0, "y": 0, "z": 0}}}))
+    pub._dispatch_event(
+        json.dumps({"msg": {"Update": {"obj_id": 1, "x": 0, "y": 0, "z": 0}}})
+    )
     assert pub._active_last_seen == 1.0  # sanity: trial A's clock is real
 
     # Trial A ends without a ZONE_EXIT (e.g. tracker lost it) and, after
@@ -319,7 +323,11 @@ def test_dispatch_event_missing_trigger_timestamp_injects_none():
 
     pub._dispatch_event(
         json.dumps(
-            {"msg": {"Update": {"obj_id": 7, "frame": 12, "x": 0.1, "y": 0.2, "z": 0.3}}}
+            {
+                "msg": {
+                    "Update": {"obj_id": 7, "frame": 12, "x": 0.1, "y": 0.2, "z": 0.3}
+                }
+            }
         )
     )
 

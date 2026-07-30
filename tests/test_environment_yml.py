@@ -64,7 +64,9 @@ def test_environment_yml_names_no_package_pyproject_does_not():
     dev_only = {"pytest", "ruff", "ipython", "tomli-w", "optofly"}
     extra = _environment_packages() - _pyproject_dependencies() - dev_only
 
-    assert extra == set(), f"environment.yml declares packages pyproject does not: {sorted(extra)}"
+    assert extra == set(), (
+        f"environment.yml declares packages pyproject does not: {sorted(extra)}"
+    )
 
 
 def test_git_dependencies_are_declared_under_pip():

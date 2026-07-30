@@ -30,7 +30,9 @@ class QuietWorker(WorkerProcess):
 def test_worker_reports_its_exception_through_the_failure_queue():
     queue = mp.Queue()
     event = mp.Event()
-    worker = ExplodingWorker(event=event, process_name="LiquidLens", failure_queue=queue)
+    worker = ExplodingWorker(
+        event=event, process_name="LiquidLens", failure_queue=queue
+    )
 
     worker.start()
     worker.join(timeout=10)
@@ -72,7 +74,9 @@ class _FakeDeadProcess:
 def test_reported_reason_replaces_the_static_hint():
     """The child's own message wins over the generic hardware hint."""
     processes = [("LiquidLens", _FakeDeadProcess())]
-    reported = {"LiquidLens": "RuntimeError: calibrations/liquid_lens.csv: expected columns z, dpt"}
+    reported = {
+        "LiquidLens": "RuntimeError: calibrations/liquid_lens.csv: expected columns z, dpt"
+    }
 
     messages = orchestration._check_critical_processes_alive(
         processes, {"LiquidLens"}, reported

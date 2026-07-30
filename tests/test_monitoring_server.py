@@ -79,10 +79,14 @@ def _run_listener(monkeypatch, results, topic="ZONE_ENTER"):
     monkeypatch.setattr(server_module, "client_queues", {})
     sub = _ScriptedSubscriber(results)
     monkeypatch.setattr(
-        server_module.zmq, "Context", lambda: type("C", (), {"socket": lambda s, k: sub})()
+        server_module.zmq,
+        "Context",
+        lambda: type("C", (), {"socket": lambda s, k: sub})(),
     )
     with pytest.raises(RuntimeError, match="stop-test-loop"):
-        server_module.zmq_listener(zmq_address="tcp://localhost:9999", zone_enter_topic=topic)
+        server_module.zmq_listener(
+            zmq_address="tcp://localhost:9999", zone_enter_topic=topic
+        )
     return server_module.trigger_data
 
 
@@ -163,4 +167,7 @@ def test_api_triggers_is_json_serializable():
         response = client.get("/api/triggers")
 
     assert response.status_code == 200
-    assert response.get_json() == {"count": 2, "triggers": [{"obj_id": 1}, {"obj_id": 2}]}
+    assert response.get_json() == {
+        "count": 2,
+        "triggers": [{"obj_id": 1}, {"obj_id": 2}],
+    }

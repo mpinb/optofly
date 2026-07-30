@@ -31,8 +31,20 @@ def test_from_section_flat_fov_box():
 def test_from_section_frustum_fov():
     section = _section(
         FOV={
-            "near": {"z": 0.10, "x_min": -0.03, "x_max": 0.03, "y_min": -0.03, "y_max": 0.03},
-            "far": {"z": 0.30, "x_min": -0.06, "x_max": 0.06, "y_min": -0.06, "y_max": 0.06},
+            "near": {
+                "z": 0.10,
+                "x_min": -0.03,
+                "x_max": 0.03,
+                "y_min": -0.03,
+                "y_max": 0.03,
+            },
+            "far": {
+                "z": 0.30,
+                "x_min": -0.06,
+                "x_max": 0.06,
+                "y_min": -0.06,
+                "y_max": 0.06,
+            },
         }
     )
     cfg = CameraConfig.from_section(section)

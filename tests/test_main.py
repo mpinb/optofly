@@ -5,6 +5,18 @@ from main import (
 from src.utils.config import AppConfig
 
 
+def _configure_test_logging():
+    """Attach a stderr stream handler so pytest's capsys can capture log output."""
+    import logging
+    import sys
+
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(logging.Formatter("%(levelname)s %(name)s %(message)s"))
+    root = logging.getLogger()
+    root.handlers = [handler]
+    root.setLevel(logging.DEBUG)
+
+
 def _app_config(tmp_path, **toml_overrides):
     import tomli_w
     import tomllib
@@ -59,27 +71,33 @@ class _FakeBraidProxy:
         self.stopped = True
 
 
-def test_handle_metadata_cancellation_stops_recording_when_proxy_present(caplog):
+def test_handle_metadata_cancellation_stops_recording_when_proxy_present(capsys):
+    _configure_test_logging()
     proxy = _FakeBraidProxy()
     handle_metadata_cancellation(proxy)
     assert proxy.stopped is True
-    combined = " ".join(r.message for r in caplog.records)
+    out = capsys.readouterr()
+    combined = out.out + out.err
     assert "cancelled" in combined.lower()
     assert "stopped" in combined.lower()
 
 
-def test_handle_metadata_cancellation_no_stop_call_when_proxy_is_none(caplog):
+def test_handle_metadata_cancellation_no_stop_call_when_proxy_is_none(capsys):
+    _configure_test_logging()
     """braid_proxy is None whenever the folder already existed (recording
     was not auto-started by this run) -- must not try to stop anything."""
     handle_metadata_cancellation(None)  # must not raise
-    combined = " ".join(r.message for r in caplog.records)
+    out = capsys.readouterr()
+    combined = out.out + out.err
     assert "cancelled" in combined.lower()
 
 
-def test_handle_metadata_cancellation_stop_failure_is_reported_not_raised(caplog):
+def test_handle_metadata_cancellation_stop_failure_is_reported_not_raised(capsys):
+    _configure_test_logging()
     proxy = _FakeBraidProxy(raise_on_stop=True)
     handle_metadata_cancellation(proxy)  # must not raise
-    combined = " ".join(r.message for r in caplog.records)
+    out = capsys.readouterr()
+    combined = out.out + out.err
     assert "warning" in combined.lower()
 
 
@@ -92,7 +110,7 @@ def test_load_config_still_returns_app_config():
 
 
 def test_dead_process_summary_names_the_process_and_the_reason():
-    """"A critical process died during the run" named nothing, even though
+    """ "A critical process died during the run" named nothing, even though
     Experiment.status() already carries the reason. On a 24-hour run the
     operator comes back to a terminal holding only that sentence."""
     from main import format_critical_failures

@@ -182,9 +182,7 @@ def fit_calibration(
             _wrap(_wrap((ba - offset) * sign) - world)
             for (world, _), ba in zip(measurements, braid_angles)
         ]
-        rms_deg = math.degrees(
-            math.sqrt(sum(r**2 for r in residuals) / len(residuals))
-        )
+        rms_deg = math.degrees(math.sqrt(sum(r**2 for r in residuals) / len(residuals)))
         if best is None or rms_deg < best[2]:
             best = (offset, flip, rms_deg)
 

@@ -51,6 +51,7 @@ def _make_worker(trigger_return):
             "error": lambda *a, **k: None,
         },
     )()
+    worker._trial_count = 0
     return worker
 
 
@@ -172,9 +173,9 @@ def test_unopenable_hardware_is_survivable_when_stimulation_is_disabled(monkeypa
     worker.initialize()  # must not raise
 
     assert worker.opto_trigger is None
-    assert any(
-        "opto_trigger.active = false" in w for w in worker.logger.warnings
-    ), f"expected a warning naming the inactive flag, got {worker.logger.warnings}"
+    assert any("opto_trigger.active = false" in w for w in worker.logger.warnings), (
+        f"expected a warning naming the inactive flag, got {worker.logger.warnings}"
+    )
     assert any("/dev/opto_trigger" in w for w in worker.logger.warnings)
 
 
@@ -245,18 +246,14 @@ def test_initialize_zmq_subscribes_to_configured_opto_enter_topic_not_zone_enter
     monkeypatch,
 ):
     worker = object.__new__(OptoTriggerWorker)
-    worker.zmq_config = ZMQConfig.from_path(
-        "configs/config.example.toml"
-    )
+    worker.zmq_config = ZMQConfig.from_path("configs/config.example.toml")
     worker.logger = type(
         "Logger",
         (),
         {"debug": lambda *a, **k: None, "error": lambda *a, **k: None},
     )()
     fake_context = FakeZmqContext()
-    monkeypatch.setattr(
-        "src.processes.led.zmq.Context", lambda: fake_context
-    )
+    monkeypatch.setattr("src.processes.led.zmq.Context", lambda: fake_context)
 
     worker._initialize_zmq()
 

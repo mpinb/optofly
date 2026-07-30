@@ -64,5 +64,7 @@ def configure_process_logging(
         root.addHandler(file)
 
     effective_console = console_level if console_level is not None else level
-    effective_file = effective_file_level if effective_file_level is not None else effective_console
+    effective_file = (
+        effective_file_level if effective_file_level is not None else effective_console
+    )
     root.setLevel(min(effective_console, effective_file))

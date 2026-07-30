@@ -70,6 +70,7 @@ class VisualProcess(WorkerProcess):
         self._config_path = config_path
         self.standalone = standalone
         self.braid_folder = braid_folder
+        self._trial_count = 0
 
     def _run(self) -> None:
         cfg = self._load_config()
@@ -265,9 +266,15 @@ class VisualProcess(WorkerProcess):
     def _handle_zone_enter(self, data: dict) -> None:
         braid_rad = data.get("mean_heading", 0.0)
         world_heading = braid_to_world_heading(braid_rad, self._offset_rad, self._flip)
-        self.logger.info(
-            "VISUAL_ZONE_ENTER obj=%s world_heading=%.1f deg",
-            data.get("obj_id"),
+        obj_id = data.get("obj_id")
+        frame = data.get("frame")
+
+        self._trial_count += 1
+
+        self.logger.debug(
+            "VISUAL_ZONE_ENTER [#%d obj=%s] world_heading=%.1f deg",
+            self._trial_count,
+            obj_id,
             world_heading,
         )
 
@@ -277,6 +284,17 @@ class VisualProcess(WorkerProcess):
                 result = stim.on_trigger(world_heading, data)
                 if result:
                     stim_params.update(result)
+                    stim_name = type(stim).__name__.replace("Stimulus", "").lower()
+                    parts = ["  visual:  %s" % stim_name]
+                    extra_keys = {
+                        "looming_expansion_type": "type",
+                        "square_offset_deg": "offset",
+                    }
+                    for key, label in extra_keys.items():
+                        if key in result:
+                            parts.append("%s=%s" % (label, result[key]))
+                    parts.append("frame=%s" % frame)
+                    print(" ".join(parts))
             except Exception:
                 self.logger.exception(
                     "Error in stimulus %s on_trigger", type(stim).__name__

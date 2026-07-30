@@ -48,7 +48,11 @@ def _make_process(visual_enter_topic):
     proc.logger = type(
         "Logger",
         (),
-        {"info": lambda *a, **k: None, "exception": lambda *a, **k: None},
+        {
+            "info": lambda *a, **k: None,
+            "exception": lambda *a, **k: None,
+            "debug": lambda *a, **k: None,
+        },
     )()
     return proc
 
@@ -84,6 +88,7 @@ def test_handle_zone_enter_publishes_latency_with_sham_true_when_no_stimulus_fir
     proc._offset_rad = 0.0
     proc._flip = False
     proc._latency_socket = FakeLatencySocket()
+    proc._trial_count = 0
 
     proc._handle_zone_enter(
         {
@@ -120,9 +125,15 @@ def test_handle_zone_enter_publishes_latency_with_real_activation_when_a_stimulu
     proc._flip = False
     proc._latency_socket = FakeLatencySocket()
     monkeypatch.setattr("src.visual.process.time.time", lambda: 999.0)
+    proc._trial_count = 0
 
     proc._handle_zone_enter(
-        {"obj_id": 7, "frame": 100, "braid_timestamp": 500.0, "handler_timestamp": 500.01}
+        {
+            "obj_id": 7,
+            "frame": 100,
+            "braid_timestamp": 500.0,
+            "handler_timestamp": 500.01,
+        }
     )
 
     sent = proc._latency_socket.sent
@@ -185,9 +196,13 @@ def test_setup_zmq_configures_latency_socket_as_non_blocking():
 
 def _config_pointing_at(tmp_path, visual_stimuli_path):
     """A main config whose visual_stimuli.config_file points where we say."""
-    source = open("configs/config.example.toml").read().replace(
-        'config_file = "configs/visual_stimuli.toml"',
-        f'config_file = "{visual_stimuli_path}"',
+    source = (
+        open("configs/config.example.toml")
+        .read()
+        .replace(
+            'config_file = "configs/visual_stimuli.toml"',
+            f'config_file = "{visual_stimuli_path}"',
+        )
     )
     out = tmp_path / "config.toml"
     out.write_text(source)
@@ -220,7 +235,7 @@ def test_missing_visual_stimuli_file_fails_loudly(tmp_path):
 def test_present_visual_stimuli_file_is_loaded(tmp_path):
     stimuli = tmp_path / "visual_stimuli.toml"
     stimuli.write_text(
-        "[visual_stimuli]\nlog_file = \"stim.csv\"\n\n"
+        '[visual_stimuli]\nlog_file = "stim.csv"\n\n'
         "[visual_stimuli.looming]\nenabled = true\ninitial_size_deg = 7.5\n"
     )
     config_path = _config_pointing_at(tmp_path, stimuli)

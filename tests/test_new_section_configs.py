@@ -13,7 +13,9 @@ def test_monitoring_config_defaults():
 
 
 def test_monitoring_config_explicit():
-    cfg = MonitoringConfig.from_section({"active": True, "host": "127.0.0.1", "port": 9000})
+    cfg = MonitoringConfig.from_section(
+        {"active": True, "host": "127.0.0.1", "port": 9000}
+    )
     assert cfg.active is True
     assert cfg.port == 9000
 

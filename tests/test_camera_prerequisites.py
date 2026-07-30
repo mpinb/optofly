@@ -46,7 +46,9 @@ def test_missing_ffmpeg_reports_how_to_install_it(monkeypatch):
 
 
 def test_present_ffmpeg_reports_its_path(monkeypatch):
-    monkeypatch.setattr("src.processes.camera.shutil.which", lambda name: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        "src.processes.camera.shutil.which", lambda name: "/usr/bin/ffmpeg"
+    )
 
     result = check_camera_prerequisites(CONFIG)["ffmpeg"]
 

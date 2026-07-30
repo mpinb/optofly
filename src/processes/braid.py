@@ -59,6 +59,7 @@ def _iter_lines_quickack(response: requests.Response) -> Iterator[Optional[str]]
             except OSError:
                 raw_sock = None
 
+
 def iter_sse_events(lines: Iterable[str]) -> Iterator[tuple[Optional[str], str]]:
     """Yield complete SSE events from an iterable of decoded lines."""
     event_type: Optional[str] = None
@@ -241,7 +242,9 @@ class BraidPublisher(WorkerProcess):
             active_bind_address = self.config.zmq.get_publisher_address(
                 self.config.zmq.active_braid_port
             )
-            self.logger.debug(f"Binding active BRAID publisher to {active_bind_address}")
+            self.logger.debug(
+                f"Binding active BRAID publisher to {active_bind_address}"
+            )
             self.active_braid_socket.bind(active_bind_address)
 
             self.trigger_socket = self.zmq_context.socket(zmq.SUB)
@@ -313,7 +316,9 @@ class BraidPublisher(WorkerProcess):
                     topic_b.decode("utf-8"), json.loads(raw.decode("utf-8"))
                 )
             except Exception as e:
-                self.logger.error(f"Failed to process trigger event in BraidPublisher: {e}")
+                self.logger.error(
+                    f"Failed to process trigger event in BraidPublisher: {e}"
+                )
 
     def _dispatch_event(self, data_str: str) -> None:
         """Parse one SSE `data:` payload and forward it to ZMQ.

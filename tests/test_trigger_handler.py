@@ -464,9 +464,15 @@ def test_opto_zone_enter_does_not_refire_while_still_inside_scaled_inner_zone(ha
     # handler fixture (via configure_test_trigger) already sets
     # opto_zone_scale=0.5 / visual_zone_scale=1.0.
     handler.process_message(make_birth(x=0.08, frame=1, xvel=-0.2))
-    handler.process_message(make_update(x=0.05, frame=2, xvel=-0.2))  # ZONE_ENTER + VISUAL_ZONE_ENTER; outside the ±0.025 opto box
-    handler.process_message(make_update(x=0.0, frame=3, xvel=-0.2))  # inside the opto box -> OPTO_ZONE_ENTER fires
-    handler.process_message(make_update(x=0.01, frame=4, xvel=-0.2))  # still inside the opto box -> must not refire
+    handler.process_message(
+        make_update(x=0.05, frame=2, xvel=-0.2)
+    )  # ZONE_ENTER + VISUAL_ZONE_ENTER; outside the ±0.025 opto box
+    handler.process_message(
+        make_update(x=0.0, frame=3, xvel=-0.2)
+    )  # inside the opto box -> OPTO_ZONE_ENTER fires
+    handler.process_message(
+        make_update(x=0.01, frame=4, xvel=-0.2)
+    )  # still inside the opto box -> must not refire
 
     topics = [topic for topic, _ in all_messages(handler.publisher)]
     assert topics == ["ZONE_ENTER", "VISUAL_ZONE_ENTER", "OPTO_ZONE_ENTER"]
@@ -645,7 +651,15 @@ def test_malformed_update_for_unknown_object_names_the_missing_field(monkeypatch
 
     # 'zvel' is genuinely absent; obj_id is present.
     handler._process_update(
-        {"obj_id": 3, "frame": 1, "x": 0.0, "y": 0.0, "z": 0.1, "xvel": 0.0, "yvel": 0.0}
+        {
+            "obj_id": 3,
+            "frame": 1,
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.1,
+            "xvel": 0.0,
+            "yvel": 0.0,
+        }
     )
 
     errors = handler.logger.errors
@@ -653,7 +667,9 @@ def test_malformed_update_for_unknown_object_names_the_missing_field(monkeypatch
         f"one failure must produce one message, not a real one followed by a "
         f"spurious 'Missing field in Update message: 3': {errors}"
     )
-    assert "zvel" in errors[0], f"must name the field that is actually missing: {errors}"
+    assert "zvel" in errors[0], (
+        f"must name the field that is actually missing: {errors}"
+    )
     assert "Birth" in errors[0], f"must name the message that actually failed: {errors}"
     assert 3 not in handler.tracked_objects
 

@@ -82,9 +82,7 @@ def test_sham_row_gets_blank_activation_and_latency():
 def test_missing_activation_timestamp_on_non_sham_row_leaves_latency_blank():
     logger = _make_logger()
 
-    logger._handle_message(
-        json.dumps(_msg(activation_timestamp=None)).encode("utf-8")
-    )
+    logger._handle_message(json.dumps(_msg(activation_timestamp=None)).encode("utf-8"))
 
     row = logger.csv_writer.rows[0]
     assert row["latency_ms"] is None

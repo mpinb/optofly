@@ -125,9 +125,7 @@ def test_trigger_returns_activation_timestamp_immediately_after_serial_write(
 ):
     trigger = _make_trigger_for_write_test()
     monkeypatch.setattr(random, "random", lambda: 1.0)  # never sham
-    monkeypatch.setattr(
-        "src.hardware.led.time.time", lambda: 42.0
-    )
+    monkeypatch.setattr("src.hardware.led.time.time", lambda: 42.0)
 
     success, was_sham, activation_timestamp = trigger.trigger(sham=None)
 

@@ -166,7 +166,12 @@ class LoomingStimulus(BaseStimulus):
             "looming_lv_ratio_ms": self._lv_ratio_ms,
         }
         if self._rng.random() < self._sham_prob:
-            return {**base, "looming_sham": True, "looming_stimulus_heading_deg": None, "looming_offset_deg": None}
+            return {
+                **base,
+                "looming_sham": True,
+                "looming_stimulus_heading_deg": None,
+                "looming_offset_deg": None,
+            }
 
         offset_deg = self._balancer.next()
         self._stimulus_heading = heading_deg + offset_deg
@@ -179,7 +184,12 @@ class LoomingStimulus(BaseStimulus):
             color=self._color,
             distance_cm=self._disk_distance_cm,
         )
-        return {**base, "looming_sham": False, "looming_stimulus_heading_deg": self._stimulus_heading, "looming_offset_deg": offset_deg}
+        return {
+            **base,
+            "looming_sham": False,
+            "looming_stimulus_heading_deg": self._stimulus_heading,
+            "looming_offset_deg": offset_deg,
+        }
 
     def update(self, dt: float) -> None:
         if self._state == _State.IDLE or self._disk is None:

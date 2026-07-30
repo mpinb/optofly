@@ -158,7 +158,9 @@ class TriggerHandlerConfig:
         )
 
     @classmethod
-    def from_path(cls, config_path: str = "configs/config.toml") -> "TriggerHandlerConfig":
+    def from_path(
+        cls, config_path: str = "configs/config.toml"
+    ) -> "TriggerHandlerConfig":
         return AppConfig.load(config_path).trigger_handler
 
 
@@ -198,7 +200,7 @@ class LiquidLensConfig:
         except KeyError:
             raise ValueError(
                 "Missing required config key: liquid_lens.port\n"
-                "  Example: port = \"/dev/optotune_icc1c\""
+                '  Example: port = "/dev/optotune_icc1c"'
             )
 
         calibration_model = section.get("calibration_model", "quadratic")
@@ -219,7 +221,9 @@ class LiquidLensConfig:
         return cls(
             port=port,
             mode=section.get("mode", "diopter"),
-            calibration_file=section.get("calibration_file", "calibrations/liquid_lens.csv"),
+            calibration_file=section.get(
+                "calibration_file", "calibrations/liquid_lens.csv"
+            ),
             calibration_model=calibration_model,
             max_diopter_step=float(section.get("max_diopter_step", 0.0)),
             zone_timeout=trigger_handler.zone_timeout,
@@ -370,7 +374,9 @@ class BraidPublisherConfig:
         )
 
     @classmethod
-    def from_path(cls, config_path: str = "configs/config.toml") -> "BraidPublisherConfig":
+    def from_path(
+        cls, config_path: str = "configs/config.toml"
+    ) -> "BraidPublisherConfig":
         return AppConfig.load(config_path).braid_publisher
 
     def __str__(self) -> str:
@@ -414,12 +420,16 @@ class OptoTriggerConfig:
         except KeyError:
             raise ValueError(
                 "Missing required config key: opto_trigger.port\n"
-                "  Example: port = \"/dev/opto_trigger\""
+                '  Example: port = "/dev/opto_trigger"'
             )
 
         duration_options = cls._parse_parameter(section.get("duration", 0), "duration")
-        intensity_options = cls._parse_parameter(section.get("intensity", 0), "intensity")
-        frequency_options = cls._parse_parameter(section.get("frequency", 0), "frequency")
+        intensity_options = cls._parse_parameter(
+            section.get("intensity", 0), "intensity"
+        )
+        frequency_options = cls._parse_parameter(
+            section.get("frequency", 0), "frequency"
+        )
 
         sham_probability = float(section.get("sham_probability", 0.0))
         if not (0.0 <= sham_probability <= 1.0):
@@ -681,7 +691,9 @@ class VisualStimuliConfig:
         )
 
     @classmethod
-    def from_path(cls, config_path: str = "configs/config.toml") -> "VisualStimuliConfig":
+    def from_path(
+        cls, config_path: str = "configs/config.toml"
+    ) -> "VisualStimuliConfig":
         return AppConfig.load(config_path).visual_stimuli
 
 
@@ -719,7 +731,9 @@ class AppConfig:
                 zmq=zmq,
             )
             braid_publisher = BraidPublisherConfig.from_section(
-                data.get("braid_publisher", {}), zmq=zmq, trigger_handler=trigger_handler
+                data.get("braid_publisher", {}),
+                zmq=zmq,
+                trigger_handler=trigger_handler,
             )
             opto_trigger = OptoTriggerConfig.from_section(
                 _required_section(data, "opto_trigger", config_path)

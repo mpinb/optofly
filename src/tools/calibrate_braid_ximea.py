@@ -333,7 +333,9 @@ def _draw_overlay(
         for i, (px, py) in enumerate(points[ph]):
             u, v = int(round(px)), int(round(py))
             cv2.drawMarker(vis, (u, v), color, cv2.MARKER_CROSS, 14, 2)
-            cv2.putText(vis, f"{i + 1}", (u + 8, v - 6), _FONT, 0.38, color, 1, cv2.LINE_AA)
+            cv2.putText(
+                vis, f"{i + 1}", (u + 8, v - 6), _FONT, 0.38, color, 1, cv2.LINE_AA
+            )
 
     # Live detected spot
     if detected_spot is not None:
@@ -346,10 +348,12 @@ def _draw_overlay(
     lines: list[tuple[str, tuple]] = []
 
     if braid_pos:
-        lines.append((
-            f"Braid: ({braid_pos[0]:.3f}, {braid_pos[1]:.3f}, {braid_pos[2]:.3f})",
-            _WHITE,
-        ))
+        lines.append(
+            (
+                f"Braid: ({braid_pos[0]:.3f}, {braid_pos[1]:.3f}, {braid_pos[2]:.3f})",
+                _WHITE,
+            )
+        )
     else:
         lines.append(("Braid: no fix", _WHITE))
 
@@ -365,16 +369,20 @@ def _draw_overlay(
     if current_pts and not phase_done[phase]:
         xs = [p[0] for p in current_pts]
         ys = [p[1] for p in current_pts]
-        lines.append((
-            f"  x [{min(xs):.4f}, {max(xs):.4f}]"
-            f"  ({(max(xs) - min(xs)) * 1000:.1f} mm)",
-            _CYAN,
-        ))
-        lines.append((
-            f"  y [{min(ys):.4f}, {max(ys):.4f}]"
-            f"  ({(max(ys) - min(ys)) * 1000:.1f} mm)",
-            _CYAN,
-        ))
+        lines.append(
+            (
+                f"  x [{min(xs):.4f}, {max(xs):.4f}]"
+                f"  ({(max(xs) - min(xs)) * 1000:.1f} mm)",
+                _CYAN,
+            )
+        )
+        lines.append(
+            (
+                f"  y [{min(ys):.4f}, {max(ys):.4f}]"
+                f"  ({(max(ys) - min(ys)) * 1000:.1f} mm)",
+                _CYAN,
+            )
+        )
 
     for i, (line, color) in enumerate(lines):
         cv2.putText(vis, line, (10, 28 + i * 22), _FONT, 0.50, color, 1, cv2.LINE_AA)
@@ -387,7 +395,9 @@ def _draw_overlay(
     else:
         need = max(0, _MIN_POINTS - len(current_pts))
         need_str = f"need {need} more | " if need > 0 else ""
-        help_text = f"SPACE/CLICK: add pt | {need_str}n: finalize plane | u: undo | q: quit"
+        help_text = (
+            f"SPACE/CLICK: add pt | {need_str}n: finalize plane | u: undo | q: quit"
+        )
 
     cv2.putText(vis, help_text, (10, h - 10), _FONT, 0.45, _YELLOW, 1, cv2.LINE_AA)
     return vis
@@ -416,7 +426,9 @@ def main() -> None:
     # --- Lens ---
     try:
         lens_cfg = LiquidLensConfig.from_path(args.config)
-        lens_cal = setup_lens_calibration(lens_cfg.calibration_file, lens_cfg.calibration_model)
+        lens_cal = setup_lens_calibration(
+            lens_cfg.calibration_file, lens_cfg.calibration_model
+        )
         lens = LensDriver(lens_cfg.port)
         lens.to_focal_power_mode()
         print(f"  Lens opened on {lens_cfg.port}")
@@ -452,7 +464,7 @@ def main() -> None:
 
     # State: points[0] = plane-1 Braid (x,y) list, points[1] = plane-2
     points: list[list[tuple[float, float]]] = [[], []]
-    z_values: list[list[float]] = [[], []]   # Braid z per recorded point, per phase
+    z_values: list[list[float]] = [[], []]  # Braid z per recorded point, per phase
     plane_z: list[float | None] = [None, None]
     phase_done: list[bool] = [False, False]
     phase = 0
@@ -523,7 +535,13 @@ def main() -> None:
                     _record_point(float(u), float(v))
 
             vis = _draw_overlay(
-                frame, phase, phase_done, points, plane_z, tracker.position, detected_spot
+                frame,
+                phase,
+                phase_done,
+                points,
+                plane_z,
+                tracker.position,
+                detected_spot,
             )
             cv2.imshow(window_name, vis)
             key = cv2.waitKey(30) & 0xFF
@@ -534,7 +552,9 @@ def main() -> None:
 
             elif key == ord(" "):
                 if phase_done[phase]:
-                    print("  This plane is finalised. Press 's' to save or 'a' to add a plane.")
+                    print(
+                        "  This plane is finalised. Press 's' to save or 'a' to add a plane."
+                    )
                 elif detected_spot is not None:
                     _record_point(detected_spot[0], detected_spot[1])
                 else:
@@ -546,15 +566,21 @@ def main() -> None:
                 if points[phase] and not phase_done[phase]:
                     removed_xy = points[phase].pop()
                     z_values[phase].pop()
-                    print(f"  Undid point: Braid ({removed_xy[0]:.4f}, {removed_xy[1]:.4f})")
+                    print(
+                        f"  Undid point: Braid ({removed_xy[0]:.4f}, {removed_xy[1]:.4f})"
+                    )
                 elif phase_done[phase]:
-                    print("  Plane already finalised — cannot undo. Start over with 'q'.")
+                    print(
+                        "  Plane already finalised — cannot undo. Start over with 'q'."
+                    )
                 else:
                     print("  Nothing to undo")
 
             elif key == ord("n"):
                 if phase_done[phase]:
-                    print("  Already finalised. Press 's' to save or 'a' to add a plane.")
+                    print(
+                        "  Already finalised. Press 's' to save or 'a' to add a plane."
+                    )
                 elif _finalise_plane():
                     phase_done[phase] = True
                     if phase == 0:

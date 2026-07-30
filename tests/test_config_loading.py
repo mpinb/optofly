@@ -3,7 +3,12 @@ import tomllib
 import pytest
 
 from src.utils import config as config_module
-from src.utils.config import CameraConfig, LiquidLensConfig, TriggerHandlerConfig, ZMQConfig
+from src.utils.config import (
+    CameraConfig,
+    LiquidLensConfig,
+    TriggerHandlerConfig,
+    ZMQConfig,
+)
 
 
 @pytest.fixture(autouse=True)

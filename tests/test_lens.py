@@ -66,9 +66,9 @@ def test_zone_enter_payload_becomes_pending_first_update(lens):
         [
             [
                 b"ZONE_ENTER",
-                json.dumps({"obj_id": 7, "frame": 12, "x": 0.1, "y": 0.2, "z": 0.3}).encode(
-                    "utf-8"
-                ),
+                json.dumps(
+                    {"obj_id": 7, "frame": 12, "x": 0.1, "y": 0.2, "z": 0.3}
+                ).encode("utf-8"),
             ]
         ]
     )

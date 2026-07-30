@@ -285,6 +285,7 @@ class TriggerHandler(WorkerProcess):
 
         # Count of ZONE_ENTER events emitted this run
         self._zone_enter_count = 0
+        self._trial_count = 0
 
         # ZMQ connections
         self.context = None
@@ -495,7 +496,9 @@ class TriggerHandler(WorkerProcess):
         except Exception as e:
             self.logger.error(f"Error processing Death message: {e}")
 
-    def _evaluate_zone_transitions(self, tracked_obj: TrackedObject, now: float) -> None:
+    def _evaluate_zone_transitions(
+        self, tracked_obj: TrackedObject, now: float
+    ) -> None:
         """
         Evaluate zone enter/exit transitions for a tracked object.
 
@@ -607,28 +610,45 @@ class TriggerHandler(WorkerProcess):
             self.publisher.send_multipart([topic, message.encode("utf-8")])
             self._last_zone_enter_time = now
             self._zone_enter_count += 1
-            self.logger.info(
-                f"ZONE_ENTER #{self._zone_enter_count} obj={tracked_obj.obj_id} "
-                f"pos=({tracked_obj.current_x:.3f}, {tracked_obj.current_y:.3f}, {tracked_obj.current_z:.3f})"
+            self._trial_count += 1
+            print(f"\n── Trial #{self._trial_count} obj={tracked_obj.obj_id} ──")
+            self.logger.debug(
+                "ZONE_ENTER [#%d obj=%d] pos=(%.3f, %.3f, %.3f)",
+                self._trial_count,
+                tracked_obj.obj_id,
+                tracked_obj.current_x,
+                tracked_obj.current_y,
+                tracked_obj.current_z,
             )
         except Exception as e:
-            self.logger.error(f"Error sending ZONE_ENTER: {e}")
+            self.logger.error("Error sending ZONE_ENTER: %s", e)
 
-    def _send_scaled_zone_enter(self, tracked_obj: TrackedObject, now: float, topic: str) -> None:
+    def _send_scaled_zone_enter(
+        self, tracked_obj: TrackedObject, now: float, topic: str
+    ) -> None:
         """Emit an opto/visual inner-zone entry event. Same payload shape as
         ZONE_ENTER (built via _build_trigger_payload)."""
         try:
             message_data = self._build_trigger_payload(tracked_obj, now)
             message = json.dumps(message_data)
-            self.publisher.send_multipart([topic.encode("utf-8"), message.encode("utf-8")])
-            self.logger.info(
-                f"{topic} obj={tracked_obj.obj_id} pos=({tracked_obj.current_x:.3f}, "
-                f"{tracked_obj.current_y:.3f}, {tracked_obj.current_z:.3f})"
+            self.publisher.send_multipart(
+                [topic.encode("utf-8"), message.encode("utf-8")]
+            )
+            self.logger.debug(
+                "%s [#%d obj=%d] pos=(%.3f, %.3f, %.3f)",
+                topic,
+                self._trial_count,
+                tracked_obj.obj_id,
+                tracked_obj.current_x,
+                tracked_obj.current_y,
+                tracked_obj.current_z,
             )
         except Exception as e:
-            self.logger.error(f"Error sending {topic}: {e}")
+            self.logger.error("Error sending %s: %s", topic, e)
 
-    def _send_zone_exit(self, tracked_obj: TrackedObject, reason: str, now: float | None = None) -> None:
+    def _send_zone_exit(
+        self, tracked_obj: TrackedObject, reason: str, now: float | None = None
+    ) -> None:
         """Emit a ZONE_EXIT event."""
         try:
             if now is None:
@@ -648,9 +668,13 @@ class TriggerHandler(WorkerProcess):
             message = json.dumps(message_data)
             topic = self.config.zmq.zone_exit_topic.encode("utf-8")
             self.publisher.send_multipart([topic, message.encode("utf-8")])
-            self.logger.info(
-                f"ZONE_EXIT obj={tracked_obj.obj_id} reason={reason} "
-                f"duration={duration:.2f}s"
+            print(f"── Trial #{self._trial_count} end (duration={duration:.2f}s) ──")
+            self.logger.debug(
+                "ZONE_EXIT [#%d obj=%d] reason=%s duration=%.2fs",
+                self._trial_count,
+                tracked_obj.obj_id,
+                reason,
+                duration,
             )
         except Exception as e:
             self.logger.error(f"Error sending ZONE_EXIT: {e}")
@@ -710,14 +734,18 @@ class TriggerHandler(WorkerProcess):
 
                 # Periodically clean up stale objects
                 current_time = time.time()
-                if _should_run_cleanup(self.tracked_objects, current_time - cleanup_timer):
+                if _should_run_cleanup(
+                    self.tracked_objects, current_time - cleanup_timer
+                ):
                     self._cleanup_stale_objects()
                     cleanup_timer = current_time
 
         except KeyboardInterrupt:
             pass
 
-        self.logger.info(f"Stopping TriggerHandler ({self._zone_enter_count} trigger(s) this run)")
+        self.logger.info(
+            "Stopping TriggerHandler (%d trigger(s) this run)", self._trial_count
+        )
         self._cleanup()
 
     def _cleanup(self) -> None:

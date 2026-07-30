@@ -35,7 +35,9 @@ def load_config(config_path: str) -> AppConfig:
         return AppConfig.load(config_path)
     except FileNotFoundError:
         logger.error("Config file not found: %s", config_path)
-        logger.error("  Create it with: cp configs/config.example.toml configs/config.toml")
+        logger.error(
+            "  Create it with: cp configs/config.example.toml configs/config.toml"
+        )
         sys.exit(1)
     except tomllib.TOMLDecodeError as e:
         logger.error("%s is not valid TOML.", config_path)
