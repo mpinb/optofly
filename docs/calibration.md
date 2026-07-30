@@ -42,7 +42,7 @@ Maps fly z-position (meters) to lens focal power (diopters) so the lens tracks f
 
 ### Prerequisites
 
-- Lens connected and serial port confirmed (required `port` key in `[liquid_lens]`; the example config uses the udev symlink `/dev/optotune_ld` — see the udev comments in `configs/config.example.toml`)
+- Lens connected and serial port confirmed (required `port` key in `[liquid_lens]`; the example config uses the udev symlink `/dev/optotune_icc1c` — see the udev comments in `configs/config.example.toml`)
 - Braid running with a tracked object visible
 - OptoFly environment activated
 
@@ -50,11 +50,11 @@ Maps fly z-position (meters) to lens focal power (diopters) so the lens tracks f
 
 1. Place a target at a known height in the arena and note its z-coordinate from Braid.
 
-2. Connect to the lens and switch to focal power mode:
+2. Connect to the controller and switch to focal power mode:
 
    ```python
-   from optotune_lens import Lens
-   lens = Lens(port="/dev/optotune_ld")
+   from optotune_lens import ICC1C
+   lens = ICC1C(port="/dev/optotune_icc1c")
    lens.to_focal_power_mode()
    ```
 
@@ -83,7 +83,7 @@ Point to the calibration file and choose a model in `configs/config.toml`:
 
 ```toml
 [liquid_lens]
-port = "/dev/optotune_ld"
+port = "/dev/optotune_icc1c"
 calibration_file = "calibrations/liquid_lens.csv"
 calibration_model = "quadratic"   # linear | quadratic | power | inverse
 ```
@@ -140,8 +140,8 @@ It reads every `*_lens_timing.csv` in the folder and prints percentile breakdown
 
 ### Troubleshooting
 
-- **Serial port not found**: confirm the symlink with `ls -l /dev/optotune_ld` (or find the raw device with `ls -l /dev/ttyUSB*`); check permissions, e.g. `sudo chmod 666 /dev/ttyUSB1` on the underlying device
-- **Lens not responding**: verify the handshake by running `Lens` interactively with `debug=True`
+- **Serial port not found**: confirm the symlink with `ls -l /dev/optotune_icc1c` (or find the raw device with `ls -l /dev/ttyUSB*`); check permissions, e.g. `sudo chmod 666 /dev/ttyUSB1` on the underlying device
+- **Lens not responding**: verify the handshake by running `ICC1C` interactively with `debug=True`
 - **Poor focus across z-range**: add more calibration points, especially at the extremes
 
 ---

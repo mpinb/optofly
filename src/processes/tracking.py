@@ -236,6 +236,7 @@ class TriggerHandler(WorkerProcess):
         log_level: str = "INFO",
         log_color: str = "MAGENTA",
         log_path: str | None = None,
+        failure_queue=None,
     ):
         super().__init__(
             event=event,
@@ -243,6 +244,7 @@ class TriggerHandler(WorkerProcess):
             log_level=log_level,
             log_color=log_color,
             process_name=process_name,
+            failure_queue=failure_queue,
         )
 
         self.config = TriggerHandlerConfig.from_path(config_path)

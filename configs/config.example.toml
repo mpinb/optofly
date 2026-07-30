@@ -145,11 +145,14 @@ sham_probability = 0.0           # Probability of sham trials (0.0-1.0)
 # AppConfig.load() validates every section on every load regardless of any
 # other section's active flag, so this key must stay present (even as a
 # placeholder) or config loading fails for the whole file.
-# 'port' must be a udev symlink pointing to the Optotune LD lens controller.
-# Create /etc/udev/rules.d/99-optofly.rules with a line like:
-#   SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", SYMLINK+="optotune_ld"
+# 'port' must be a udev symlink pointing to the Optotune ICC-1C controller.
+# Create /etc/udev/rules.d/99-optotune-icc1c.rules with a line like:
+#   SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="a31e", ATTRS{serial}=="<your unit's serial>", SYMLINK+="optotune_icc1c", MODE="0660", GROUP="dialout"
+# idVendor/idProduct above are confirmed from a real ICC-1C unit; the serial
+# is per-unit -- check yours with `udevadm info -a -n /dev/ttyACM0` (or see
+# it in `lsusb`) rather than reusing the one above.
 # Then reload: sudo udevadm control --reload && sudo udevadm trigger
-port = "/dev/optotune_ld"
+port = "/dev/optotune_icc1c"
 mode = "diopter"
 calibration_file = "calibrations/liquid_lens.csv"
 

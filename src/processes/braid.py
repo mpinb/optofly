@@ -108,6 +108,7 @@ class BraidPublisher(WorkerProcess):
         log_level: str = "INFO",
         log_color: str = "GREEN",
         log_path: str | None = None,
+        failure_queue=None,
     ):
         """
         Initialize the BraidPublisher.
@@ -119,6 +120,7 @@ class BraidPublisher(WorkerProcess):
             log_color: Color for log messages
             process_name: Name to display in logs
             log_path: Path to shared log file (written from child process)
+            failure_queue: Optional mp.Queue for reporting crash reasons to the parent
         """
         # Pass parameters to parent class
         super().__init__(
@@ -127,6 +129,7 @@ class BraidPublisher(WorkerProcess):
             log_level=log_level,
             log_color=log_color,
             process_name=process_name,
+            failure_queue=failure_queue,
         )
 
         # Initialize our specific attributes

@@ -189,11 +189,16 @@ class LiquidLensConfig:
         camera: "CameraConfig",
         zmq: "ZMQConfig",
     ) -> "LiquidLensConfig":
+        # Hardware configuration.
+        # Serial port for the Optotune ICC-1C controller (see the udev rule
+        # in configs/config.example.toml -- its idVendor/idProduct are TBD
+        # until real hardware is on hand to check).
         try:
             port = section["port"]
         except KeyError:
             raise ValueError(
-                'Missing required config key: liquid_lens.port\n  Example: port = "/dev/optotune_ld"'
+                "Missing required config key: liquid_lens.port\n"
+                "  Example: port = \"/dev/optotune_icc1c\""
             )
 
         calibration_model = section.get("calibration_model", "quadratic")
