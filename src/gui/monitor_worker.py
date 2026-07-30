@@ -72,7 +72,7 @@ def monitor_loop(
 def start_monitor_thread(
     config_path: str, experiment: Experiment, state: MonitorState, stop_event: threading.Event
 ) -> threading.Thread:
-    zmq_config = ZMQConfig(config_path)
+    zmq_config = ZMQConfig.from_path(config_path)
     thread = threading.Thread(
         target=monitor_loop, args=(zmq_config, experiment, state, stop_event), daemon=True
     )
