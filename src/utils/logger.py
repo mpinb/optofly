@@ -33,8 +33,15 @@ def configure_process_logging(
     process_name: str,
     color: str | None = None,
     level: int = logging.INFO,
+    console_level: int | None = None,
+    file_level: int | None = None,
 ) -> None:
-    """Configure the root logger for a process. Call once at process entry."""
+    """Configure the root logger for a process. Call once at process entry.
+
+    console_level / file_level override `level` for their respective handlers.
+    When both are None (the default), both handlers share `level` — backward
+    compatible with every existing caller.
+    """
     root = logging.getLogger()
     for h in list(root.handlers):
         root.removeHandler(h)
@@ -44,12 +51,18 @@ def configure_process_logging(
     color_code = COLORS.get((color or "WHITE").upper(), COLORS["WHITE"])
     stream = logging.StreamHandler(sys.stdout)
     stream.setFormatter(ColoredFormatter(process_name, color_code))
+    stream.setLevel(console_level if console_level is not None else level)
     root.addHandler(stream)
 
+    effective_file_level: int | None = None
     if log_path:
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
         file = logging.FileHandler(log_path, mode="a")
         file.setFormatter(logging.Formatter(_FMT, _DATEFMT))
+        effective_file_level = file_level if file_level is not None else level
+        file.setLevel(effective_file_level)
         root.addHandler(file)
 
-    root.setLevel(level)
+    effective_console = console_level if console_level is not None else level
+    effective_file = effective_file_level if effective_file_level is not None else effective_console
+    root.setLevel(min(effective_console, effective_file))

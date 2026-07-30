@@ -10,6 +10,7 @@ class WorkerProcess(Process):
         event: Event,
         log_path: str | None = None,
         log_level: str = "INFO",
+        file_log_level: str = "DEBUG",
         log_color: str | None = None,
         process_name: str = "WorkerProcess",
         failure_queue=None,
@@ -27,6 +28,7 @@ class WorkerProcess(Process):
         self.event = event
         self.log_path = log_path
         self.log_level = log_level
+        self.file_log_level = file_log_level
         self.log_color = log_color
         self.process_name = process_name
         self.failure_queue = failure_queue
@@ -45,6 +47,8 @@ class WorkerProcess(Process):
             self.process_name,
             self.log_color,
             level=getattr(logging, self.log_level.upper(), logging.INFO),
+            console_level=getattr(logging, self.log_level.upper(), logging.INFO),
+            file_level=getattr(logging, self.file_log_level.upper(), logging.DEBUG),
         )
         self.logger = logging.getLogger(self.__class__.__module__)
         try:
