@@ -108,7 +108,7 @@ Manually finding "in focus" by eye is slow and subjective. The [`liquid-lens-cal
 This tool lives in a separate repository, [`liquid-lens-calibration`](https://github.com/elhananby/liquid-lens-calibration), not inside OptoFly. Clone it, point it at the reconstructor XML from step 2 above, and run it from its own project directory:
 
 ```bash
-git clone https://github.com/elhananby/liquid-lens-calibration.git
+git clone https://github.com/mpinb/liquid-lens-calibration.git
 cd liquid-lens-calibration
 uv sync
 uv run lens-calibrate --calibration /path/to/calibration_charuco.xml
