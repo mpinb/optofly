@@ -2,7 +2,7 @@
 # OPTOFLY CONFIGURATION
 # ==============================================================================
 # Main configuration file for the OptoFly closed-loop optogenetics system
-# Documentation: https://github.com/elhananby/optofly
+# Documentation: https://github.com/mpinb/optofly
 
 # ==============================================================================
 # SYSTEM CONFIGURATION

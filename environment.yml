@@ -37,4 +37,4 @@ dependencies:
       # Git installs -- conda cannot express these. optotune-lens is fetched
       # over SSH, so `mamba env create` needs a key with access to that repo.
       - ximea @ git+https://github.com/elhananby/ximea-py.git
-      - optotune-lens @ git+ssh://git@github.com/elhananby/optotune-lens.git
+      - optotune-lens @ git+ssh://git@github.com/mpinb/optotune-lens.git

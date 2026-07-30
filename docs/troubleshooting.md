@@ -109,7 +109,7 @@ If the device is there but you get permission denied, add yourself to `dialout`
 
 The lens also fails to start on a bad calibration file. `calibrations/liquid_lens.csv`
 must have exactly two columns named `z` and `dpt`. The
-[`liquid-lens-calibration`](https://github.com/elhananby/liquid-lens-calibration)
+[`liquid-lens-calibration`](https://github.com/mpinb/liquid-lens-calibration)
 repo emits a `diopter` column instead — rename it to `dpt` before use.
 
 ## Performance

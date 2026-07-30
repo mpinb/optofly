@@ -574,7 +574,7 @@ requires-dist = [
     { name = "matplotlib", specifier = ">=3.10.3" },
     { name = "numpy", specifier = ">=2.2.5" },
     { name = "opencv-python", specifier = ">=4.13.0.92" },
-    { name = "optotune-lens", git = "ssh://git@github.com/elhananby/optotune-lens.git" },
+    { name = "optotune-lens", git = "ssh://git@github.com/mpinb/optotune-lens.git" },
     { name = "panda3d", specifier = ">=1.10.0" },
     { name = "pyserial", specifier = ">=3.5" },
     { name = "pyzmq", specifier = ">=26.4.0" },
@@ -596,7 +596,7 @@ dev = [
 [[package]]
 name = "optotune-lens"
 version = "0.1.0"
-source = { git = "ssh://git@github.com/elhananby/optotune-lens.git#f4b922784040c369a4dcf4544322dfe3ebf2fc6d" }
+source = { git = "ssh://git@github.com/mpinb/optotune-lens.git#a65870a932b2c568f6f2a75e472a16b4b689de41" }
 dependencies = [
     { name = "pyserial" },
 ]

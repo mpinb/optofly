@@ -46,10 +46,10 @@ This downloads and installs the current XIMEA Linux PCIe driver, skipping the do
 
 ## 2. Calibrate each tracking camera's intrinsics
 
-Every Basler camera in Braid's tracking rig needs its own intrinsic calibration (focal length, principal point, lens distortion) before Braid can triangulate anything. Use the separate [`basler-charuco-calibrator`](https://github.com/elhananby/basler-charuco-calibrator) repository:
+Every Basler camera in Braid's tracking rig needs its own intrinsic calibration (focal length, principal point, lens distortion) before Braid can triangulate anything. Use the separate [`basler-charuco-calibrator`](https://github.com/mpinb/basler-charuco-calibrator) repository:
 
 ```bash
-git clone https://github.com/elhananby/basler-charuco-calibrator.git
+git clone https://github.com/mpinb/basler-charuco-calibrator.git
 cd basler-charuco-calibrator
 uv sync
 uv run python -m basler_charuco_calibrator

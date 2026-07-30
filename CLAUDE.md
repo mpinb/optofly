@@ -184,7 +184,7 @@ Coordinate system: fly at origin, North=+Y, East=+X, Z=up, units in cm. Use `ang
 
 ### Liquid Lens Calibration
 
-`calibrations/liquid_lens.csv` maps `z` (meters) → `dpt` (diopters), fitted at startup by `LensCalibration` (`src/processes/lens.py`) using `calibration_model` (`linear` | `quadratic` | `power` | `inverse`). The loader expects exactly two columns, `z` and `dpt`. Build the CSV manually by stepping through z-heights with `optotune_lens.Lens`, or automate it with the separate [`liquid-lens-calibration`](https://github.com/elhananby/liquid-lens-calibration) repo (XIMEA + multi-Basler AprilTag triangulation); its output uses a `diopter` column, which needs renaming to `dpt` before use. See `docs/calibration.md`.
+`calibrations/liquid_lens.csv` maps `z` (meters) → `dpt` (diopters), fitted at startup by `LensCalibration` (`src/processes/lens.py`) using `calibration_model` (`linear` | `quadratic` | `power` | `inverse`). The loader expects exactly two columns, `z` and `dpt`. Build the CSV manually by stepping through z-heights with `optotune_lens.Lens`, or automate it with the separate [`liquid-lens-calibration`](https://github.com/mpinb/liquid-lens-calibration) repo (XIMEA + multi-Basler AprilTag triangulation); its output uses a `diopter` column, which needs renaming to `dpt` before use. See `docs/calibration.md`.
 
 ### Camera
 
