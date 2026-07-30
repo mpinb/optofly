@@ -1,3 +1,4 @@
+import contextlib
 from direct.showbase.ShowBase import ShowBase
 from panda3d.core import (
     Camera,
@@ -60,7 +61,8 @@ class ArenaScene(ShowBase):
             )
         load_prc_file_data("", prc)
 
-        ShowBase.__init__(self)
+        with contextlib.redirect_stdout(None), contextlib.redirect_stderr(None):
+            ShowBase.__init__(self)
         self.disableMouse()
 
         self._panel_width = width // 4

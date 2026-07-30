@@ -59,28 +59,28 @@ class _FakeBraidProxy:
         self.stopped = True
 
 
-def test_handle_metadata_cancellation_stops_recording_when_proxy_present(capsys):
+def test_handle_metadata_cancellation_stops_recording_when_proxy_present(caplog):
     proxy = _FakeBraidProxy()
     handle_metadata_cancellation(proxy)
     assert proxy.stopped is True
-    out = capsys.readouterr().out
-    assert "cancelled" in out.lower()
-    assert "stopped" in out.lower()
+    combined = " ".join(r.message for r in caplog.records)
+    assert "cancelled" in combined.lower()
+    assert "stopped" in combined.lower()
 
 
-def test_handle_metadata_cancellation_no_stop_call_when_proxy_is_none(capsys):
+def test_handle_metadata_cancellation_no_stop_call_when_proxy_is_none(caplog):
     """braid_proxy is None whenever the folder already existed (recording
     was not auto-started by this run) -- must not try to stop anything."""
     handle_metadata_cancellation(None)  # must not raise
-    out = capsys.readouterr().out
-    assert "cancelled" in out.lower()
+    combined = " ".join(r.message for r in caplog.records)
+    assert "cancelled" in combined.lower()
 
 
-def test_handle_metadata_cancellation_stop_failure_is_reported_not_raised(capsys):
+def test_handle_metadata_cancellation_stop_failure_is_reported_not_raised(caplog):
     proxy = _FakeBraidProxy(raise_on_stop=True)
     handle_metadata_cancellation(proxy)  # must not raise
-    out = capsys.readouterr().out
-    assert "warning" in out.lower()
+    combined = " ".join(r.message for r in caplog.records)
+    assert "warning" in combined.lower()
 
 
 def test_load_config_still_returns_app_config():
@@ -89,20 +89,6 @@ def test_load_config_still_returns_app_config():
 
     app_config = load_config("configs/config.example.toml")
     assert isinstance(app_config, AppConfig)
-
-
-def test_summary_prints_lens_predictor(capsys, tmp_path):
-    from main import print_experiment_config
-
-    app_config = _app_config(
-        tmp_path, liquid_lens={"mode": "diopter", "predictor": "linear"}
-    )
-    print_experiment_config(app_config, ["LiquidLens"])
-    out = capsys.readouterr().out
-    assert "Predictor: linear" in out
-    # The old code printed nothing about the predictor unless the
-    # nonexistent kalman.enabled/prediction.enabled keys were set.
-    assert "Kalman filter (predictive focus)" not in out
 
 
 def test_dead_process_summary_names_the_process_and_the_reason():

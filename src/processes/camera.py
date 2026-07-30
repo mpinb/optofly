@@ -259,13 +259,24 @@ class RustCameraProcess(WorkerProcess):
             self.logger.error("optofly-camera did not exit after SIGTERM, killing")
             self._proc.kill()
 
+    _XIAPI_NOISE_PATTERNS = (
+        "xiAPI: EAL_IF",
+        "xiAPI: FGTL_SetParam_to_CAL",
+        "xiAPI: SAL_Common_SetAcquisitionFrameRate",
+        "xiAPI: xiFAPI_Device::AllocateBuffers",
+        "xiAPI: Bandwidth measurement",
+    )
+
     def _forward_output(self) -> None:
         """Read from Rust binary stdout/stderr and forward to logger (daemon thread)."""
         try:
             if self._proc and self._proc.stdout:
                 for line in self._proc.stdout:
                     line = line.rstrip()
-                    if line:
-                        self.logger.info("[optofly-camera] %s", line)
+                    if not line:
+                        continue
+                    if any(pattern in line for pattern in self._XIAPI_NOISE_PATTERNS):
+                        continue
+                    self.logger.info("[optofly-camera] %s", line)
         except Exception as e:
             self.logger.warning("Error reading optofly-camera output: %s", e)

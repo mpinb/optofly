@@ -151,6 +151,7 @@ class BraidPublisher(WorkerProcess):
         self.trigger_socket = None
         self.stream_thread = None
         self.is_connected = False
+        self._first_update_seen = False
 
     def _handle_signal(self, signum, frame):
         """Handle termination signals by setting the stop event."""
@@ -379,6 +380,7 @@ class BraidPublisher(WorkerProcess):
                 [self._active_topic_bytes, active_message.encode("utf-8")]
             )
         self.logger.debug("Published message: %.50s...", message)
+        self._first_update_seen = True
 
     def _process_stream(self) -> None:
         """Process the event stream in a separate thread.
@@ -426,7 +428,7 @@ class BraidPublisher(WorkerProcess):
                         self._dispatch_event(data_str)
 
                         now = time.monotonic()
-                        if last_boundary is not None:
+                        if last_boundary is not None and self._first_update_seen:
                             gap = now - last_boundary
                             if gap > BOUNDARY_GAP_WARN_S:
                                 self.logger.warning(
