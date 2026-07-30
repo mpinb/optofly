@@ -4,9 +4,9 @@ The sections below are ordered the way you'll actually do them: each one depends
 
 | # | Calibration | Depends on | Tool |
 |---|---|---|---|
-| 1 | [Camera Intrinsic Calibration](#camera-intrinsic-calibration) | A Basler tracking camera | [`basler-charuco-calibrator`](https://github.com/elhananby/basler-charuco-calibrator) (separate repo) |
+| 1 | [Camera Intrinsic Calibration](#camera-intrinsic-calibration) | A Basler tracking camera | [`basler-charuco-calibrator`](https://github.com/mpinb/basler-charuco-calibrator) (separate repo) |
 | 2 | [Braid Multi-Camera Calibration](#braid-multi-camera-extrinsic-calibration) | Step 1, done for every tracking camera | Braid's own tooling |
-| 3 | [Liquid Lens Calibration](#liquid-lens-calibration) | Braid tracking live | `optotune_lens`, or [`liquid-lens-calibration`](https://github.com/elhananby/liquid-lens-calibration) (separate repo) |
+| 3 | [Liquid Lens Calibration](#liquid-lens-calibration) | Braid tracking live | `optotune_lens`, or [`liquid-lens-calibration`](https://github.com/mpinb/liquid-lens-calibration) (separate repo) |
 | 4 | [Camera FOV Calibration](#camera-fov-calibration) | Step 3 | `src.tools.calibrate_braid_ximea` |
 | 5 | [Frustum FOV Calibration](#frustum-fov-calibration) | Step 3 (optional refinement of step 4) | `src.tools.calibrate_braid_ximea` or `calibrate_frustum_fov` |
 | 6 | [Panda3D Heading Calibration](#panda3d-heading-calibration) | Braid tracking live | `src.tools.calibrate_heading` |
@@ -15,10 +15,10 @@ The sections below are ordered the way you'll actually do them: each one depends
 
 Before Braid can triangulate 3D fly positions from multiple 2D camera views, every tracking camera needs its own intrinsic calibration: focal length, principal point, and lens distortion. This is the first thing to do on a new rig. It's also the only step that touches each camera in isolation; everything after this involves the whole multi-camera rig working together.
 
-OptoFly doesn't include a tool for this. Use the separate [`basler-charuco-calibrator`](https://github.com/elhananby/basler-charuco-calibrator) repository, which drives a Basler camera via `pypylon`, shows a live detection overlay of a ChArUco board, and auto-captures frames as you move the board to cover the frame:
+OptoFly doesn't include a tool for this. Use the separate [`basler-charuco-calibrator`](https://github.com/mpinb/basler-charuco-calibrator) repository, which drives a Basler camera via `pypylon`, shows a live detection overlay of a ChArUco board, and auto-captures frames as you move the board to cover the frame:
 
 ```bash
-git clone https://github.com/elhananby/basler-charuco-calibrator.git
+git clone https://github.com/mpinb/basler-charuco-calibrator.git
 cd basler-charuco-calibrator
 uv sync
 uv run python -m basler_charuco_calibrator
@@ -32,7 +32,7 @@ Do this for every Basler camera in the tracking rig before moving to step 2.
 
 The per-camera intrinsics from step 1 feed into Braid's own multi-camera extrinsic calibration, which works out where each camera sits and points relative to the others and produces the `multi_camera_reconstructor` XML that Braid uses to triangulate 3D positions from synchronized 2D detections. This step is part of the Braid/strand-braid toolchain, not OptoFly. Follow Braid's own calibration documentation for the procedure.
 
-The output XML matters to OptoFly in one place: the external [`liquid-lens-calibration`](https://github.com/elhananby/liquid-lens-calibration) tool (see [Liquid Lens Calibration](#liquid-lens-calibration) below) takes this file as its `--calibration` argument so it can triangulate a target's true `z` using the same camera geometry Braid uses for tracking.
+The output XML matters to OptoFly in one place: the external [`liquid-lens-calibration`](https://github.com/mpinb/liquid-lens-calibration) tool (see [Liquid Lens Calibration](#liquid-lens-calibration) below) takes this file as its `--calibration` argument so it can triangulate a target's true `z` using the same camera geometry Braid uses for tracking.
 
 Once this step is done, Braid should be tracking flies in 3D and publishing over its SSE endpoint (`http://<host>:8397/events`). Confirm that in Braid's own web UI before continuing. Every calibration step below assumes Braid is already running and tracking.
 
@@ -103,12 +103,12 @@ At startup, `LensCalibration` reads the CSV and fits the selected model to the `
 
 ### Automated Calibration (AprilTag Triangulation)
 
-Manually finding "in focus" by eye is slow and subjective. The [`liquid-lens-calibration`](https://github.com/elhananby/liquid-lens-calibration) tool builds the same `(z, dpt)` CSV without a human judgment call: it sweeps the lens through its diopter range and uses a multi-camera Basler rig to triangulate a static AprilTag target's true `z`, then finds the best-focus diopter at each position with a focus metric computed on a XIMEA camera behind the lens.
+Manually finding "in focus" by eye is slow and subjective. The [`liquid-lens-calibration`](https://github.com/mpinb/liquid-lens-calibration) tool builds the same `(z, dpt)` CSV without a human judgment call: it sweeps the lens through its diopter range and uses a multi-camera Basler rig to triangulate a static AprilTag target's true `z`, then finds the best-focus diopter at each position with a focus metric computed on a XIMEA camera behind the lens.
 
-This tool lives in a separate repository, [`liquid-lens-calibration`](https://github.com/elhananby/liquid-lens-calibration), not inside OptoFly. Clone it, point it at the reconstructor XML from step 2 above, and run it from its own project directory:
+This tool lives in a separate repository, [`liquid-lens-calibration`](https://github.com/mpinb/liquid-lens-calibration), not inside OptoFly. Clone it, point it at the reconstructor XML from step 2 above, and run it from its own project directory:
 
 ```bash
-git clone https://github.com/elhananby/liquid-lens-calibration.git
+git clone https://github.com/mpinb/liquid-lens-calibration.git
 cd liquid-lens-calibration
 uv sync
 uv run lens-calibrate --calibration /path/to/calibration_charuco.xml
@@ -206,9 +206,11 @@ The z for each plane is read automatically from Braid — the tool computes the 
 
 ### When to Use This
 
-The flat `[camera.FOV]` calibration uses a single set of x/y bounds applied at all z heights. A standard liquid lens produces a field of view that grows with distance — the further the fly is from the camera, the wider the visible area. A flat FOV either misses flies at the far edge of the volume or triggers spuriously on flies outside the actual frame.
+The flat `[camera.FOV]` calibration uses a single set of x/y bounds applied at all z heights. A camera's field of view grows with distance from the lens — the further a plane is from the camera, the wider the visible area on it. A flat FOV either misses flies at the far edge of the volume or triggers spuriously on flies outside the actual frame.
 
 The frustum calibration captures FOV bounds at two z heights and stores both. At runtime, `TriggerHandler` linearly interpolates the bounds at the fly's actual z, giving a perspective-correct trigger zone.
+
+**`near`/`far` are z-order labels, not measured camera distance.** The calibration tools always call the lower-z plane `near` and the higher-z plane `far` — they never measure or know the camera's actual physical position, they just compare the two z values. OptoFly's camera is mounted **above** the arena, so higher z is physically *closer* to the camera and lower z is physically *farther* from it — meaning the config's `near` plane (lower z) is actually the physically far one, and `far` (higher z) is physically near. This doesn't affect correctness: the interpolation math only needs `near_z < far_z` and independently interpolates the measured bounds, so it's geometrically correct regardless of which one is physically closer to the lens. It only matters for reading your own calibration output sensibly (see the troubleshooting note below) — if your rig's camera is mounted the other way (below, looking up), the physical/config direction lines up the intuitive way and you can ignore this note.
 
 **Use this calibration if:**
 - You see flies triggering outside the visible frame (FOV too wide)
@@ -247,7 +249,7 @@ The `calibrate_braid_ximea.py` `a`-key path is described below.
    Write [camera.FOV.near] (z=0.1000 m) and [camera.FOV.far] (z=0.2500 m) to configs/config.toml? [y/N]
    ```
 
-   Answer `y`. The lower-z plane is automatically assigned as near, higher-z as far.
+   Answer `y`. The lower-z plane is automatically assigned as `near`, higher-z as `far` (a z-order label — see the note above about what this means for a camera mounted above the arena).
 
 5. Verify and restart:
 
@@ -255,7 +257,7 @@ The `calibrate_braid_ximea.py` `a`-key path is described below.
    grep -A 15 "\[camera\.FOV\]" configs/config.toml
    ```
 
-   The far-plane bounds should be visibly wider than the near-plane bounds. `TriggerHandler` picks the mode up from the config at startup — frustum mode is active whenever both `[camera.FOV.near]` and `[camera.FOV.far]` tables are present. Confirm what was parsed:
+   With the camera above the arena, the *physically* farther plane — lower z, labeled `near` in the config — should have the wider bounds, and the *physically* closer plane — higher z, labeled `far` — should be narrower. (If your camera is instead mounted below looking up, it's the reverse: `far`/higher-z should be wider.) `TriggerHandler` picks the mode up from the config at startup — frustum mode is active whenever both `[camera.FOV.near]` and `[camera.FOV.far]` tables are present. Confirm what was parsed:
 
    ```bash
    uv run python -c "from src.utils.config import AppConfig; c = AppConfig.load('configs/config.toml'); print('frustum:', c.camera.fov_frustum, '| near z:', c.camera.fov_near_z, '| far z:', c.camera.fov_far_z)"
@@ -265,7 +267,7 @@ The `calibrate_braid_ximea.py` `a`-key path is described below.
 
 ### Troubleshooting
 
-- **Far-plane bounds narrower than near-plane bounds**: the laser was at the wrong height when you collected points for one of the planes. Rerun the tool.
+- **Bounds don't get wider on the plane you expected**: check which plane is physically closer to your camera, not just the `near`/`far` config labels — they only track z-order (see the note in "When to Use This"). For an overhead-mounted camera, the wider bounds should land on `near` (lower z); the narrower ones on `far` (higher z). If it's backwards from that and your camera is overhead, the laser was likely at the wrong height when you collected one of the planes — rerun the tool.
 
 - **Trigger zone still looks wrong**: the frustum interpolates linearly. If distortion is non-linear, narrow `z_min`/`z_max` so the fly spends less time in the interpolated region.
 
@@ -278,18 +280,18 @@ The `calibrate_braid_ximea.py` `a`-key path is described below.
 # Frustum mode — generated by calibrate_braid_ximea.py
 
 [camera.FOV.near]
-z     = 0.1000      # z where these bounds were measured
-x_min = -0.01500
-x_max = 0.02500
-y_min = -0.01800
-y_max = 0.03000
-
-[camera.FOV.far]
-z     = 0.2500      # z where these bounds were measured
+z     = 0.1000      # z where these bounds were measured (physically farthest from an overhead camera)
 x_min = -0.02180
 x_max = 0.03900
 y_min = -0.02500
 y_max = 0.04100
+
+[camera.FOV.far]
+z     = 0.2500      # z where these bounds were measured (physically closest to an overhead camera)
+x_min = -0.01500
+x_max = 0.02500
+y_min = -0.01800
+y_max = 0.03000
 ```
 
 To revert to flat mode, replace both sub-tables with flat keys:
