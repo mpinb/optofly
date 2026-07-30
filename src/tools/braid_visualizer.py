@@ -137,7 +137,7 @@ class BraidVisualizer(WorkerProcess):
         if isinstance(config_path, dict):
             self.config = config_path
         else:
-            self.config = ZMQConfig(config_path)
+            self.config = ZMQConfig.from_path(config_path)
 
         self.stop_event = event
         # Set up data storage

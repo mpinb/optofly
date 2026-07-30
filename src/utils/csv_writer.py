@@ -4,14 +4,7 @@ import os
 
 
 class CSVWriter:
-    def __init__(
-        self,
-        filepath: str,
-        strict: bool = True,
-        process_name: str = "CSVWriter",
-        log_level: str = "INFO",
-        log_color: str = "RED",
-    ):
+    def __init__(self, filepath: str, strict: bool = True):
         """
         Initialize a CSVWriter for appending rows as dictionaries to a CSV file.
 

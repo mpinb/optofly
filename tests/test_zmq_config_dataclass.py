@@ -47,5 +47,19 @@ def test_address_helpers_still_work():
 
 
 def test_path_based_constructor_still_works():
-    cfg = ZMQConfig("configs/config.example.toml")
+    cfg = ZMQConfig.from_path("configs/config.example.toml")
     assert cfg.braid_port > 0
+
+
+def test_from_section_defaults_opto_and_visual_enter_topics():
+    cfg = ZMQConfig.from_section(_section())
+    assert cfg.opto_enter_topic == "OPTO_ZONE_ENTER"
+    assert cfg.visual_enter_topic == "VISUAL_ZONE_ENTER"
+
+
+def test_from_section_reads_explicit_opto_and_visual_enter_topics():
+    cfg = ZMQConfig.from_section(
+        _section(opto_enter_topic="CUSTOM_OPTO", visual_enter_topic="CUSTOM_VISUAL")
+    )
+    assert cfg.opto_enter_topic == "CUSTOM_OPTO"
+    assert cfg.visual_enter_topic == "CUSTOM_VISUAL"

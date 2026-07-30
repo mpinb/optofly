@@ -1,9 +1,10 @@
 import json
 
+import pytest
 import zmq
 
 from src.processes.led import OptoTriggerWorker
-from src.utils.config import ZMQConfig
+from src.utils.config import AppConfig, ZMQConfig
 
 
 class FakeLatencySocket:
@@ -78,6 +79,7 @@ def test_handle_trigger_publishes_latency_for_real_activation():
         {
             "obj_id": 7,
             "frame": 100,
+            "record_frame": 95,
             "braid_timestamp": 500.0,
             "handler_timestamp": 500.01,
             "mean_heading": 0.1,
@@ -90,6 +92,7 @@ def test_handle_trigger_publishes_latency_for_real_activation():
         "system": "opto",
         "obj_id": 7,
         "frame": 100,
+        "record_frame": 95,
         "braid_timestamp": 500.0,
         "trigger_timestamp": 500.01,
         "activation_timestamp": 500.02,
@@ -113,6 +116,75 @@ def test_handle_trigger_publishes_latency_with_none_activation_for_sham():
     sent = worker.latency_socket.sent
     assert sent[0]["sham"] is True
     assert sent[0]["activation_timestamp"] is None
+    assert sent[0]["record_frame"] is None
+
+
+class RecordingLogger:
+    def __init__(self):
+        self.warnings = []
+
+    def warning(self, msg, *args):
+        self.warnings.append(msg % args if args else msg)
+
+    def info(self, *a, **k):
+        pass
+
+    def debug(self, *a, **k):
+        pass
+
+    def error(self, *a, **k):
+        pass
+
+
+class UnopenableOptoTrigger:
+    """Stands in for hardware whose serial port cannot be opened."""
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def initialize(self):
+        return False
+
+    def set_backlight(self, intensity):
+        raise AssertionError("set_backlight must not run after a failed init")
+
+
+def _worker_for_initialize(monkeypatch, *, active):
+    monkeypatch.setattr("src.processes.led.OptoTrigger", UnopenableOptoTrigger)
+    worker = object.__new__(OptoTriggerWorker)
+    worker.config_path = "configs/config.example.toml"
+    worker.process_name = "OptoTriggerWorker"
+    worker.log_level = "INFO"
+    worker.log_color = "RED"
+    worker.opto_config = AppConfig.load("configs/config.example.toml").opto_trigger
+    worker.is_enabled = active
+    worker.opto_trigger = None
+    worker.logger = RecordingLogger()
+    return worker
+
+
+def test_unopenable_hardware_is_survivable_when_stimulation_is_disabled(monkeypatch):
+    """With opto_trigger.active = false the user has asked for no stimulation,
+    so a missing Arduino must not take the whole experiment down -- the
+    process stays up and only loses the backlight."""
+    worker = _worker_for_initialize(monkeypatch, active=False)
+
+    worker.initialize()  # must not raise
+
+    assert worker.opto_trigger is None
+    assert any(
+        "opto_trigger.active = false" in w for w in worker.logger.warnings
+    ), f"expected a warning naming the inactive flag, got {worker.logger.warnings}"
+    assert any("/dev/opto_trigger" in w for w in worker.logger.warnings)
+
+
+def test_unopenable_hardware_still_raises_when_stimulation_is_enabled(monkeypatch):
+    """With active = true the user asked for stimulation we cannot deliver,
+    so this must stay fatal."""
+    worker = _worker_for_initialize(monkeypatch, active=True)
+
+    with pytest.raises(RuntimeError, match="/dev/opto_trigger"):
+        worker.initialize()
 
 
 def test_initialize_zmq_configures_latency_socket_as_non_blocking():
@@ -122,7 +194,7 @@ def test_initialize_zmq_configures_latency_socket_as_non_blocking():
     _initialize_zmq() setup path (not a fake socket) against the checked-in
     example config, so getsockopt reflects genuine zmq behavior."""
     worker = object.__new__(OptoTriggerWorker)
-    worker.zmq_config = ZMQConfig("configs/config.example.toml")
+    worker.zmq_config = ZMQConfig.from_path("configs/config.example.toml")
     worker.logger = type(
         "Logger",
         (),
@@ -138,3 +210,55 @@ def test_initialize_zmq_configures_latency_socket_as_non_blocking():
         worker.latency_socket.close()
         worker.trigger_socket.close()
         worker.context.term()
+
+
+class FakeSubSocket:
+    def __init__(self):
+        self.connected_to = None
+        self.subscriptions = []
+
+    def connect(self, address):
+        self.connected_to = address
+
+    def setsockopt_string(self, opt, value):
+        self.subscriptions.append(value)
+
+
+class FakePushSocket:
+    def setsockopt(self, opt, value):
+        pass
+
+    def connect(self, address):
+        pass
+
+
+class FakeZmqContext:
+    def __init__(self):
+        self.sub_socket = FakeSubSocket()
+        self.push_socket = FakePushSocket()
+
+    def socket(self, socket_type):
+        return self.sub_socket if socket_type == zmq.SUB else self.push_socket
+
+
+def test_initialize_zmq_subscribes_to_configured_opto_enter_topic_not_zone_enter(
+    monkeypatch,
+):
+    worker = object.__new__(OptoTriggerWorker)
+    worker.zmq_config = ZMQConfig.from_path(
+        "configs/config.example.toml"
+    )
+    worker.logger = type(
+        "Logger",
+        (),
+        {"debug": lambda *a, **k: None, "error": lambda *a, **k: None},
+    )()
+    fake_context = FakeZmqContext()
+    monkeypatch.setattr(
+        "src.processes.led.zmq.Context", lambda: fake_context
+    )
+
+    worker._initialize_zmq()
+
+    assert fake_context.sub_socket.subscriptions == [worker.zmq_config.opto_enter_topic]
+    assert "ZONE_ENTER" not in fake_context.sub_socket.subscriptions

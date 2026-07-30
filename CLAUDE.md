@@ -60,18 +60,20 @@ Braid HTTP SSE (http://host:8397/events)
     ↓
 BraidPublisher  →  ZMQ PUB  topic=BRAID  port=5555
     ↓
-TriggerHandler  →  ZMQ PUB  topics=ZONE_ENTER/ZONE_EXIT  port=5556
+TriggerHandler  →  ZMQ PUB  topics=ZONE_ENTER/ZONE_EXIT/OPTO_ZONE_ENTER/VISUAL_ZONE_ENTER  port=5556
     ↓
     ├── RustCameraProcess    (starts recording on ZONE_ENTER; stamps trigger_frame_idx on ZONE_ENTER)
     ├── LiquidLens           (starts focusing on ZONE_ENTER via BRAID; writes lens_timing.csv per video) ─┐
-    ├── OptoTriggerWorker    (fires LED on ZONE_ENTER, one-shot)                                          ├─→ ZMQ PUSH  port=latency_port ─→ LatencyLogger (ZMQ PULL, writes latency.csv)
-    ├── VisualProcess        (Panda3D; renders stimuli on ZONE_ENTER, one-shot)                           ─┘
+    ├── OptoTriggerWorker    (fires LED on OPTO_ZONE_ENTER, one-shot)                                     ├─→ ZMQ PUSH  port=latency_port ─→ LatencyLogger (ZMQ PULL, writes latency.csv)
+    ├── VisualProcess        (Panda3D; renders stimuli on VISUAL_ZONE_ENTER, one-shot)                    ─┘
     └── Monitoring Server    (web dashboard, optional)
 ```
 
 The ZMQ BRAID feed is only live when the full stack is running. Standalone tools (calibration, simulators) that need tracking data must connect directly to the Braid HTTP SSE endpoint (`/events`).
 
-`LatencyLogger` is core and always-on (started right after `TriggerHandler`, before any optional process) — a dead `LatencyLogger` only loses latency data, it never aborts the experiment. It's the one place in the codebase using ZMQ PUSH/PULL instead of PUB/SUB: `OptoTriggerWorker`, `VisualProcess`, and `LiquidLens` each PUSH one `LATENCY` message per trigger to `zmq.latency_port` (a many-producer/one-consumer fan-in, not a broadcast), and `LatencyLogger` is the sole writer of `latency.csv` in the braid folder. Each `LATENCY` message carries `system` (`"opto"` | `"visual"` | `"lens"`), `obj_id`, `frame`, `braid_timestamp`, `activation_timestamp`, and `sham`; `LatencyLogger` computes `latency_ms = (activation_timestamp - braid_timestamp) * 1000` for non-sham trials. `LiquidLens` only publishes latency for the first commanded diopter per trial (not every subsequent tracking update).
+`ZONE_ENTER`/`ZONE_EXIT` still gate the camera and lens exactly as before — recording starts as soon as an object enters the outer trigger zone. `OPTO_ZONE_ENTER`/`VISUAL_ZONE_ENTER` are separate, one-shot events emitted by `TriggerHandler` only once a tracked object — already inside the outer `ZONE_ENTER` zone — reaches a smaller zone nested inside it, sized by `opto_zone_scale`/`visual_zone_scale` in `[trigger_handler]` (fraction of the outer FOV, centered). Setting either scale to `1.0` reproduces today's same-frame behavior for that system (fires on the same frame as `ZONE_ENTER`).
+
+`LatencyLogger` is core and always-on (started right after `TriggerHandler`, before any optional process) — a dead `LatencyLogger` only loses latency data, it never aborts the experiment. It's the one place in the codebase using ZMQ PUSH/PULL instead of PUB/SUB: `OptoTriggerWorker`, `VisualProcess`, and `LiquidLens` each PUSH one `LATENCY` message per trigger to `zmq.latency_port` (a many-producer/one-consumer fan-in, not a broadcast), and `LatencyLogger` is the sole writer of `latency.csv` in the braid folder. Each `LATENCY` message carries `system` (`"opto"` | `"visual"` | `"lens"`), `obj_id`, `frame`, `record_frame`, `braid_timestamp`, `activation_timestamp`, and `sham`; `LatencyLogger` computes `latency_ms = (activation_timestamp - braid_timestamp) * 1000` for non-sham trials. `LiquidLens` only publishes latency for the first commanded diopter per trial (not every subsequent tracking update).
 
 ### Process Model
 
@@ -107,7 +109,16 @@ Death carries the bare obj_id as an integer, not an object.
 
 `src/utils/config.py` has typed config classes (e.g. `LiquidLensConfig`, `ZMQConfig`) that load from TOML sections. Pass `config_path` to each process; don't read TOML directly elsewhere. `trigger_handler.zone_timeout` is the single global timeout used by TriggerHandler, CameraProcess (buffer sizing), and LiquidLens (focus tracking).
 
-Every `*Config` class's path-based constructor routes through `AppConfig.load()`, which builds and validates all nine config sections in one pass — regardless of any given section's own `active` flag. This means `configs/config.toml` must always have valid `[liquid_lens]`, `[opto_trigger]`, etc. sections present (each with its required `port` key) even when that subsystem is disabled via `active = false`, and even if you only ever construct a single config class (e.g. `ZMQConfig(path)`). Standalone tools that only need one section (e.g. `src/tools/braid_visualizer.py`, `src/tools/braid_simulator.py`) still need a fully valid config file for this reason.
+Each config class has exactly two constructors, and no others:
+
+- `Cls.from_section(section_dict, ...)` — builds from an already-parsed TOML table. Called only by `AppConfig.load()`, which passes in the dependencies (`camera`, `zmq`, `trigger_handler`) explicitly so no config class ever constructs another.
+- `Cls.from_path(config_path)` — convenience for standalone tools and processes that need one section. Delegates to `AppConfig.load()` and returns the corresponding attribute.
+
+Both end at the dataclass-generated `__init__`, so **the declared fields are the construction interface**: add a field to the dataclass and forget it in `from_section()` and you get a `TypeError` naming the field at config-load time, not an `AttributeError` inside a child process at trigger time. Never construct these via `object.__new__` + `__dict__` assignment — that was the previous pattern and it made the two lists drift silently. `tests/test_config_construction.py` pins this.
+
+`AppConfig.load()` builds and validates all nine config sections in one pass — regardless of any given section's own `active` flag. This means `configs/config.toml` must always have valid `[liquid_lens]`, `[opto_trigger]`, etc. sections present (each with its required `port` key) even when that subsystem is disabled via `active = false`, and even if you only ever need a single section (e.g. `ZMQConfig.from_path(path)`). Standalone tools that only need one section (e.g. `src/tools/braid_visualizer.py`, `src/tools/braid_simulator.py`) still need a fully valid config file for this reason.
+
+Every config is frozen except `OptoTriggerConfig`, which `OptoTrigger.set_parameters()` mutates once per trigger to record the balanced-randomization-selected trial parameters.
 
 Key parameters (all in `configs/config.toml`):
 
@@ -120,6 +131,23 @@ Key parameters (all in `configs/config.toml`):
 | `[liquid_lens.kalman]` | `prediction_horizon` | `0.05` | Additional lookahead beyond `system_latency` (seconds) |
 
 `LiquidLens` also enforces a hardware floor of 25ms between serial commands regardless of `predictor` or `max_diopter_step` (~40 Hz max update rate).
+
+### Which processes are started, and which failures are fatal
+
+Not every process has an `active` flag, and criticality is derived from config rather than fixed:
+
+| Process | Started when | Death is fatal when |
+|---|---|---|
+| `BraidPublisher` | always | always |
+| `TriggerHandler` | always | always |
+| `LatencyLogger` | always | never (only latency data is lost) |
+| `VisualProcess` | `visual_stimuli.active` | never |
+| `CameraProcess` | `camera.active` | never |
+| `LiquidLens` | **`camera.active`** — it has no `active` flag of its own, since autofocus is only meaningful while the camera records | `camera.active` |
+| `OptoTriggerWorker` | always — it also drives the backlight | **`opto_trigger.active`** only |
+| `Monitoring Server` | `monitoring.active` | never |
+
+The two bolded rows are the surprising ones. Searching for `[liquid_lens] active` to disable the lens will find nothing; disable the camera instead. And `OptoTriggerWorker` is spawned even with `opto_trigger.active = false`, but a hardware failure there is then survivable — the process keeps running without the backlight rather than aborting a rig that has no Arduino attached. See `_critical_names()` in `src/orchestration.py`.
 
 ### Visual Stimuli (Panda3D)
 
@@ -144,7 +172,7 @@ State machine (Rust binary):
 
 Output files per trial (all in `camera.save_folder`):
 - `obj_id_{N}_frame_{M}.mp4` — encoded video
-- `obj_id_{N}_frame_{M}.csv` — per-frame metadata (`frame_idx`, `nframe`, `ts_sec`, `ts_usec`, `cam_time_ns`, `trigger_frame_idx`). `trigger_frame_idx` repeats on every row — it is the buffer index at which `ZONE_ENTER` fired, marking stimulus onset. Use it to align trials: frames before it are pre-stimulus baseline, frames after are the response.
+- `obj_id_{N}_frame_{M}.csv` — per-frame metadata (`frame_idx`, `nframe`, `ts_sec`, `ts_usec`, `cam_time_ns`, `trigger_frame_idx`). `trigger_frame_idx` repeats on every row — it is the buffer index at which `ZONE_ENTER` fired, marking **recording start**, not stimulus onset. Actual stimulus onset for opto/visual is in `latency.csv`'s `frame` field for that system's row (`"opto"`/`"visual"`); `record_frame` on that same row equals the camera's `trigger_frame_idx`/recording-start frame, so `(row.frame - row.record_frame)` is the number of Braid frames between recording start and stimulus onset — convert to camera frames via the fps ratio if needed for video alignment (Braid runs ~100Hz; camera fps is in `configs/config.toml`'s `[camera]` section).
 - `obj_id_{N}_frame_{M}_lens_timing.csv`: per-adjustment lens timing (`t_braid`, `t_relay`, `t_lens_recv`, `t_serial_start`, `t_diopter_sent`, `delay_ms`, `z`, `focus_z`, `diopter`, `target_diopter`, `predictor`, ...)
 
 **`max_recording_time` vs `zone_timeout`**: `camera.max_recording_time` is a frame-buffer size limit — it counts from `ZONE_ENTER`. `trigger_handler.zone_timeout` is the tracker's dead-reckoning timeout for declaring a fly has left the zone. Set `max_recording_time` ≥ `zone_timeout`.

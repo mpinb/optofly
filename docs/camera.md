@@ -35,7 +35,7 @@ Default settings (3s, 500fps, 2112x2112): ~8.5GB.
 - Locates the binary in `optofly-camera/target/{release,debug}/` or `PATH`
 - Launches it with `--config`, `--save-folder`, and `--log-level` arguments
 - Monitors the subprocess and the shared `stop_event`
-- On shutdown: sends a ZMQ `kill` message, waits for graceful exit, then SIGTERM/SIGKILL
+- On shutdown: sends SIGTERM, waits up to 30s for graceful exit, then SIGKILL
 
 ## Dependencies
 
@@ -65,11 +65,15 @@ Set `[camera] active = true` in `configs/config.toml`, then `uv run python main.
 **Pre-flight checks:**
 ```python
 from src.processes.camera import check_camera_prerequisites
-results = check_camera_prerequisites("configs/config.toml")
-if not results["overall"]:
-    for error in results["errors"]:
-        print(error)
+
+for name, result in check_camera_prerequisites("configs/config.toml").items():
+    print(name, result)
 ```
+
+Returns a `dict[str, CheckResult]` covering `camera_binary`, `ffmpeg`,
+`save_folder_writable`, and `trigger_port`. Each `CheckResult` has `.ok` (bool)
+and `.detail` (what to do if it failed). A failing `trigger_port` just means the
+experiment isn't running. See [troubleshooting.md](troubleshooting.md#runtime).
 
 ## Configuration
 
@@ -97,7 +101,9 @@ Subscribes to topics `ZONE_ENTER`, `ZONE_EXIT`, and `kill` on port 5556 (multipa
 [b"ZONE_EXIT",      b'{"obj_id": 123, "reason": "left_fov", "timestamp": 1234.80, "duration": 0.20}']
 ```
 
-Kill signal: `[b"kill", b""]`
+The binary also subscribes to a bare `kill` topic, but **nothing in this
+codebase publishes to it** — shutdown is by SIGTERM from the Python wrapper.
+The subscription is vestigial; don't build on it without adding a publisher.
 
 **State machine:**
 
@@ -116,16 +122,16 @@ Kill signal: `[b"kill", b""]`
 frame_idx,nframe,ts_sec,ts_usec,cam_time_ns,trigger_frame_idx
 0,100,1234,567890,1234567890000,42
 ```
-`trigger_frame_idx` is written to every row and indicates which buffer frame corresponds to the real `ZONE_ENTER` moment. Frames before it are pre-stimulus baseline; frames after are the response.
+`trigger_frame_idx` is written to every row and indicates which buffer frame corresponds to the real `ZONE_ENTER` moment — that is, it marks **recording start**, not stimulus onset. Actual stimulus onset for opto/visual is in `latency.csv`'s `frame` field for that system's row (`"opto"`/`"visual"`); `record_frame` on that same row equals `trigger_frame_idx`/the outer entry frame, so `(row.frame - row.record_frame)` is the number of Braid frames between recording start and stimulus onset. Convert to camera frames via the fps ratio if needed for video alignment (Braid runs ~100Hz; camera fps is in `configs/config.toml`'s `[camera]` section).
 
 **Lens timing CSV:** `{save_folder}/obj_id_{obj_id}_frame_{frame}_lens_timing.csv`
 
 Written by the Python `LiquidLens` process. One row per commanded diopter change while tracking an object (updates that fall below the slew-rate threshold or arrive within the 25ms hardware rate limit are skipped and don't produce a row).
 ```csv
 t_braid,t_relay,t_lens_recv,t_serial_start,t_diopter_sent,delay_ms,frame,obj_id,x,y,z,focus_z,diopter,target_diopter,predictor
-1234567.888,1234567.889,1234567.890,1234567.891,1234567.893,2.1,4589,123,0.01,-0.02,0.18,0.18,3.2,3.2,kalman
+1234567.888,1234567.889,1234567.890,1234567.891,1234567.893,2.1,4589,123,0.01,-0.02,0.18,0.18,3.2,3.2,linear
 ```
-`delay_ms` = time from `t_serial_start` to `t_diopter_sent`, i.e. the USB serial write itself. `predictor` records which mode (`none`, `linear`, `kalman`) produced `focus_z` for that row. `diopter` is the slew-rate-limited value actually sent to the lens; `target_diopter` is what the calibration curve returned before limiting. Compare the two to see how much `max_diopter_step` is holding back a given trial. Feed this file to `uv run python -m src.tools.lens_latency_analyze` for latency percentile breakdowns and a recommended `system_latency`.
+`delay_ms` = time from `t_serial_start` to `t_diopter_sent`, i.e. the USB serial write itself. `predictor` records which mode (`none` or `linear`) produced `focus_z` for that row. `diopter` is the slew-rate-limited value actually sent to the lens; `target_diopter` is what the calibration curve returned before limiting. Compare the two to see how much `max_diopter_step` is holding back a given trial. Feed this file to `uv run python -m src.tools.lens_latency_analyze` for latency percentile breakdowns and a recommended `system_latency`.
 
 **Debug histograms:** Generate offline with `src/tools/generate_camera_histograms.py`
 - Reads CSV files and produces PNG histograms showing frame counter diffs, inter-frame interval, jitter, timeline
@@ -158,11 +164,19 @@ netstat -tulpn | grep 5556
 ## Testing
 
 ```bash
-# Integration test (requires hardware)
-python tests/test_camera_integration.py
+# Python-side unit tests (no hardware)
+uv run pytest tests/test_camera_config.py tests/test_camera_prerequisites.py
 
-# Check Rust compilation
-cd optofly-camera && cargo check
+# Rust unit tests + compile check
+cd optofly-camera && cargo test && cargo check
 ```
 
-`test_camera_integration.py` exercises the pure-Python `CameraProcess` class in `src/processes/camera.py` (talks to the camera directly via `ximea-py`), not `RustCameraProcess`. The two are separate implementations in the same file. `main.py` runs `RustCameraProcess` (imported under the alias `CameraProcess`) for actual experiments, so passing this test does not confirm the Rust binary path works. Verify that by running `main.py` with `[camera] active = true` and checking a recording is produced.
+There is no automated end-to-end camera test: capture needs a real XIMEA device,
+so nothing above proves the binary can actually record. Verify that by hand —
+run `main.py` with `[camera] active = true` and confirm an
+`obj_id_{N}_frame_{M}.mp4` appears in `camera.save_folder` after a trigger.
+
+`RustCameraProcess` is the only camera implementation. An earlier pure-Python
+`CameraProcess` that drove the sensor directly via `ximea-py` was removed;
+`main.py` imports `RustCameraProcess` under the alias `CameraProcess`, which is
+all that name now refers to.

@@ -1,3 +1,9 @@
+# Conda/mamba install path (docs/getting-started.md, Installation Reference).
+#
+# This file is a second, hand-maintained dependency list with no lockfile, so
+# it must be kept in step with the `dependencies` array in pyproject.toml.
+# tests/test_environment_yml.py enforces that -- run the suite after changing
+# either file.
 name: optofly_env
 channels:
   - conda-forge
@@ -19,8 +25,16 @@ dependencies:
   - pytest>=8.4.2
   - ruff
 
-  # Additional dependencies via pip (not available in conda)
+  # Additional dependencies via pip (not on conda-forge under the same name,
+  # or installed straight from git).
   - pip
   - pip:
       - rerun-sdk>=0.23.2
       - tomli-w>=1.1.0
+      - flask>=3.1.2
+      - panda3d>=1.10.0
+      - opencv-python>=4.13.0.92
+      # Git installs -- conda cannot express these. optotune-lens is fetched
+      # over SSH, so `mamba env create` needs a key with access to that repo.
+      - ximea @ git+https://github.com/elhananby/ximea-py.git
+      - optotune-lens @ git+ssh://git@github.com/elhananby/optotune-lens.git

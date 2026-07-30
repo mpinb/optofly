@@ -154,9 +154,9 @@ def load_environment(
 ) -> Tuple[ZMQConfig, Sequence[Tuple[float, float]], TriggerHandlerConfig]:
     """Load ZMQ settings, arena corners, and trigger configuration."""
 
-    zmq_config = ZMQConfig(config_path)
+    zmq_config = ZMQConfig.from_path(config_path)
 
-    camera_config = CameraConfig(config_path)
+    camera_config = CameraConfig.from_path(config_path)
     corners = [
         (camera_config.fov_x_min, camera_config.fov_y_min),
         (camera_config.fov_x_min, camera_config.fov_y_max),
@@ -164,7 +164,7 @@ def load_environment(
         (camera_config.fov_x_max, camera_config.fov_y_max),
     ]
 
-    trigger_config = TriggerHandlerConfig(config_path)
+    trigger_config = TriggerHandlerConfig.from_path(config_path)
 
     return zmq_config, corners, trigger_config
 

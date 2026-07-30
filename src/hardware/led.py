@@ -17,6 +17,7 @@ import serial
 import logging
 
 from src.utils.config import OptoTriggerConfig
+from src.utils.logger import configure_process_logging
 
 
 class OptoTrigger:
@@ -62,24 +63,18 @@ class OptoTrigger:
     All selected parameter values are logged for full reproducibility.
     """
 
-    def __init__(
-        self,
-        config_path: str = "configs/config.toml",
-        process_name: str = "OptoTrigger",
-        log_level: str = "INFO",
-        log_color: str = "RED",
-    ):
+    def __init__(self, config_path: str = "configs/config.toml"):
         """
         Initialize the OptoTrigger hardware controller.
 
         Args:
             config_path: Path to the configuration file
-            process_name: Name for logging purposes
-            log_level: Logging level (DEBUG, INFO, WARNING, ERROR)
-            log_color: Color for log messages
+
+        Logging is inherited from the calling process, which has already run
+        configure_process_logging() -- this class takes no logging arguments.
         """
 
-        self.config = OptoTriggerConfig(config_path)
+        self.config = OptoTriggerConfig.from_path(config_path)
         self.serial_conn = None
         self.is_initialized = False
 
@@ -496,11 +491,11 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    with OptoTrigger(
-        config_path=args.config,
-        log_level=args.log_level,
-        process_name="OptoTriggerCLI",
-    ) as trigger:
+    configure_process_logging(
+        None, "OptoTriggerCLI", "RED", level=getattr(logging, args.log_level.upper(), logging.INFO)
+    )
+
+    with OptoTrigger(config_path=args.config) as trigger:
         # Apply any parameter overrides
         params_changed = False
         overrides = {

@@ -130,7 +130,7 @@ class BraidPublisher(WorkerProcess):
         )
 
         # Initialize our specific attributes
-        self.config = BraidPublisherConfig(config_path)
+        self.config = BraidPublisherConfig.from_path(config_path)
         self.stop_event = event if event is not None else mp.Event()
 
         # Pre-encode constants used on the per-event hot path.

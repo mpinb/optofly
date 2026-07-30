@@ -74,6 +74,8 @@ def configure_test_trigger(handler):
             "min_velocity": 0.05,
             "max_velocity": 0.5,
             "heading_cone_deg": 30.0,
+            "opto_zone_scale": 0.5,
+            "visual_zone_scale": 1.0,
         },
         camera=camera,
         zmq=zmq,
@@ -92,6 +94,8 @@ def configure_test_trigger(handler):
     handler.z_min = test_config.z_min
     handler.z_max = test_config.z_max
     handler.cooldown_period = test_config.cooldown_period
+    handler.opto_zone_scale = test_config.opto_zone_scale
+    handler.visual_zone_scale = test_config.visual_zone_scale
 
 
 class FakeClock:
@@ -424,6 +428,176 @@ def test_zone_enter_preserves_braid_timestamp_and_adds_handler_timestamp(
     assert payload["timestamp"] == fake_clock.now  # existing field unchanged
 
 
+def all_messages(fake_publisher):
+    return decode_messages(fake_publisher)
+
+
+def test_opto_zone_enter_fires_once_fly_reaches_scaled_inner_zone(handler):
+    # configure_test_trigger (via the handler fixture) already sets
+    # opto_zone_scale=0.5 / visual_zone_scale=1.0.
+
+    # FOV is -0.05..0.05 in x/y (see configure_test_trigger). Outer entry at
+    # x=0.05 is inside the outer FOV (triggers ZONE_ENTER + VISUAL_ZONE_ENTER,
+    # since visual_zone_scale=1.0 makes the visual box equal the outer FOV)
+    # but outside the opto zone (half-width 0.05*0.5=0.025 at scale=0.5).
+    # Only once x reaches 0.0 (fov center) is the fly guaranteed inside the
+    # scaled-down opto box, firing OPTO_ZONE_ENTER on that later update.
+    handler.process_message(make_birth(x=0.08, frame=1, xvel=-0.2))
+    handler.process_message(make_update(x=0.05, frame=2, xvel=-0.2))
+    handler.process_message(make_update(x=0.0, frame=3, xvel=-0.2))
+
+    messages = all_messages(handler.publisher)
+    topics = [topic for topic, _ in messages]
+    assert topics == ["ZONE_ENTER", "VISUAL_ZONE_ENTER", "OPTO_ZONE_ENTER"]
+    opto_payload = messages[2][1]
+    assert opto_payload["obj_id"] == 7
+    assert opto_payload["frame"] == 3
+    assert opto_payload["record_frame"] == 2
+
+
+def test_opto_zone_enter_does_not_refire_while_still_inside_scaled_inner_zone(handler):
+    """One-shot guarantee at a realistic (non-1.0) production-default scale.
+    The existing one-shot test (test_opto_and_visual_fired_flags_reset_on_zone_exit_allowing_refire)
+    only checks this at opto_zone_scale=1.0; this exercises it at the
+    handler fixture's default opto_zone_scale=0.5.
+    """
+    # handler fixture (via configure_test_trigger) already sets
+    # opto_zone_scale=0.5 / visual_zone_scale=1.0.
+    handler.process_message(make_birth(x=0.08, frame=1, xvel=-0.2))
+    handler.process_message(make_update(x=0.05, frame=2, xvel=-0.2))  # ZONE_ENTER + VISUAL_ZONE_ENTER; outside the ±0.025 opto box
+    handler.process_message(make_update(x=0.0, frame=3, xvel=-0.2))  # inside the opto box -> OPTO_ZONE_ENTER fires
+    handler.process_message(make_update(x=0.01, frame=4, xvel=-0.2))  # still inside the opto box -> must not refire
+
+    topics = [topic for topic, _ in all_messages(handler.publisher)]
+    assert topics == ["ZONE_ENTER", "VISUAL_ZONE_ENTER", "OPTO_ZONE_ENTER"]
+    assert topics.count("OPTO_ZONE_ENTER") == 1
+
+
+def test_visual_zone_enter_fires_same_frame_as_zone_enter_when_scale_is_one(handler):
+    handler.visual_zone_scale = 1.0
+
+    handler.process_message(make_birth(x=0.08, frame=1, xvel=-0.2))
+    handler.process_message(make_update(x=0.05, frame=2, xvel=-0.2))
+
+    messages = all_messages(handler.publisher)
+    assert [topic for topic, _ in messages] == ["ZONE_ENTER", "VISUAL_ZONE_ENTER"]
+    assert messages[0][1]["frame"] == messages[1][1]["frame"] == 2
+    assert messages[1][1]["record_frame"] == 2
+
+
+def test_opto_and_visual_fired_flags_reset_on_zone_exit_allowing_refire(handler):
+    handler.opto_zone_scale = 1.0
+    handler.visual_zone_scale = 1.0
+
+    handler.process_message(make_birth(x=0.08, frame=1, xvel=-0.2))
+    handler.process_message(make_update(x=0.05, frame=2, xvel=-0.2))
+    handler.process_message(make_update(x=0.08, frame=3, xvel=-0.2))  # exits FOV
+    handler.process_message(make_update(x=0.05, frame=4, xvel=-0.2))  # re-enters
+
+    # Both scales are 1.0 here, so opto and visual both fire on the same
+    # update as ZONE_ENTER; the implementation checks opto before visual
+    # when both fire simultaneously (see Step 7 below), hence this order.
+    topics = [topic for topic, _ in all_messages(handler.publisher)]
+    assert topics == [
+        "ZONE_ENTER",
+        "OPTO_ZONE_ENTER",
+        "VISUAL_ZONE_ENTER",
+        "ZONE_EXIT",
+        "ZONE_ENTER",
+        "OPTO_ZONE_ENTER",
+        "VISUAL_ZONE_ENTER",
+    ]
+
+
+def test_opto_zone_enter_never_fires_before_zone_enter(handler):
+    handler.opto_zone_scale = 1.0
+    handler.visual_zone_scale = 1.0
+
+    # xvel=0 with min_velocity=0.05 means the object never passes the
+    # velocity gate, so it should never reach in_zone at all.
+    handler.process_message(make_birth(x=0.08, frame=1, xvel=0.0))
+    handler.process_message(make_update(x=0.05, frame=2, xvel=0.0))
+
+    assert all_messages(handler.publisher) == []
+
+
+def test_opto_and_visual_zone_enter_do_not_fire_when_object_drifts_outside_z_band(
+    handler,
+):
+    """Regression test: in_zone is a sticky flag that stays True even after
+    the object's z drifts outside [z_min, z_max] (only x/y exit triggers
+    ZONE_EXIT, by design). The inner opto/visual zone check must still
+    require the object be within the live trigger zone (including z), not
+    just rely on the sticky in_zone flag, since _is_in_scaled_zone only
+    checks x/y and never z.
+    """
+    handler.opto_zone_scale = 0.5
+    handler.visual_zone_scale = 0.5
+
+    handler.process_message(make_birth(x=0.08, z=0.2, frame=1, xvel=-0.2))
+    # x=0.05 is inside the outer FOV (-0.05..0.05) so ZONE_ENTER fires here,
+    # but it's outside the 0.5-scaled inner box (-0.025..0.025), so neither
+    # OPTO_ZONE_ENTER nor VISUAL_ZONE_ENTER fires yet -- no flag reset needed.
+    handler.process_message(make_update(x=0.05, z=0.2, frame=2, xvel=-0.2))
+
+    topics_after_enter = [topic for topic, _ in all_messages(handler.publisher)]
+    assert topics_after_enter == ["ZONE_ENTER"]
+
+    # x=0.0 is now well inside the scaled inner box, but z=0.9 is far outside
+    # z_max=0.3, so in_zone_now is False here even though the sticky in_zone
+    # flag remains True. Neither inner zone should fire.
+    handler.process_message(make_update(x=0.0, z=0.9, frame=3, xvel=-0.2))
+
+    topics = [topic for topic, _ in all_messages(handler.publisher)]
+    assert topics == ["ZONE_ENTER"]
+    assert "OPTO_ZONE_ENTER" not in topics
+    assert "VISUAL_ZONE_ENTER" not in topics
+
+
+def test_zone_enter_payload_includes_record_frame_equal_to_its_own_frame(handler):
+    handler.process_message(make_birth(x=0.08, frame=1, xvel=-0.2))
+    handler.process_message(make_update(x=0.05, frame=2, xvel=-0.2))
+
+    messages = zone_messages(handler.publisher)
+    zone_enter_payload = messages[0][1]
+    assert zone_enter_payload["record_frame"] == zone_enter_payload["frame"] == 2
+
+
+def test_get_zone_at_z_scale_one_equals_outer_fov(handler):
+    x_min, x_max, y_min, y_max = handler._get_zone_at_z(0.2, 1.0)
+    assert (x_min, x_max, y_min, y_max) == handler._get_fov_at_z(0.2)
+
+
+def test_get_zone_at_z_shrinks_toward_center(handler):
+    outer = handler._get_fov_at_z(0.2)
+    x_min, x_max, y_min, y_max = handler._get_zone_at_z(0.2, 0.5)
+    outer_cx = (outer[0] + outer[1]) / 2.0
+    outer_cy = (outer[2] + outer[3]) / 2.0
+    assert x_min == pytest.approx(outer_cx - (outer[1] - outer[0]) / 4.0)
+    assert x_max == pytest.approx(outer_cx + (outer[1] - outer[0]) / 4.0)
+    assert y_min == pytest.approx(outer_cy - (outer[3] - outer[2]) / 4.0)
+    assert y_max == pytest.approx(outer_cy + (outer[3] - outer[2]) / 4.0)
+
+
+def test_get_zone_at_z_scales_frustum_interpolated_box(frustum_handler):
+    """Uses the frustum_handler fixture already defined earlier in this
+    file (near ±0.03 at z=0.10, far ±0.06 at z=0.30, both centered on 0),
+    so a 0.5 scale should exactly halve the frustum-interpolated box at
+    either plane."""
+    h = frustum_handler
+    x_min, x_max, y_min, y_max = h._get_zone_at_z(0.10, 0.5)
+    assert x_min == pytest.approx(-0.015)
+    assert x_max == pytest.approx(0.015)
+    assert y_min == pytest.approx(-0.015)
+    assert y_max == pytest.approx(0.015)
+
+    x_min, x_max, y_min, y_max = h._get_zone_at_z(0.30, 0.5)
+    assert x_min == pytest.approx(-0.03)
+    assert x_max == pytest.approx(0.03)
+    assert y_min == pytest.approx(-0.03)
+    assert y_max == pytest.approx(0.03)
+
+
 def test_velocity_and_age_bookkeeping_still_use_receipt_clock_not_braid_timestamp(
     handler, fake_clock
 ):
@@ -438,3 +612,58 @@ def test_velocity_and_age_bookkeeping_still_use_receipt_clock_not_braid_timestam
     tracked = handler.tracked_objects[7]
     assert tracked.get_tracking_duration(fake_clock.now) == 0.0
     assert tracked.current_braid_timestamp == 1_000_000.0
+
+
+class _CapturingLogger:
+    def __init__(self):
+        self.errors = []
+
+    def error(self, msg, *args):
+        self.errors.append(msg % args if args else msg)
+
+    def warning(self, *a, **k):
+        pass
+
+    def info(self, *a, **k):
+        pass
+
+    def debug(self, *a, **k):
+        pass
+
+
+def test_malformed_update_for_unknown_object_names_the_missing_field(monkeypatch):
+    """An Update for an unknown obj_id delegates to _process_birth(), which
+    swallows its own KeyError. Control then fell through to
+    self.tracked_objects[obj_id], raising a *second* KeyError that the outer
+    handler reported as "Missing field in Update message: 'obj_id'" -- naming
+    the wrong field and the wrong message type, so anyone debugging a Braid
+    feed was sent looking for a field that was present."""
+    handler = object.__new__(TriggerHandler)
+    handler.tracked_objects = {}
+    handler.logger = _CapturingLogger()
+    handler.config = type("C", (), {"min_velocity": 0.01})()
+
+    # 'zvel' is genuinely absent; obj_id is present.
+    handler._process_update(
+        {"obj_id": 3, "frame": 1, "x": 0.0, "y": 0.0, "z": 0.1, "xvel": 0.0, "yvel": 0.0}
+    )
+
+    errors = handler.logger.errors
+    assert len(errors) == 1, (
+        f"one failure must produce one message, not a real one followed by a "
+        f"spurious 'Missing field in Update message: 3': {errors}"
+    )
+    assert "zvel" in errors[0], f"must name the field that is actually missing: {errors}"
+    assert "Birth" in errors[0], f"must name the message that actually failed: {errors}"
+    assert 3 not in handler.tracked_objects
+
+
+def test_failed_birth_does_not_leave_a_half_tracked_object(monkeypatch):
+    handler = object.__new__(TriggerHandler)
+    handler.tracked_objects = {}
+    handler.logger = _CapturingLogger()
+    handler.config = type("C", (), {"min_velocity": 0.01})()
+
+    handler._process_birth({"obj_id": 9, "frame": 1, "x": 0.0})
+
+    assert handler.tracked_objects == {}

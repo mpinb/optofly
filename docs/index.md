@@ -27,5 +27,5 @@ OptoFly integrates multiple hardware and software components for automated close
 - **Ximea Camera** — High-speed (500fps) triggered video recording
 - **Optogenetic Trigger** — LED stimulation control via Arduino
 - **Liquid Lens** — Dynamic autofocus with optional predictive tracking
-- **Visual Stimuli** — Configurable patterns (looming, vertical bar, static)
+- **Visual Stimuli** — Configurable Panda3D patterns (background, looming, oscillating square)
 - **Monitoring** — Web dashboard for real-time trigger visualization

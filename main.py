@@ -31,9 +31,23 @@ def load_config(config_path: str) -> AppConfig:
         return AppConfig.load(config_path)
     except FileNotFoundError:
         print(f"ERROR: Config file not found: {config_path}")
+        print("  Create it with: cp configs/config.example.toml configs/config.toml")
+        sys.exit(1)
+    except tomllib.TOMLDecodeError as e:
+        # Distinguished from a ValueError below so the line/column tomllib
+        # reports isn't flattened into a generic "failed to load" message.
+        print(f"ERROR: {config_path} is not valid TOML.")
+        print(f"  {e}")
+        sys.exit(1)
+    except ValueError as e:
+        # The message already opens with the config path (AppConfig.load adds
+        # it), so don't repeat it in the header.
+        print("ERROR: invalid configuration")
+        for line in str(e).splitlines():
+            print(f"  {line}")
         sys.exit(1)
     except Exception as e:
-        print(f"ERROR: Failed to load config: {e}")
+        print(f"ERROR: Failed to load config {config_path}: {e}")
         sys.exit(1)
 
 
@@ -52,6 +66,20 @@ def check_recording_time_sufficient(app_config: AppConfig) -> str | None:
             "truncated before the fly exits the zone."
         )
     return None
+
+
+def format_critical_failures(status: dict) -> list[str]:
+    """Return one line per process that recorded a failure reason.
+
+    Experiment already stores why each process died; without this the operator
+    returning to a finished 24-hour run saw only "A critical process died",
+    with the actual cause somewhere up the scrollback (or gone).
+    """
+    return [
+        f"✗ {info['failed_reason']}"
+        for info in status["processes"].values()
+        if info.get("failed_reason")
+    ]
 
 
 def print_experiment_config(app_config: AppConfig, active_processes: list):
@@ -196,6 +224,8 @@ def main():
             experiment.check_health()
             if not experiment.is_running():
                 print("\n\nA critical process died during the run, shutting down...")
+                for line in format_critical_failures(experiment.status()):
+                    print(f"  {line}")
                 break
             time.sleep(0.1)
     except ExperimentStartError as e:

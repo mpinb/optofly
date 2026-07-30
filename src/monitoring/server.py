@@ -1,4 +1,6 @@
 from flask import Flask, render_template, jsonify, Response
+import collections
+import logging
 import zmq
 import threading
 import json
@@ -6,16 +8,23 @@ import queue
 import uuid
 import datetime
 
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__)
 
 # Global dict of queues
 client_queues = {}
 queues_lock = threading.Lock()
 
+# How many recent triggers to keep for the dashboard. /api/triggers returns the
+# whole list on every poll, so this is bounded rather than growing for the life
+# of a 24-hour run; "count" below stays a true running total.
+TRIGGER_HISTORY = 500
+
 # In-memory storage for trigger data
 trigger_data = {
     "count": 0,
-    "triggers": [],
+    "triggers": collections.deque(maxlen=TRIGGER_HISTORY),
 }
 
 # Thread-safe queue and lock for trigger data
@@ -24,27 +33,40 @@ trigger_queue = queue.Queue()
 
 
 def zmq_listener(zmq_address="tcp://localhost:23456", zone_enter_topic="ZONE_ENTER"):
-    """Listen for ZONE_ENTER messages over ZMQ and update trigger_data."""
+    """Listen for ZONE_ENTER messages over ZMQ and update trigger_data.
+
+    Decoding and dispatch are guarded, but receive failures are not, and the
+    split is deliberate. A malformed message used to end this daemon thread
+    while Flask carried on serving, so the dashboard stayed up and silently
+    stopped updating -- and an operator reading a stale-but-live dashboard
+    concludes no flies are triggering. A dead socket, by contrast, is not
+    recoverable here; the thread ends, but loudly.
+    """
     context = zmq.Context()
     subscriber = context.socket(zmq.SUB)
     subscriber.connect(zmq_address)
     subscriber.setsockopt_string(zmq.SUBSCRIBE, zone_enter_topic)
 
     while True:
-        topic, message = subscriber.recv_multipart()
-        topic = topic.decode("utf-8")
-        json_data = message.decode("utf-8")
+        parts = subscriber.recv_multipart()
 
-        if topic == zone_enter_topic:
-            data = json.loads(json_data)
+        try:
+            topic_bytes, message = parts
+            topic = topic_bytes.decode("utf-8")
+            if topic != zone_enter_topic:
+                continue
+            data = json.loads(message.decode("utf-8"))
+        except Exception:
+            logger.exception("Monitoring listener: dropping unreadable message")
+            continue
 
-            with trigger_lock:
-                trigger_data["count"] += 1
-                trigger_data["triggers"].append(data)
+        with trigger_lock:
+            trigger_data["count"] += 1
+            trigger_data["triggers"].append(data)
 
-            with queues_lock:
-                for _, q in list(client_queues.items()):
-                    q.put(data)
+        with queues_lock:
+            for _, q in list(client_queues.items()):
+                q.put(data)
 
 
 @app.route("/")
@@ -55,7 +77,11 @@ def index():
 @app.route("/api/triggers")
 def get_triggers():
     with trigger_lock:
-        return jsonify(trigger_data)
+        # triggers is a bounded deque, which jsonify cannot serialize; copy to
+        # a list inside the lock so the response is also a stable snapshot.
+        return jsonify(
+            {"count": trigger_data["count"], "triggers": list(trigger_data["triggers"])}
+        )
 
 
 @app.route("/stream")

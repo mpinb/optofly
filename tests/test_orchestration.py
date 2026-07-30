@@ -1,7 +1,10 @@
+from pathlib import Path
+
 import pytest
 
 import src.orchestration as orchestration
 from src.orchestration import Experiment
+from src.utils.config import AppConfig
 
 
 class FakeProcess:
@@ -179,6 +182,57 @@ def test_dead_trigger_handler_produces_its_own_message():
     assert "TriggerHandler" in messages[0]
 
 
+def test_inactive_opto_trigger_is_not_critical(config_path):
+    """configs/config.example.toml ships opto_trigger.active = false. A user
+    with no Arduino wired up must still be able to run the experiment, so a
+    dead OptoTriggerWorker is only fatal when stimulation was requested."""
+    app_config = AppConfig.load(config_path)
+    assert app_config.opto_trigger.active is False
+
+    critical = orchestration._critical_names(app_config)
+
+    assert "OptoTriggerWorker" not in critical
+    assert {"BraidPublisher", "TriggerHandler"} <= critical
+
+
+def test_active_opto_trigger_is_critical(tmp_path, config_path):
+    source = Path(config_path).read_text()
+    active_config = tmp_path / "opto_active.toml"
+    active_config.write_text(
+        source.replace("[opto_trigger]\n# LED optogenetic stimulation\nactive = false",
+                       "[opto_trigger]\n# LED optogenetic stimulation\nactive = true")
+    )
+
+    app_config = AppConfig.load(str(active_config))
+    assert app_config.opto_trigger.active is True
+
+    assert "OptoTriggerWorker" in orchestration._critical_names(app_config)
+
+
+def test_dead_inactive_opto_trigger_produces_no_fatal_message():
+    """End-to-end of the above through the message builder."""
+    processes = [("OptoTriggerWorker", _FakeDeadProcess())]
+    critical = {"BraidPublisher", "TriggerHandler"}
+
+    assert orchestration._check_critical_processes_alive(processes, critical) == []
+
+
+def test_liquid_lens_is_not_critical_when_camera_is_inactive(tmp_path, config_path):
+    """LiquidLens is only started when camera.active is true, so it must not
+    be judged critical when the camera is off."""
+    source = Path(config_path).read_text()
+    no_camera = tmp_path / "no_camera.toml"
+    no_camera.write_text(
+        source.replace("# High-speed camera settings\nactive = true",
+                       "# High-speed camera settings\nactive = false")
+    )
+
+    app_config = AppConfig.load(str(no_camera))
+    assert app_config.camera.active is False
+
+    assert "LiquidLens" not in orchestration._critical_names(app_config)
+
+
 def test_multiple_dead_critical_processes_each_produce_a_message():
     processes = [
         ("BraidPublisher", _FakeDeadProcess()),
@@ -246,13 +300,17 @@ def test_start_while_running_raises(config_path):
 def test_critical_process_failure_raises_start_error(monkeypatch, config_path):
     from src.orchestration import ExperimentStartError
 
-    monkeypatch.setattr(orchestration, "OptoTriggerWorker", FakeCrashingProcess)
+    # LiquidLens, not OptoTriggerWorker: the example config sets
+    # opto_trigger.active = false, which (deliberately) makes a dead
+    # OptoTriggerWorker non-fatal. camera.active is true there, so LiquidLens
+    # is critical and exercises the same fail-fast path.
+    monkeypatch.setattr(orchestration, "LiquidLens", FakeCrashingProcess)
     exp = Experiment()
     with pytest.raises(ExperimentStartError):
         exp.start(config_path, metadata=None)
 
     status = exp.status()
-    assert status["processes"]["OptoTriggerWorker"]["failed_reason"] is not None
+    assert status["processes"]["LiquidLens"]["failed_reason"] is not None
     exp.stop()
 
 
@@ -355,14 +413,16 @@ def test_check_health_sets_stop_event_when_critical_process_dies_mid_run(config_
     exp.start(config_path, metadata=None)
     assert exp.is_running() is True
 
-    # Simulate OptoTriggerWorker dying mid-run (it started alive, per FakeProcess.start()).
-    opto = [p for name, p in exp._processes if name == "OptoTriggerWorker"][0]
-    opto._alive = False
+    # Simulate LiquidLens dying mid-run (it started alive, per FakeProcess.start()).
+    # LiquidLens rather than OptoTriggerWorker because the example config
+    # disables opto stimulation, which makes that process non-critical.
+    lens = [p for name, p in exp._processes if name == "LiquidLens"][0]
+    lens._alive = False
 
     exp.check_health()
 
     assert exp.is_running() is False
-    assert exp.status()["processes"]["OptoTriggerWorker"]["failed_reason"] is not None
+    assert exp.status()["processes"]["LiquidLens"]["failed_reason"] is not None
     exp.stop()
 
 
@@ -393,3 +453,54 @@ def test_check_health_logs_once_for_non_critical_process_death(config_path, capl
     assert len(matching) == 1
     assert exp.is_running() is True  # non-critical death is never fatal
     exp.stop()
+
+
+class _RecordingBraidProxy:
+    def __init__(self):
+        self.stopped = False
+
+    def stop_csv_recording(self):
+        self.stopped = True
+
+
+def test_stop_ends_the_braid_recording_when_start_failed_before_the_stop_event(
+    monkeypatch, config_path, patch_processes
+):
+    """prepare_braid_folder() starts a Braid recording. If start() then raises
+    before it assigns _stop_event -- writing metadata, copying configs,
+    configuring logging, constructing the first process -- stop() used to
+    return immediately at `if self._stop_event is None`, never reaching the
+    braid_proxy teardown. Braid then records forever with nobody to stop it,
+    and the next run starts a second one alongside it."""
+    exp = Experiment()
+    exp.prepare_braid_folder(config_path)
+    proxy = _RecordingBraidProxy()
+    exp._braid_proxy = proxy
+
+    def explode(*a, **kw):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(orchestration, "write_metadata", explode)
+
+    with pytest.raises(OSError):
+        exp.start(config_path, metadata={"experiment_duration": 1})
+
+    exp.stop()
+
+    assert proxy.stopped is True, "a half-started experiment must still stop recording"
+
+
+def test_stop_ends_the_braid_recording_after_a_normal_run(config_path, patch_processes):
+    exp = Experiment()
+    exp.prepare_braid_folder(config_path)
+    proxy = _RecordingBraidProxy()
+    exp._braid_proxy = proxy
+
+    exp.start(config_path, metadata=None)
+    exp.stop()
+
+    assert proxy.stopped is True
+
+
+def test_stop_is_still_a_no_op_with_nothing_started():
+    Experiment().stop()  # must not raise

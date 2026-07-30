@@ -5,17 +5,26 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "flask>=3.1.2",
-    "matplotlib>=3.10.3",
+    # --- experiment runtime (imported by src/processes, src/visual, src/monitoring) ---
+    "flask>=3.1.2",             # monitoring dashboard
     "numpy>=2.2.5",
-    "opencv-python>=4.13.0.92",
-    "optotune-lens",
-    "panda3d>=1.10.0",
-    "pyserial>=3.5",
-    "pyzmq>=26.4.0",
-    "requests>=2.32.3",
-    "rerun-sdk>=0.23.2",
-    "scipy>=1.15.3",
+    "optotune-lens",            # liquid lens serial driver (src/processes/lens.py)
+    "panda3d>=1.10.0",          # visual stimuli arena (src/visual/)
+    "pyserial>=3.5",            # opto trigger Arduino (src/hardware/led.py)
+    "pyzmq>=26.4.0",            # all inter-process messaging
+    "requests>=2.32.3",         # Braid HTTP SSE + callback API
+    "scipy>=1.15.3",            # lens calibration curve fitting
+
+    # --- src/tools/ only: calibration and offline analysis, never the runtime ---
+    # These are easy to mistake for dead weight. Each is imported lazily by the
+    # tool named beside it, so nothing on the experiment path touches them.
+    "matplotlib>=3.10.3",       # src/tools/generate_camera_histograms.py
+    "opencv-python>=4.13.0.92", # src/tools/calibrate_{braid_ximea,frustum_fov}.py
+    "rerun-sdk>=0.23.2",        # src/tools/braid_visualizer.py
+    # NOT dead despite the Python camera path being replaced by the Rust
+    # binary: the two FOV calibration tools still open a live XIMEA preview so
+    # you can click the FOV edges. The runtime capture path uses the Rust
+    # xiapi/xiapi-sys crates instead, which are unrelated to this package.
     "ximea @ git+https://github.com/elhananby/ximea-py.git",
 ]
 

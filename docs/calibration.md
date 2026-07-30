@@ -126,7 +126,11 @@ See that repo's own README for hardware setup and the full option list.
 
 ### Tuning Prediction Latency
 
-If you enable `predictor = "linear"` or `predictor = "kalman"` (see the Liquid Lens section of [architecture.md](architecture.md)), the `system_latency` value under `[liquid_lens.kalman]` should reflect your rig's actual measured delay, not a guess. After running a session, measure it from the recorded lens timing CSVs:
+If you enable `predictor = "linear"` (the only predictor besides `"none"`; a
+`"kalman"` mode existed once and was removed, though the `[liquid_lens.kalman]`
+section name was kept for config compatibility), the `system_latency` value
+under `[liquid_lens.kalman]` should reflect your rig's actual measured delay,
+not a guess. After running a session, measure it from the recorded lens timing CSVs:
 
 ```bash
 uv run python -m src.tools.lens_latency_analyze /mnt/data/videos/<braid_dir>

@@ -168,6 +168,8 @@ heading_cone_deg = 45.0     # Heading tolerance from center-directed (degrees)
 min_velocity = 0.01         # Min velocity threshold (m/s)
 max_velocity = 2.0          # Max velocity threshold, rejects tracking noise (m/s)
 zone_timeout = 2.0          # Auto ZONE_EXIT if no updates for this long (s)
+opto_zone_scale = 0.5       # Opto fires only once the fly reaches this fraction of the FOV, centered (0-1]
+visual_zone_scale = 1.0     # Visual fires at this fraction of the FOV, centered (0-1]; 1.0 = same as camera FOV
 
 [camera]
 active = true
@@ -182,8 +184,8 @@ intensity = [0, 51, 102, 153, 204, 255]
 color = "red"
 
 [liquid_lens]
-# Activates automatically when camera is active
-port = "/dev/ttyUSB1"
+# Activates automatically when camera is active — no active flag of its own
+port = "/dev/optotune_ld"   # udev symlink; see configs/config.example.toml
 calibration_file = "calibrations/liquid_lens.csv"
 
 [visual_stimuli]
@@ -195,6 +197,10 @@ active = true
 host = "0.0.0.0"
 port = 5000
 ```
+
+**Operational notes:**
+- An existing rig `configs/config.toml` (git-ignored, not touched by upgrades) that predates the opto/visual zone split has none of `opto_zone_scale`, `visual_zone_scale`, `opto_enter_topic`, or `visual_enter_topic`. On the next run, opto will silently start firing at 50% of the FOV instead of the full FOV (the `opto_zone_scale` default). This is not a bug — just worth knowing before your first run after upgrading, since the recorded video will look identical but the LED will fire later than it used to.
+- It's now possible for a trial to have a recording plus lens/visual latency rows but *no* opto latency row at all, if the fly left the outer zone before ever reaching the smaller opto zone. This is expected, not a dropped message — check `opto_zone_scale` if you expect opto to fire on every trial.
 
 ### configs/visual_stimuli.toml
 
@@ -263,14 +269,15 @@ With `--skip-metadata`, `experiment_duration` defaults to 24 hours. The launcher
 # Python unit tests
 uv run pytest
 
-# Camera integration test (requires hardware)
-python tests/test_camera_integration.py
+# Camera preflight (no hardware needed — reports what's missing)
+uv run python -c "from src.processes.camera import check_camera_prerequisites as c; \
+[print(k, v) for k, v in c('configs/config.toml').items()]"
 
 # Visual stimuli standalone (no hardware)
 uv run python -m src.visual --standalone
 
 # Simulate Braid tracking data (development)
-python -m src.tools.braid_simulator
+uv run python -m src.tools.braid_simulator
 ```
 
 ## Where to Go Deeper

@@ -45,7 +45,7 @@ Commands are sent at **115200 baud** in the format:
 ## Python Integration
 
 The `OptoTriggerWorker` process (`src/processes/led.py`) handles:
-- Subscribing to ZONE_ENTER messages from TriggerHandler
+- Subscribing to OPTO_ZONE_ENTER messages from TriggerHandler
 - Randomizing duration, intensity, and frequency from config lists
 - Sham trial support (configurable probability)
 - Constructing and sending serial commands

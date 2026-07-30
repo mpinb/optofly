@@ -26,6 +26,31 @@ logger = logging.getLogger(__name__)
 _TOML_CACHE: dict[str, tuple[float, dict]] = {}
 
 
+def _required_section(data: dict, name: str, config_path: str) -> dict:
+    """Return section `name`, or explain precisely what's missing.
+
+    Only for sections carrying at least one key with no sensible default
+    (`zmq`, `camera`, `liquid_lens`, `opto_trigger`). Omitting one of those is
+    a mistake rather than a request for defaults -- and because AppConfig.load()
+    validates every section regardless of active flags, the omission stops the
+    whole run, so the message has to point straight at the fix.
+
+    Sections that are fully defaulted (`monitoring`, `logging`,
+    `visual_stimuli`, `trigger_handler`, `braid_publisher`) stay optional.
+    """
+    if name not in data:
+        # No config path in the message: AppConfig.load() prefixes it once, so
+        # naming it here too would print it three times by the time main.py
+        # has added its own header.
+        raise ValueError(
+            f"Section [{name}] not found.\n"
+            f"  Every section must be present even when its subsystem is "
+            f"inactive, because the whole file is validated in one pass.\n"
+            f"  Copy the [{name}] block from configs/config.example.toml."
+        )
+    return data[name]
+
+
 def _load_toml_cached(config_path: str) -> dict:
     mtime = os.stat(config_path).st_mtime
     cached = _TOML_CACHE.get(config_path)
@@ -37,37 +62,15 @@ def _load_toml_cached(config_path: str) -> dict:
     return data
 
 
-class ConfigBase:
-    """Base class for all configuration objects."""
+def load_toml(config_path: str) -> dict:
+    """Parse a TOML file and return the raw tree (cached by path + mtime).
 
-    def __init__(self, config_path: str, section: str = None):
-        """Initialize the configuration.
-
-        Args:
-            config_path: Path to the configuration file
-            section: Optional section in the config file to load
-        """
-        self.config_path = config_path
-        self.section = section
-
-    def _load_config(self):
-        """Load configuration from file."""
-        try:
-            config = _load_toml_cached(self.config_path)
-
-            if self.section is not None:
-                if self.section not in config:
-                    raise ValueError(
-                        f"Section '{self.section}' not found in {self.config_path}"
-                    )
-                return config[self.section]
-            return config
-        except FileNotFoundError:
-            logger.error(f"Config file not found: {self.config_path}")
-            raise
-        except Exception as e:
-            logger.error(f"Error opening config file: {e}")
-            raise
+    For the one caller that legitimately needs untyped TOML: the visual
+    stimuli file, which has its own per-stimulus schema rather than a fixed
+    set of fields. Everything describing the main config should go through
+    AppConfig instead of reading TOML directly.
+    """
+    return _load_toml_cached(config_path)
 
 
 @dataclass(frozen=True)
@@ -98,6 +101,8 @@ class TriggerHandlerConfig:
     min_velocity: float
     max_velocity: float
     min_tracking_age: float
+    opto_zone_scale: float
+    visual_zone_scale: float
     zmq: "ZMQConfig"
 
     @classmethod
@@ -111,8 +116,18 @@ class TriggerHandlerConfig:
 
         heading_cone_deg = float(section.get("heading_cone_deg", 45.0))
 
-        instance = object.__new__(cls)
-        object.__setattr__(instance, "__dict__", dict(
+        opto_zone_scale = float(section.get("opto_zone_scale", 0.5))
+        visual_zone_scale = float(section.get("visual_zone_scale", 1.0))
+        if not (0.0 < opto_zone_scale <= 1.0):
+            raise ValueError(
+                f"trigger_handler.opto_zone_scale must be in (0.0, 1.0], got {opto_zone_scale}"
+            )
+        if not (0.0 < visual_zone_scale <= 1.0):
+            raise ValueError(
+                f"trigger_handler.visual_zone_scale must be in (0.0, 1.0], got {visual_zone_scale}"
+            )
+
+        return cls(
             zone_timeout=float(section.get("zone_timeout", 2.0)),
             cooldown_period=float(section.get("cooldown_period", 10.0)),
             fov_x_min=camera.fov_x_min,
@@ -137,13 +152,14 @@ class TriggerHandlerConfig:
             min_velocity=float(section.get("min_velocity", 0.01)),
             max_velocity=float(section.get("max_velocity", 2.0)),
             min_tracking_age=float(section.get("min_tracking_age", 0.1)),
+            opto_zone_scale=opto_zone_scale,
+            visual_zone_scale=visual_zone_scale,
             zmq=zmq,
-        ))
-        return instance
+        )
 
-    def __init__(self, config_path: str = "configs/config.toml"):
-        built = AppConfig.load(config_path).trigger_handler
-        object.__setattr__(self, "__dict__", dict(built.__dict__))
+    @classmethod
+    def from_path(cls, config_path: str = "configs/config.toml") -> "TriggerHandlerConfig":
+        return AppConfig.load(config_path).trigger_handler
 
 
 @dataclass(frozen=True)
@@ -195,8 +211,7 @@ class LiquidLensConfig:
 
         kalman_config = section.get("kalman", {})
 
-        instance = object.__new__(cls)
-        object.__setattr__(instance, "__dict__", dict(
+        return cls(
             port=port,
             mode=section.get("mode", "diopter"),
             calibration_file=section.get("calibration_file", "calibrations/liquid_lens.csv"),
@@ -211,12 +226,11 @@ class LiquidLensConfig:
             system_latency=kalman_config.get("system_latency", 0.05),
             prediction_horizon=kalman_config.get("prediction_horizon", 0.05),
             zmq=zmq,
-        ))
-        return instance
+        )
 
-    def __init__(self, config_path: str = "configs/config.toml"):
-        built = AppConfig.load(config_path).liquid_lens
-        object.__setattr__(self, "__dict__", dict(built.__dict__))
+    @classmethod
+    def from_path(cls, config_path: str = "configs/config.toml") -> "LiquidLensConfig":
+        return AppConfig.load(config_path).liquid_lens
 
 
 @dataclass(frozen=True)
@@ -230,6 +244,8 @@ class ZMQConfig:
     braid_topic: str
     zone_enter_topic: str
     zone_exit_topic: str
+    opto_enter_topic: str
+    visual_enter_topic: str
     active_braid_topic: str
     braid_pub_hwm: int
     lens_update_conflate: bool
@@ -272,8 +288,7 @@ class ZMQConfig:
         if braid_pub_hwm <= 0:
             raise ValueError("zmq.braid_pub_hwm must be positive")
 
-        instance = object.__new__(cls)
-        object.__setattr__(instance, "__dict__", dict(
+        return cls(
             braid_port=braid_port,
             trigger_port=trigger_port,
             active_braid_port=active_braid_port,
@@ -281,16 +296,17 @@ class ZMQConfig:
             braid_topic=braid_topic,
             zone_enter_topic=section.get("zone_enter_topic", "ZONE_ENTER"),
             zone_exit_topic=section.get("zone_exit_topic", "ZONE_EXIT"),
+            opto_enter_topic=section.get("opto_enter_topic", "OPTO_ZONE_ENTER"),
+            visual_enter_topic=section.get("visual_enter_topic", "VISUAL_ZONE_ENTER"),
             active_braid_topic=section.get("active_braid_topic", "ACTIVE_BRAID"),
             braid_pub_hwm=braid_pub_hwm,
             lens_update_conflate=bool(section.get("lens_update_conflate", True)),
             transport=transport,
-        ))
-        return instance
+        )
 
-    def __init__(self, config_path: str = "configs/config.toml"):
-        built = AppConfig.load(config_path).zmq
-        object.__setattr__(self, "__dict__", dict(built.__dict__))
+    @classmethod
+    def from_path(cls, config_path: str = "configs/config.toml") -> "ZMQConfig":
+        return AppConfig.load(config_path).zmq
 
     def get_subscriber_address(self, port: int) -> str:
         """Get the subscriber address for a given port."""
@@ -336,8 +352,7 @@ class BraidPublisherConfig:
         if reconnect_delay <= 0:
             raise ValueError("braid_publisher.reconnect_delay must be positive")
 
-        instance = object.__new__(cls)
-        object.__setattr__(instance, "__dict__", dict(
+        return cls(
             host=host,
             callback_port=callback_port,
             experiments_path=experiments_path,
@@ -347,12 +362,11 @@ class BraidPublisherConfig:
             reconnect_delay=reconnect_delay,
             zmq=zmq,
             zone_timeout=trigger_handler.zone_timeout,
-        ))
-        return instance
+        )
 
-    def __init__(self, config_path: str = "configs/config.toml"):
-        built = AppConfig.load(config_path).braid_publisher
-        object.__setattr__(self, "__dict__", dict(built.__dict__))
+    @classmethod
+    def from_path(cls, config_path: str = "configs/config.toml") -> "BraidPublisherConfig":
+        return AppConfig.load(config_path).braid_publisher
 
     def __str__(self) -> str:
         return (
@@ -418,8 +432,7 @@ class OptoTriggerConfig:
             if int(v) < 0:
                 raise ValueError(f"opto_trigger.duration values must be >= 0, got {v}")
 
-        instance = object.__new__(cls)
-        instance.__dict__.update(
+        return cls(
             active=section.get("active", False),
             port=port,
             baudrate=int(section.get("baudrate", 115200)),
@@ -432,22 +445,10 @@ class OptoTriggerConfig:
             color=cls._normalize_color(section.get("color", "white")),
             sham_probability=sham_probability,
         )
-        return instance
 
-    def __init__(self, config_path: str = "configs/config.toml"):
-        """Path-based constructor delegating to AppConfig.load().
-
-        Dataclass note: @dataclass only auto-generates __init__ when a class
-        doesn't define one itself; since this class defines __init__
-        explicitly (for the path-based call form), @dataclass leaves it
-        alone and supplies __repr__/__eq__/field annotations only. That
-        means from_section() above cannot build instances via cls(...) --
-        it would recurse into this path-based __init__, not a field-based
-        one -- so it constructs via object.__new__() + direct __dict__
-        update instead, exactly like this __init__ does for its own case.
-        """
-        built = AppConfig.load(config_path).opto_trigger
-        self.__dict__.update(built.__dict__)
+    @classmethod
+    def from_path(cls, config_path: str = "configs/config.toml") -> "OptoTriggerConfig":
+        return AppConfig.load(config_path).opto_trigger
 
     def get_trigger_command(self) -> str:
         """Return the formatted command string expected by the Arduino firmware."""
@@ -576,8 +577,7 @@ class CameraConfig:
             if fov_y_min >= fov_y_max:
                 raise ValueError("camera.FOV.y_min must be less than y_max")
 
-        instance = object.__new__(cls)
-        object.__setattr__(instance, "__dict__", dict(
+        return cls(
             active=section.get("active", False),
             sensor_width_px=sensor_width_px,
             sensor_height_px=sensor_height_px,
@@ -603,12 +603,11 @@ class CameraConfig:
             fov_far_x_max=fov_far_x_max,
             fov_far_y_min=fov_far_y_min,
             fov_far_y_max=fov_far_y_max,
-        ))
-        return instance
+        )
 
-    def __init__(self, config_path: str = "configs/config.toml"):
-        built = AppConfig.load(config_path).camera
-        object.__setattr__(self, "__dict__", dict(built.__dict__))
+    @classmethod
+    def from_path(cls, config_path: str = "configs/config.toml") -> "CameraConfig":
+        return AppConfig.load(config_path).camera
 
     def __str__(self):
         fov_width_mm = (self.fov_x_max - self.fov_x_min) * 1000
@@ -639,6 +638,10 @@ class MonitoringConfig:
             port=int(section.get("port", 5000)),
         )
 
+    @classmethod
+    def from_path(cls, config_path: str = "configs/config.toml") -> "MonitoringConfig":
+        return AppConfig.load(config_path).monitoring
+
 
 @dataclass(frozen=True)
 class LoggingConfig:
@@ -649,6 +652,10 @@ class LoggingConfig:
     @classmethod
     def from_section(cls, section: dict) -> "LoggingConfig":
         return cls(level=section.get("level", "INFO").upper())
+
+    @classmethod
+    def from_path(cls, config_path: str = "configs/config.toml") -> "LoggingConfig":
+        return AppConfig.load(config_path).logging
 
     def level_int(self) -> int:
         return getattr(logging, self.level, logging.INFO)
@@ -667,6 +674,10 @@ class VisualStimuliConfig:
             active=section.get("active", False),
             config_file=section.get("config_file", "configs/visual_stimuli.toml"),
         )
+
+    @classmethod
+    def from_path(cls, config_path: str = "configs/config.toml") -> "VisualStimuliConfig":
+        return AppConfig.load(config_path).visual_stimuli
 
 
 @dataclass(frozen=True)
@@ -688,27 +699,40 @@ class AppConfig:
     def load(cls, config_path: str = "configs/config.toml") -> "AppConfig":
         data = _load_toml_cached(config_path)
 
-        zmq = ZMQConfig.from_section(data.get("zmq", {}))
-        camera = CameraConfig.from_section(data.get("camera", {}))
-        trigger_handler = TriggerHandlerConfig.from_section(
-            data.get("trigger_handler", {}), camera=camera, zmq=zmq
-        )
-        liquid_lens = LiquidLensConfig.from_section(
-            data.get("liquid_lens", {}),
-            trigger_handler=trigger_handler,
-            camera=camera,
-            zmq=zmq,
-        )
-        braid_publisher = BraidPublisherConfig.from_section(
-            data.get("braid_publisher", {}), zmq=zmq, trigger_handler=trigger_handler
-        )
-        opto_trigger = OptoTriggerConfig.from_section(data.get("opto_trigger", {}))
-        monitoring = MonitoringConfig.from_section(data.get("monitoring", {}))
-        logging_cfg = LoggingConfig.from_section(data.get("logging", {}))
-        visual_stimuli = VisualStimuliConfig.from_section(data.get("visual_stimuli", {}))
+        try:
+            zmq = ZMQConfig.from_section(_required_section(data, "zmq", config_path))
+            camera = CameraConfig.from_section(
+                _required_section(data, "camera", config_path)
+            )
+            trigger_handler = TriggerHandlerConfig.from_section(
+                data.get("trigger_handler", {}), camera=camera, zmq=zmq
+            )
+            liquid_lens = LiquidLensConfig.from_section(
+                _required_section(data, "liquid_lens", config_path),
+                trigger_handler=trigger_handler,
+                camera=camera,
+                zmq=zmq,
+            )
+            braid_publisher = BraidPublisherConfig.from_section(
+                data.get("braid_publisher", {}), zmq=zmq, trigger_handler=trigger_handler
+            )
+            opto_trigger = OptoTriggerConfig.from_section(
+                _required_section(data, "opto_trigger", config_path)
+            )
+            monitoring = MonitoringConfig.from_section(data.get("monitoring", {}))
+            logging_cfg = LoggingConfig.from_section(data.get("logging", {}))
+            visual_stimuli = VisualStimuliConfig.from_section(
+                data.get("visual_stimuli", {})
+            )
+        except ValueError as e:
+            # Re-raise with the file named. Individual from_section() validators
+            # know the key but not which of the several configs in play (example,
+            # local, per-experiment copies in braid folders) is being loaded.
+            if str(e).startswith(config_path):
+                raise
+            raise ValueError(f"{config_path}: {e}") from e
 
-        instance = object.__new__(cls)
-        object.__setattr__(instance, "__dict__", dict(
+        return cls(
             camera=camera,
             trigger_handler=trigger_handler,
             liquid_lens=liquid_lens,
@@ -718,5 +742,4 @@ class AppConfig:
             monitoring=monitoring,
             logging=logging_cfg,
             visual_stimuli=visual_stimuli,
-        ))
-        return instance
+        )
