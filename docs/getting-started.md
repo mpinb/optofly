@@ -92,7 +92,7 @@ Before connecting to live flies, verify each LED channel fires correctly over se
 
 ## 10. Run your first experiment
 
-With Braid tracking and recording:
+With Braid running and tracking:
 
 ```bash
 uv run python main.py

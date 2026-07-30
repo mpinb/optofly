@@ -30,7 +30,7 @@ uv sync
 cp configs/config.example.toml configs/config.toml
 cp configs/visual_stimuli.example.toml configs/visual_stimuli.toml
 
-# Run experiment (start Braid recording first)
+# Run experiment (Braid must be running — main.py starts the recording itself)
 uv run python main.py
 ```
 
@@ -48,7 +48,9 @@ The relay now has two ZMQ outputs:
   zone.
 
 `TriggerHandler` still consumes the full `BRAID` stream and emits `ZONE_ENTER`
-and `ZONE_EXIT` on `trigger_port` (`5556`). `BraidPublisher` also listens to
+and `ZONE_EXIT` on `trigger_port` (`5556`), plus one-shot
+`OPTO_ZONE_ENTER`/`VISUAL_ZONE_ENTER` events when the in-zone fly reaches the
+smaller inner opto/visual zones. `BraidPublisher` also listens to
 those zone events so it knows which object is active. When a Braid `Update`
 matches that active object, it republishes the inner update directly on
 `ACTIVE_BRAID`.
