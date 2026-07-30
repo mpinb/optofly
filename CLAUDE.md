@@ -204,3 +204,43 @@ Output files per trial (all in `camera.save_folder`):
 ### Liquid Lens
 
 `LiquidLens` (`src/processes/lens.py`) responds to `ZONE_ENTER` and subscribes to the `ACTIVE_BRAID` feed, calling `LensDriver.set_diopter()` while tracking. Three filters gate each command: the `predictor` mode (`"none"` or `"linear"`) picks the target z, `max_diopter_step` optionally slew-limits the jump from the last commanded diopter, and a command is dropped outright if it arrives less than 25ms after the last one or changes the diopter by under `1e-5`.
+
+## Installing and Using Claude Code
+
+Claude Code is an AI-powered coding assistant that runs in your terminal.
+
+### Install
+
+Pick one:
+
+```bash
+# macOS, Linux, or WSL
+curl -fsSL https://claude.ai/install.sh | bash
+
+# npm (any platform, requires Node.js 22+)
+npm install -g @anthropic-ai/claude-code
+
+# Homebrew (macOS)
+brew install --cask claude-code
+```
+
+Windows PowerShell: `irm https://claude.ai/install.ps1 | iex`
+
+Verify: `claude --version` should print a version like `2.1.X (Claude Code)`.
+
+### First run
+
+```bash
+cd ~/src/OptoFly
+claude
+```
+
+The first run opens a browser to authenticate (Claude Pro/Max, Team/Enterprise, Console, or an `ANTHROPIC_API_KEY` environment variable). Credentials are then stored locally — no repeat login.
+
+If this repo's `CLAUDE.md` is ever missing, running `/init` inside a Claude Code session regenerates it from the current codebase.
+
+### Useful commands
+
+- `/help` — list all commands
+- `/clear` — reset conversation history
+- Shift+Tab — cycle permission mode (`plan` / default / `acceptEdits`)
