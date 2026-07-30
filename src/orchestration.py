@@ -8,6 +8,7 @@ one interface instead of duplicating the spawn/shutdown sequence.
 import logging
 import multiprocessing as mp
 import time
+import tomllib
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -30,7 +31,7 @@ from src.utils.logger import configure_process_logging
 from src.utils.metadata import append_metadata_to_csv
 from src.utils.metadata import extract_config_columns
 from src.utils.metadata import write_metadata
-from src.monitoring.server import run_server
+# from src.monitoring.server import run_server  # monitoring server disabled
 
 logger = logging.getLogger(__name__)
 # Always emit this module's milestone messages at INFO regardless of the root
@@ -267,6 +268,52 @@ class Experiment:
             failure_queue=self._failure_queue,
         )
 
+        # ── Experiment configuration summary ──
+        print("\n" + "=" * 70)
+        print("OptoFly Experiment Configuration")
+        print("=" * 70)
+        print("\nActive Processes:")
+        print("  ✓ BraidPublisher")
+        print("  ✓ TriggerHandler")
+        print("  ✓ LatencyLogger")
+        if app_config.visual_stimuli.active:
+            print("  ✓ VisualProcess (Panda3D)")
+        if app_config.camera.active:
+            print("  ✓ CameraProcess")
+            print("  ✓ LiquidLens")
+        print("  ✓ OptoTriggerWorker")
+        if app_config.camera.active:
+            print(f"\nCamera: {app_config.camera.resolution[0]}×{app_config.camera.resolution[1]} @ {app_config.camera.fps}fps")
+        if app_config.camera.active:
+            predictor = app_config.liquid_lens.predictor
+            lens_detail = f"diopter, {predictor} predictor"
+            if predictor == "linear":
+                lens_detail += f" (latency={app_config.liquid_lens.system_latency}s, horizon={app_config.liquid_lens.prediction_horizon}s)"
+            print(f"Liquid Lens: {lens_detail}")
+        if app_config.opto_trigger.active:
+            dur = app_config.opto_trigger.duration
+            if isinstance(dur, list):
+                dur = f"[{', '.join(str(d) for d in dur)}]"
+            print(f"\nOpto Trigger: {app_config.opto_trigger.color}, {app_config.opto_trigger.intensity}/255, {dur}ms")
+        if app_config.visual_stimuli.active:
+            enabled_stimuli = []
+            try:
+                with open(app_config.visual_stimuli.config_file, "rb") as f:
+                    vs_data = tomllib.load(f).get("visual_stimuli", {})
+                for section_name, section in vs_data.items():
+                    if isinstance(section, dict) and section.get("enabled", False):
+                        name = section_name.replace("_", " ").capitalize()
+                        if section_name == "looming":
+                            exp_type = section.get("type", "exponential")
+                            name += f" (type={exp_type})"
+                        enabled_stimuli.append(name)
+            except Exception:
+                pass
+            if enabled_stimuli:
+                print(f"\nVisual Stimuli: {', '.join(enabled_stimuli)}")
+        print("\n" + "=" * 70 + "\n")
+        # ── end config summary ──
+
         logger.info("Starting core processes...")
         braid_publisher = BraidPublisher(**common)
         braid_publisher.start()
@@ -290,22 +337,7 @@ class Experiment:
         time.sleep(0.5)
 
         logger.info("Starting optional processes...")
-        if app_config.monitoring.active:
-            zmq_address = f"tcp://localhost:{app_config.zmq.trigger_port}"
-            monitoring_process = mp.Process(
-                target=run_server,
-                args=(
-                    zmq_address,
-                    app_config.monitoring.host,
-                    app_config.monitoring.port,
-                    app_config.zmq.zone_enter_topic,
-                ),
-                daemon=True,
-            )
-            monitoring_process.start()
-            self._processes.append(("Monitoring Server", monitoring_process))
-            logger.info("  ✓ Monitoring Server")
-            logger.info(f"    Dashboard: http://{app_config.monitoring.host}:{app_config.monitoring.port}")
+        # Monitoring server disabled — module kept for future reinstatement.
 
         if app_config.visual_stimuli.active:
             visual_process = VisualProcess(

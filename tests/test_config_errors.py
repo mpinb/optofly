@@ -60,7 +60,9 @@ def test_invalid_value_names_the_config_file(tmp_path):
     """A bad value inside a present section must still identify the file --
     with several configs around (example, local, per-experiment copies) the
     message is useless without it."""
-    source = open(EXAMPLE).read().replace("sham_probability = 0.0", "sham_probability = 5.0")
+    source = open(EXAMPLE).read()
+    import re
+    source = re.sub(r'(sham_probability\s*=\s*)-?\d+\.?\d*', r'\g<1>5.0', source)
     path = tmp_path / "bad_value.toml"
     path.write_text(source)
 
@@ -100,19 +102,19 @@ def test_optional_sections_may_be_absent(tmp_path):
 class TestMainCliMessages:
     """main.load_config() is what a novice actually sees."""
 
-    def test_missing_file_suggests_the_cp_command(self, capsys):
+    def test_missing_file_suggests_the_cp_command(self, caplog):
         from main import load_config
 
         with pytest.raises(SystemExit):
             load_config("configs/definitely_not_here.toml")
 
-        out = capsys.readouterr().out
-        assert "configs/definitely_not_here.toml" in out
-        assert "cp configs/config.example.toml" in out, (
-            f"a missing config is almost always a skipped cp step: {out}"
+        combined = " ".join(r.message for r in caplog.records)
+        assert "configs/definitely_not_here.toml" in combined
+        assert "cp configs/config.example.toml" in combined, (
+            f"a missing config is almost always a skipped cp step: {combined}"
         )
 
-    def test_toml_syntax_error_is_reported_as_such(self, tmp_path, capsys):
+    def test_toml_syntax_error_is_reported_as_such(self, tmp_path, caplog):
         path = tmp_path / "broken.toml"
         path.write_text("[zmq]\nbraid_port = = 5555\n")
 
@@ -121,12 +123,12 @@ class TestMainCliMessages:
         with pytest.raises(SystemExit):
             load_config(str(path))
 
-        out = capsys.readouterr().out
-        assert "not valid TOML" in out, f"must distinguish a syntax error: {out}"
-        assert str(path) in out
+        combined = " ".join(r.message for r in caplog.records)
+        assert "not valid TOML" in combined, f"must distinguish a syntax error: {combined}"
+        assert str(path) in combined
 
     def test_invalid_configuration_is_distinguished_from_a_syntax_error(
-        self, tmp_path, capsys
+        self, tmp_path, caplog
     ):
         source = open(EXAMPLE).read().replace('color = "red"', 'color = "chartreuse"')
         path = tmp_path / "bad_colour.toml"
@@ -137,7 +139,7 @@ class TestMainCliMessages:
         with pytest.raises(SystemExit):
             load_config(str(path))
 
-        out = capsys.readouterr().out
-        assert "invalid configuration" in out.lower()
-        assert "chartreuse" in out
-        assert "not valid TOML" not in out
+        combined = " ".join(r.message for r in caplog.records)
+        assert "invalid configuration" in combined.lower()
+        assert "chartreuse" in combined
+        assert "not valid TOML" not in combined
