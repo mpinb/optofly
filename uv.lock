@@ -930,4 +930,4 @@ wheels = [
 [[package]]
 name = "ximea"
 version = "4.33.14"
-source = { git = "https://github.com/mpinb/ximea-py.git#46b2bd259cda9fd1973328a4a55cab0e08695af6" }
+source = { git = "https://github.com/mpinb/ximea-py.git#4388cf75a298599bedb621c9b8d6293ccf76fb2d" }
