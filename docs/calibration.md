@@ -158,6 +158,7 @@ The z for each plane is read automatically from Braid — the tool computes the 
 - Braid running and tracking **the laser**, not a fly: launch it with a config that uses `DetectLight` polarity (bright-object detection) instead of the `DetectDark` polarity the fly-tracking configs use — e.g. `braid-run laser.toml` if you've set one up. A fly-tracking config won't pick up a laser dot.
 - Liquid lens connected with `calibrations/liquid_lens.csv` built (see Liquid Lens Calibration above)
 - A laser pointer or bright LED you can hold at the frame edges
+- Arena lighting **off** — both the overhead lights and the floor backlight must be off. Either light source can wash out the laser dot or be mistaken for it by the detection threshold.
 - OptoFly environment activated (`uv sync`)
 - You're in the OptoFly repo's own root directory (`~/src/OptoFly`, or wherever you cloned it) — the tool's `--config configs/config.toml` path is relative and won't resolve from anywhere else
 
@@ -201,7 +202,7 @@ The z for each plane is read automatically from Braid — the tool computes the 
 - **"No Braid fix"**: Braid is not tracking the laser. Ensure the dot is inside the tracking volume before recording.
 - **FOV looks wrong after saving**: re-run and ensure the laser is at the edges of the frame (not the centre). Add more than 4 points if the live bounds estimate is noisy.
 - **Lens does not refocus**: check the serial port in `[liquid_lens] port` in `config.toml`.
-- **Timeout messages in the terminal**: safe to ignore. They just mean no object was detected in that window (e.g. the laser dot briefly moved out of frame or below the detection threshold) — they don't indicate a crash or a failed run.
+- **Timeout messages in the terminal**: safe to ignore. They just mean no object was detected in that window (e.g. the laser dot briefly moved out of frame or below the detection threshold) — they don't indicate a crash or a failed run. Suppressed by default (`--quiet` is on unless you pass `--no-quiet`).
 
 ---
 
@@ -237,10 +238,10 @@ Same as Camera FOV Calibration above.
 4. Press **`s`** to save:
 
    ```
-   Write [camera.FOV.near] (z=0.1000 m) and [camera.FOV.far] (z=0.2500 m) to configs/config.toml? [y/N]
+   Write [camera.FOV.near] (z=0.1000 m) and [camera.FOV.far] (z=0.2500 m) to configs/config.toml? [Y/n]
    ```
 
-   Answer `y`. The lower-z plane is automatically assigned as `near`, higher-z as `far` (a z-order label — see the note above about what this means for a camera mounted above the arena).
+   Press Enter to accept (defaults to yes). The lower-z plane is automatically assigned as `near`, higher-z as `far` (a z-order label — see the note above about what this means for a camera mounted above the arena).
 
 5. Verify and restart:
 
@@ -303,7 +304,17 @@ y_max = 0.041
 
 Screen assignment for the Panda3D pipeline comes from `screen_mapping` in `[visual_stimuli.arena]`. No interactive tool is needed there: just list which physical screen, left to right, faces which compass direction.
 
-Aligning Braid's heading coordinate frame with the arena needs `braid_heading_offset_rad` and `braid_heading_flip`. The first command below is all you need to perform the actual Braid-to-screen calibration; the other two are optional variants, not extra steps to run afterward:
+Aligning Braid's heading coordinate frame with the arena needs `braid_heading_offset_rad` and `braid_heading_flip`.
+
+### Prerequisites
+
+- Braid running and tracking your target (unless using `--standalone`). A laser pointer works well and needs a `DetectLight` config (e.g. `braid-run laser.toml`); a small white ball also works with the default `DetectDark` fly-tracking config.
+- If using a laser pointer: arena lighting **off** — both the overhead lights and the floor backlight must be off, or either can wash out the laser dot or be mistaken for it.
+- OptoFly environment activated (`uv sync`)
+
+### Procedure
+
+The first command below is all you need to perform the actual Braid-to-screen calibration; the other two are optional variants, not extra steps to run afterward:
 
 ```bash
 uv run python -m src.tools.calibrate_heading                          # performs the calibration
@@ -311,7 +322,8 @@ uv run python -m src.tools.calibrate_heading --standalone              # variant
 uv run python -m src.tools.calibrate_heading --screens North South     # variant: calibrate a subset of screens
 ```
 
-The tool shows a bright dot on each arena screen in turn. Place a Braid-trackable target (a small white ball works) directly in front of the dot and press Enter. After all screens, it fits `braid_heading_offset_rad` and `braid_heading_flip` from the Braid *position* angle of the target at each known screen direction, and offers to write both values into `visual_stimuli.toml`.
+The tool shows a bright dot on each arena screen in turn. Place a Braid-trackable target (a laser pointer's dot, or a small white ball, works) directly in front of the dot and press SPACE (or Enter, if typing in the
+terminal). After all screens, it fits `braid_heading_offset_rad` and `braid_heading_flip` from the Braid *position* angle of the target at each known screen direction, and offers to write both values into `visual_stimuli.toml`.
 
 This works because Braid heading (velocity direction) and position angle share the same coordinate frame, so the same transform applies to `mean_heading` at runtime:
 

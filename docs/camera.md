@@ -122,6 +122,8 @@ The subscription is vestigial; don't build on it without adding a publisher.
 
 **Video:** `{save_folder}/obj_id_{obj_id}_frame_{frame}.mp4`
 - Codec: H.264 (NVENC p4/constqp18, or x264 ultrafast/crf18 fallback), grayscale input
+- To review these high-speed recordings frame-by-frame, use **Avidemux** — it's already installed on this machine. If it's missing on another one, get it from
+  [avidemux.sourceforge.net](https://avidemux.sourceforge.net/).
 
 **Metadata CSV:** `{save_folder}/obj_id_{obj_id}_frame_{frame}.csv`
 ```csv
