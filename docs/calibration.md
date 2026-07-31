@@ -7,9 +7,8 @@ The sections below are ordered the way you'll actually do them: each one depends
 | 1 | [Camera Intrinsic Calibration](#camera-intrinsic-calibration) | A Basler tracking camera | [`basler-charuco-calibrator`](https://github.com/mpinb/basler-charuco-calibrator) (separate repo) |
 | 2 | [Braid Multi-Camera Calibration](#braid-multi-camera-extrinsic-calibration) | Step 1, done for every tracking camera | Braid's own tooling |
 | 3 | [Liquid Lens Calibration](#liquid-lens-calibration) | Braid tracking live | `optotune_lens`, or [`liquid-lens-calibration`](https://github.com/mpinb/liquid-lens-calibration) (separate repo) |
-| 4 | [Camera FOV Calibration](#camera-fov-calibration) | Step 3 | `src.tools.calibrate_braid_ximea` |
-| 5 | [Frustum FOV Calibration](#frustum-fov-calibration) | Step 3 (optional refinement of step 4) | `src.tools.calibrate_braid_ximea` |
-| 6 | [Panda3D Heading Calibration](#panda3d-heading-calibration) | Braid tracking live | `src.tools.calibrate_heading` |
+| 4 | FOV Calibration — [frustum](#frustum-fov-calibration) (recommended) or [flat](#camera-fov-calibration) (quick/throwaway rigs only) | Step 3 | `src.tools.calibrate_braid_ximea` |
+| 5 | [Panda3D Heading Calibration](#panda3d-heading-calibration) | Braid tracking live | `src.tools.calibrate_heading` |
 
 ## Camera Intrinsic Calibration
 
@@ -142,7 +141,7 @@ It reads every `*_lens_timing.csv` in the folder and prints percentile breakdown
 
 ## Camera FOV Calibration
 
-Measures the camera field-of-view at one or two z-planes so that `[camera.FOV]` (flat) or `[camera.FOV.near]` / `[camera.FOV.far]` (frustum) can be written to `config.toml`.
+Measures the camera field-of-view at one or two z-planes so that `[camera.FOV]` (flat) or `[camera.FOV.near]` / `[camera.FOV.far]` (frustum) can be written to `config.toml`. This is the flat, one-plane version of the procedure — **use [Frustum FOV Calibration](#frustum-fov-calibration) below instead for any rig you intend to keep using**; it's more accurate for barely any extra effort. Only use the flat version below for a quick, throwaway test rig.
 
 The z for each plane is read automatically from Braid — the tool computes the median of the Braid z values recorded during point collection, so you never have to type a height manually.
 
@@ -202,15 +201,15 @@ The z for each plane is read automatically from Braid — the tool computes the 
 
 ## Frustum FOV Calibration
 
-### When to Use This
+### Why This Is the Recommended Default
 
 The flat `[camera.FOV]` calibration uses a single set of x/y bounds applied at all z heights. A camera's field of view grows with distance from the lens — the further a plane is from the camera, the wider the visible area on it. A flat FOV either misses flies at the far edge of the volume or triggers spuriously on flies outside the actual frame.
 
-The frustum calibration captures FOV bounds at two z heights and stores both. At runtime, `TriggerHandler` linearly interpolates the bounds at the fly's actual z, giving a perspective-correct trigger zone.
+The frustum calibration captures FOV bounds at two z heights instead of one and stores both. At runtime, `TriggerHandler` linearly interpolates the bounds at the fly's actual z, giving a perspective-correct trigger zone. It costs one extra plane of data collection over the flat version, for meaningfully better accuracy — **do this one for any rig you intend to keep using.**
 
 **`near`/`far` are z-order labels, not measured camera distance.** The calibration tools always call the lower-z plane `near` and the higher-z plane `far` — they never measure or know the camera's actual physical position, they just compare the two z values. OptoFly's camera is mounted **above** the arena, so higher z is physically *closer* to the camera and lower z is physically *farther* from it — meaning the config's `near` plane (lower z) is actually the physically far one, and `far` (higher z) is physically near. This doesn't affect correctness: the interpolation math only needs `near_z < far_z` and independently interpolates the measured bounds, so it's geometrically correct regardless of which one is physically closer to the lens. It only matters for reading your own calibration output sensibly (see the troubleshooting note below) — if your rig's camera is mounted the other way (below, looking up), the physical/config direction lines up the intuitive way and you can ignore this note.
 
-**Use this calibration if:**
+**You need this calibration — not just the flat version — if:**
 - You see flies triggering outside the visible frame (FOV too wide)
 - You see flies in-frame that don't trigger (FOV too narrow)
 - The discrepancy worsens at higher or lower z positions
