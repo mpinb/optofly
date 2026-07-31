@@ -141,7 +141,7 @@ Key parameters (all in `configs/config.toml`):
 |---|---|---|---|
 | `[zmq]` | `latency_port` | `5558` | PUSH/PULL port `OptoTriggerWorker`/`VisualProcess`/`LiquidLens` push `LATENCY` messages to; `LatencyLogger` binds it and writes `latency.csv` |
 | `[zmq]` | `active_braid_port` | `5557` | PUB port for the `ACTIVE_BRAID` fast lane (only the in-zone object's updates); consumed by `LiquidLens` |
-| `[zmq]` | `lens_update_conflate` | `true` | Sets `CONFLATE`+`RCVHWM=1` on the lens's `ACTIVE_BRAID` socket so stale focus updates are dropped instead of queued |
+| `[zmq]` | `lens_update_conflate` | `true` | Sets `RCVHWM=1` on the lens's `ACTIVE_BRAID` socket to bound its queue depth (not `CONFLATE` — that option doesn't support multi-part messages and silently drops everything when combined with this feed's topic-filtered SUBSCRIBE; `LiquidLens._get_latest_active_update()` already drains-to-latest on every read) |
 | `[zmq]` | `transport` | `"tcp"` | `"tcp"` (`tcp://localhost:PORT`) or `"ipc"` (per-port socket files under `/tmp`); used by `get_publisher_address`/`get_subscriber_address` |
 | `[liquid_lens]` | `predictor` | `"none"` | `"none"` uses raw Braid z; `"linear"` extrapolates `z + vz * (system_latency + prediction_horizon)` |
 | `[liquid_lens]` | `max_diopter_step` | `0.0` | Per-update slew-rate limit on commanded diopter; `0.0` disables it. Ramps large jumps (esp. trial onset) so the lens's ~400 Hz resonance isn't excited |

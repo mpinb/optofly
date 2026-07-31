@@ -3,7 +3,11 @@ import json
 import pytest
 import zmq
 
-from src.processes.lens import LiquidLens, _is_lens_rate_limited
+from src.processes.lens import (
+    LiquidLens,
+    _is_lens_rate_limited,
+    configure_active_braid_socket,
+)
 
 
 class FakeSocket:
@@ -287,6 +291,74 @@ def test_publish_latency_sends_lens_system_message_never_sham(lens):
         "activation_timestamp": 500.02,
         "sham": False,
     }
+
+
+def test_active_braid_socket_conflate_delivers_multipart_updates():
+    """Regression: zmq.CONFLATE is documented to not support multi-part
+    messages, but BraidPublisher's ACTIVE_BRAID feed is always sent as a
+    two-part [topic, payload] message (see braid.py's
+    active_braid_socket.send_multipart), and LiquidLens subscribes with a
+    topic filter (zmq.SUBSCRIBE, "ACTIVE_BRAID"). Combining CONFLATE with a
+    filtered multipart SUB silently drops every message -- the socket never
+    becomes readable at all, so LiquidLens only ever sees the one synthetic
+    "first update" built from ZONE_ENTER itself and never refocuses again
+    for the rest of the trial, no matter how long it runs.
+
+    This calls configure_active_braid_socket() -- the real function
+    LiquidLens.initialize() uses to set up this socket -- against a real PUB
+    socket publishing the same multipart shape BraidPublisher uses, proving
+    messages actually arrive.
+    """
+    ctx = zmq.Context()
+    pub = ctx.socket(zmq.PUB)
+    pub.setsockopt(zmq.SNDHWM, 1)  # matches BraidPublisher.active_braid_socket
+    pub.bind("tcp://127.0.0.1:0")
+    address = pub.getsockopt(zmq.LAST_ENDPOINT).decode("utf-8")
+
+    sub = ctx.socket(zmq.SUB)
+    zmq_config = type(
+        "ZMQConfig",
+        (),
+        {
+            "lens_update_conflate": True,  # config.toml default
+            "active_braid_port": 0,  # unused: get_subscriber_address is stubbed
+            "active_braid_topic": "ACTIVE_BRAID",
+            "get_subscriber_address": lambda self, port: address,
+        },
+    )()
+    configure_active_braid_socket(sub, zmq_config)
+
+    poller = zmq.Poller()
+    poller.register(sub, zmq.POLLIN)
+
+    try:
+        import time as _time
+
+        _time.sleep(0.2)  # let the SUB's subscription reach the PUB
+
+        received = 0
+        deadline = _time.monotonic() + 2.0
+        for i in range(50):
+            pub.send_multipart(
+                [b"ACTIVE_BRAID", json.dumps({"obj_id": 1, "i": i}).encode("utf-8")]
+            )
+            _time.sleep(0.01)
+            if dict(poller.poll(timeout=0)).get(sub) == zmq.POLLIN:
+                sub.recv_multipart(flags=zmq.NOBLOCK)
+                received += 1
+            if _time.monotonic() > deadline:
+                break
+
+        assert received > 1, (
+            "active_braid_socket with CONFLATE+topic-filter delivered "
+            f"{received}/50 messages -- CONFLATE does not support "
+            "multi-part messages and must not be combined with a "
+            "filtered SUBSCRIBE on this channel"
+        )
+    finally:
+        sub.close()
+        pub.close()
+        ctx.term()
 
 
 def test_latency_socket_setsockopt_technique_makes_send_non_blocking():

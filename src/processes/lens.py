@@ -19,6 +19,26 @@ from optotune_lens import ICC1C as LensDriver
 VALID_CALIBRATION_MODELS = ("linear", "quadratic", "power", "inverse")
 
 
+def configure_active_braid_socket(sock, zmq_config) -> None:
+    """Apply sockopts, connect, and subscribe a SUB socket to the
+    ACTIVE_BRAID feed.
+
+    Deliberately does not set zmq.CONFLATE: this feed is always a two-part
+    [topic, payload] message (see BraidPublisher.active_braid_socket
+    .send_multipart), and CONFLATE does not support multi-part messages --
+    combined with the topic-filtered SUBSCRIBE below, it silently drops
+    every message rather than raising, starving the lens of all updates
+    after the initial ZONE_ENTER-derived one. RCVHWM=1 alone still bounds
+    the queue to the newest pending update; _get_latest_active_update()
+    already drains to the latest on every read, so nothing is lost by not
+    conflating at the transport level.
+    """
+    if zmq_config.lens_update_conflate:
+        sock.setsockopt(zmq.RCVHWM, 1)
+    sock.connect(zmq_config.get_subscriber_address(zmq_config.active_braid_port))
+    sock.setsockopt_string(zmq.SUBSCRIBE, zmq_config.active_braid_topic)
+
+
 def _is_lens_rate_limited(
     pending_first_update: Optional[dict], last_cmd_time: float, now_monotonic: float
 ) -> bool:
@@ -214,15 +234,7 @@ class LiquidLens(WorkerProcess):
         # ZMQ
         self.context = zmq.Context()
         self.active_braid_socket = self.context.socket(zmq.SUB)
-        if self.zmq_config.lens_update_conflate:
-            self.active_braid_socket.setsockopt(zmq.CONFLATE, 1)
-            self.active_braid_socket.setsockopt(zmq.RCVHWM, 1)
-        self.active_braid_socket.connect(
-            self.zmq_config.get_subscriber_address(self.zmq_config.active_braid_port)
-        )
-        self.active_braid_socket.setsockopt_string(
-            zmq.SUBSCRIBE, self.zmq_config.active_braid_topic
-        )
+        configure_active_braid_socket(self.active_braid_socket, self.zmq_config)
 
         self.trigger_socket = self.context.socket(zmq.SUB)
         self.trigger_socket.connect(
