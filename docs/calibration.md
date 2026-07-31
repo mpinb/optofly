@@ -155,7 +155,7 @@ The z for each plane is read automatically from Braid — the tool computes the 
 ### Prerequisites
 
 - Ximea camera connected and live
-- Braid running and tracking
+- Braid running and tracking **the laser**, not a fly: launch it with a config that uses `DetectLight` polarity (bright-object detection) instead of the `DetectDark` polarity the fly-tracking configs use — e.g. `braid-run laser.toml` if you've set one up. A fly-tracking config won't pick up a laser dot.
 - Liquid lens connected with `calibrations/liquid_lens.csv` built (see Liquid Lens Calibration above)
 - A laser pointer or bright LED you can hold at the frame edges
 - OptoFly environment activated (`uv sync`)
