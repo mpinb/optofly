@@ -114,13 +114,7 @@ uv sync
 uv run lens-calibrate --calibration /path/to/calibration_charuco.xml
 ```
 
-It writes `lens_calib_YYYYMMDD_HHMMSS.csv` with columns `z, diopter, x, y, n_cameras, n_tags, focus_metric_peak, timestamp`. OptoFly's loader (`setup_lens_calibration` in `src/processes/lens.py`) expects exactly two columns named `z` and `dpt`, so rename the `diopter` column to `dpt` and drop the rest before pointing `liquid_lens.calibration_file` at the result:
-
-```bash
-python -c "import csv; rows = list(csv.DictReader(open('lens_calib_YYYYMMDD_HHMMSS.csv'))); \
-w = csv.writer(open('calibrations/liquid_lens.csv', 'w')); w.writerow(['z', 'dpt']); \
-[w.writerow([r['z'], r['diopter']]) for r in rows]"
-```
+It writes two files: a full, timestamped CSV (`calibrations/lens_calib_YYYYMMDD_HHMMSS.csv`, relative to wherever you ran it from) with every raw measurement, and — written directly into **this** repo, at the hardcoded path `/home/nfc/src/OptoFly/calibrations/liquid_lens.csv` — just the two columns OptoFly's loader (`setup_lens_calibration` in `src/processes/lens.py`) expects: `z` and `dpt`. No manual column-renaming step is needed. If `calibrations/liquid_lens.csv` already exists, you're prompted to confirm the overwrite; declining instead saves the new calibration as `calibrations/lens_calib_YYYYMMDD_HHMMSS_optofly.csv`, so you can review it before replacing the live one.
 
 See that repo's own README for hardware setup and the full option list.
 
