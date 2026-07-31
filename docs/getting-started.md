@@ -185,7 +185,7 @@ color = "red"
 
 [liquid_lens]
 # Activates automatically when camera is active — no active flag of its own
-port = "/dev/optotune_ld"   # udev symlink; see configs/config.example.toml
+port = "/dev/optotune_icc1c"  # udev symlink; see configs/config.example.toml
 calibration_file = "calibrations/liquid_lens.csv"
 
 [visual_stimuli]

@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 # AppConfig.load() may be called many times per process -- once per
 # process/tool that needs a config, plus every standalone script under
-# src/tools/ -- and each call re-parses and re-validates all nine config
+# src/tools/ -- and each call re-parses and re-validates all eight config
 # sections. Caching the parsed TOML by (path, mtime) keeps those repeated
 # calls cheap without re-reading the file from disk each time, while still
 # picking up on-disk edits (mtime changes invalidate the cache).

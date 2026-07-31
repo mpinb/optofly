@@ -1,7 +1,7 @@
 """Config loading is the most common novice activity, so its failures have to
 say three things: which file, which section/key, and what to do about it.
 
-AppConfig.load() validates all nine sections regardless of active flags, which
+AppConfig.load() validates all eight sections regardless of active flags, which
 means a mistake in a subsystem the user never enabled still stops the run --
 all the more reason the message must point at the right place.
 """

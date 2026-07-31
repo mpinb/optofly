@@ -21,7 +21,7 @@ dependencies = [
     # These are easy to mistake for dead weight. Each is imported lazily by the
     # tool named beside it, so nothing on the experiment path touches them.
     "matplotlib>=3.10.3",       # src/tools/generate_camera_histograms.py
-    "opencv-python>=4.13.0.92", # src/tools/calibrate_{braid_ximea,frustum_fov}.py
+    "opencv-python>=4.13.0.92", # src/tools/calibrate_braid_ximea.py
     "rerun-sdk>=0.23.2",        # src/tools/braid_visualizer.py
     # NOT dead despite the Python camera path being replaced by the Rust
     # binary: the two FOV calibration tools still open a live XIMEA preview so

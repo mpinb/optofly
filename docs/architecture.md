@@ -35,7 +35,7 @@ LatencyLogger  →  latency.csv in the braid folder
 
 TriggerHandler is the single admission controller. Each object can produce at most one `ZONE_ENTER`/`ZONE_EXIT` pair per visit to the trigger volume, with re-entry treated as a new cycle subject only to the global cooldown period. `OPTO_ZONE_ENTER`/`VISUAL_ZONE_ENTER` are separate one-shot events fired once the object, already inside the outer `ZONE_ENTER` zone, reaches a smaller nested zone sized by `opto_zone_scale`/`visual_zone_scale`; at `scale=1.0` they fire on the same frame as `ZONE_ENTER`.
 
-`BraidPublisher` both publishes and subscribes: it forwards the full tracking stream on `BRAID`, and it also subscribes to `ZONE_ENTER`/`ZONE_EXIT` so it knows which object is currently active. Updates for that object are republished on the `ACTIVE_BRAID` fast lane (`SNDHWM = 1`, and consumers set `CONFLATE`), so the lens always focuses on the newest position rather than working through a backlog.
+`BraidPublisher` both publishes and subscribes: it forwards the full tracking stream on `BRAID`, and it also subscribes to `ZONE_ENTER`/`ZONE_EXIT` so it knows which object is currently active. Updates for that object are republished on the `ACTIVE_BRAID` fast lane (`SNDHWM = 1`, and consumers set `RCVHWM = 1` — `CONFLATE` isn't used here because it silently drops multi-part messages when combined with topic-filtered `SUBSCRIBE`; `LiquidLens._get_latest_active_update()` already drains-to-latest on every read), so the lens always focuses on the newest position rather than working through a backlog.
 
 ## Process Model
 
@@ -163,4 +163,4 @@ After exit, the same object can trigger again if it re-enters the zone after the
 - Zone events are one-way pub/sub: processes never acknowledge them. The one exception to PUB/SUB in the whole codebase is the `LATENCY` channel, which is PUSH/PULL — a many-producer, one-consumer fan-in rather than a broadcast, so each message is delivered to exactly one reader.
 - Camera and liquid lens are lifecycle followers only: start on `ZONE_ENTER`, stop on `ZONE_EXIT`, keep no pre-zone state.
 - `LiquidLens` has no `active` flag of its own. It is started iff `[camera] active = true`, since autofocus is only meaningful while the high-speed camera is recording.
-- Every `*Config` path constructor routes through `AppConfig.load()`, which builds and validates **all nine** config sections regardless of any section's `active` flag. `configs/config.toml` must therefore always contain valid `[liquid_lens]`, `[opto_trigger]`, etc. sections (each with its required `port` key) even when those subsystems are disabled.
+- Every `*Config` path constructor routes through `AppConfig.load()`, which builds and validates **all eight** config sections regardless of any section's `active` flag. `configs/config.toml` must therefore always contain valid `[liquid_lens]`, `[opto_trigger]`, etc. sections (each with its required `port` key) even when those subsystems are disabled.
