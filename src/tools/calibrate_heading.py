@@ -2,8 +2,9 @@
 
 Displays a bright dot on each arena screen in sequence. Place a
 Braid-trackable target (small white ball) directly in front of the dot and
-press Enter. After all screens, the script fits braid_heading_offset_rad and
-braid_heading_flip and optionally saves them to visual_stimuli.toml.
+press SPACE (or Enter, if typing in the terminal). After all screens, the
+script fits braid_heading_offset_rad and braid_heading_flip and optionally
+saves them to visual_stimuli.toml.
 
 The calibration works by measuring the Braid *position* angle of the target
 placed at each known screen direction, then fitting:
@@ -286,19 +287,31 @@ class HeadingCalibrationApp:
         self._collect_done = threading.Event()
         self._collect_result: tuple[float, tuple[float, float]] | None = None
 
-        # Input: set event each time user presses Enter in the terminal
-        # (avoids needing Panda3D window focus)
+        # Input: SPACE is the standard "record a point" key across all
+        # calibration tools in this project's family (FOV, lens, ChArUco).
+        # Bind it here if the calibration window has focus; also accept Enter
+        # in the terminal as a fallback so it works even without window focus
+        # (input() can't distinguish Space from any other keystroke, so Enter
+        # is the only key the terminal path can react to).
         self._input_event = threading.Event()
+        self._scene.accept("space", self._input_event.set)
         self._scene.accept("enter", self._input_event.set)
         threading.Thread(target=self._terminal_input_loop, daemon=True).start()
 
     def _terminal_input_loop(self) -> None:
-        """Set _input_event on each Enter press in the terminal."""
-        while self._state != self._DONE:
+        """Fallback: set _input_event on each Enter press in the terminal.
+
+        Loops exactly once per screen (not while state != DONE): DONE isn't
+        set until seconds after the last screen's press, since it waits on
+        the Braid sample collection first. Polling state here would leave
+        this thread blocked in one extra dangling input() call that silently
+        eats the first keystroke meant for the save prompt that follows.
+        """
+        for _ in range(len(self._screens)):
             try:
                 input()
             except EOFError:
-                break
+                return
             self._input_event.set()
 
     # ------------------------------------------------------------------
@@ -311,7 +324,8 @@ class HeadingCalibrationApp:
         print(
             f"Screens: {', '.join(self._screens)}\n"
             "For each screen: place a Braid-trackable target in front of\n"
-            "the bright dot, then press Enter (in this terminal).\n"
+            "the bright dot, then press SPACE (calibration window) or\n"
+            "Enter (this terminal).\n"
         )
         self._show_step(0)
 
@@ -376,7 +390,7 @@ class HeadingCalibrationApp:
             f"[{step + 1}/{len(self._screens)}] {screen} screen  "
             f"(heading {_HEADING_DEG[screen]:.0f}°)  "
             f"color={color}\n"
-            "Place target in front of dot, then press Enter... ",
+            "Place target in front of dot, then press SPACE (or Enter)... ",
             end="",
             flush=True,
         )
@@ -563,8 +577,8 @@ def main() -> None:
     print()
 
     # --- Save? -------------------------------------------------------------
-    save = input(f"Save to {vs_path}? [y/N] ").strip().lower()
-    if save == "y":
+    save = input(f"Save to {vs_path}? [Y/n] ").strip().lower()
+    if save != "n":
         _save_to_config(vs_path, offset_rad, flip)
         print("Saved ✓")
     else:
