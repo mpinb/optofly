@@ -433,6 +433,7 @@ class LiquidLens(WorkerProcess):
                         )
                         if key in msg
                     }
+                    return  # break: let main loop process first command before ZONE_EXIT
 
             elif topic == self.zmq_config.zone_exit_topic and self.is_tracking:
                 if msg.get("obj_id") == self.current_tracked_obj:
