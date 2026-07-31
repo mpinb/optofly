@@ -27,7 +27,7 @@ dependencies = [
     # binary: the two FOV calibration tools still open a live XIMEA preview so
     # you can click the FOV edges. The runtime capture path uses the Rust
     # xiapi/xiapi-sys crates instead, which are unrelated to this package.
-    "ximea @ git+https://github.com/elhananby/ximea-py.git",
+    "ximea @ git+https://github.com/mpinb/ximea-py.git",
 ]
 
 [dependency-groups]

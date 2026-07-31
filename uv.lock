@@ -457,7 +457,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.32.3" },
     { name = "rerun-sdk", specifier = ">=0.23.2" },
     { name = "scipy", specifier = ">=1.15.3" },
-    { name = "ximea", git = "https://github.com/elhananby/ximea-py.git" },
+    { name = "ximea", git = "https://github.com/mpinb/ximea-py.git" },
 ]
 
 [package.metadata.requires-dev]
@@ -930,4 +930,4 @@ wheels = [
 [[package]]
 name = "ximea"
 version = "4.33.14"
-source = { git = "https://github.com/elhananby/ximea-py.git#63dd642ca744a7fb31b8c61f53a48b488589282a" }
+source = { git = "https://github.com/mpinb/ximea-py.git#46b2bd259cda9fd1973328a4a55cab0e08695af6" }
