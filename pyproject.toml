@@ -8,8 +8,7 @@ authors = [
     { name = "Elhanan Buchsbaum", email = "elhanan.buchsbaum@mpinb.mpg.de" },
 ]
 dependencies = [
-    # --- experiment runtime (imported by src/processes, src/visual, src/monitoring) ---
-    "flask>=3.1.2",             # monitoring dashboard
+    # --- experiment runtime (imported by src/processes, src/visual) ---
     "numpy>=2.2.5",
     "optotune-lens",            # liquid lens serial driver (src/processes/lens.py)
     "panda3d>=1.10.0",          # visual stimuli arena (src/visual/)

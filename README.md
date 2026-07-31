@@ -42,7 +42,7 @@ OptoFly receives live Braid tracking data from the Braid model server SSE endpoi
 The relay now has two ZMQ outputs:
 
 - `BRAID` on `braid_port` (`5555` by default): the full tracking stream for
-  `TriggerHandler`, monitoring, and tools that need every object update.
+  `TriggerHandler` and tools that need every object update.
 - `ACTIVE_BRAID` on `active_braid_port` (`5557` by default): a lens-specific
   fast lane containing only updates for the object currently inside the trigger
   zone.

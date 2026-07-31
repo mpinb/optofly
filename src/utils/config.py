@@ -35,8 +35,8 @@ def _required_section(data: dict, name: str, config_path: str) -> dict:
     validates every section regardless of active flags, the omission stops the
     whole run, so the message has to point straight at the fix.
 
-    Sections that are fully defaulted (`monitoring`, `logging`,
-    `visual_stimuli`, `trigger_handler`, `braid_publisher`) stay optional.
+    Sections that are fully defaulted (`logging`, `visual_stimuli`,
+    `trigger_handler`, `braid_publisher`) stay optional.
     """
     if name not in data:
         # No config path in the message: AppConfig.load() prefixes it once, so
@@ -638,27 +638,6 @@ class CameraConfig:
 
 
 @dataclass(frozen=True)
-class MonitoringConfig:
-    """Configuration for the web monitoring dashboard."""
-
-    active: bool
-    host: str
-    port: int
-
-    @classmethod
-    def from_section(cls, section: dict) -> "MonitoringConfig":
-        return cls(
-            active=section.get("active", False),
-            host=section.get("host", "0.0.0.0"),
-            port=int(section.get("port", 5000)),
-        )
-
-    @classmethod
-    def from_path(cls, config_path: str = "configs/config.toml") -> "MonitoringConfig":
-        return AppConfig.load(config_path).monitoring
-
-
-@dataclass(frozen=True)
 class LoggingConfig:
     """Configuration for the root logger level."""
 
@@ -708,7 +687,6 @@ class AppConfig:
     zmq: "ZMQConfig"
     braid_publisher: "BraidPublisherConfig"
     opto_trigger: "OptoTriggerConfig"
-    monitoring: "MonitoringConfig"
     logging: "LoggingConfig"
     visual_stimuli: "VisualStimuliConfig"
 
@@ -738,7 +716,6 @@ class AppConfig:
             opto_trigger = OptoTriggerConfig.from_section(
                 _required_section(data, "opto_trigger", config_path)
             )
-            monitoring = MonitoringConfig.from_section(data.get("monitoring", {}))
             logging_cfg = LoggingConfig.from_section(data.get("logging", {}))
             visual_stimuli = VisualStimuliConfig.from_section(
                 data.get("visual_stimuli", {})
@@ -758,7 +735,6 @@ class AppConfig:
             zmq=zmq,
             braid_publisher=braid_publisher,
             opto_trigger=opto_trigger,
-            monitoring=monitoring,
             logging=logging_cfg,
             visual_stimuli=visual_stimuli,
         )

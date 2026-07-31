@@ -23,7 +23,6 @@ from src.utils.config import (
     CameraConfig,
     LiquidLensConfig,
     LoggingConfig,
-    MonitoringConfig,
     OptoTriggerConfig,
     TriggerHandlerConfig,
     VisualStimuliConfig,
@@ -39,7 +38,6 @@ SECTION_CLASSES = [
     LiquidLensConfig,
     BraidPublisherConfig,
     OptoTriggerConfig,
-    MonitoringConfig,
     LoggingConfig,
     VisualStimuliConfig,
 ]
@@ -51,7 +49,6 @@ ATTR_FOR_CLASS = {
     LiquidLensConfig: "liquid_lens",
     BraidPublisherConfig: "braid_publisher",
     OptoTriggerConfig: "opto_trigger",
-    MonitoringConfig: "monitoring",
     LoggingConfig: "logging",
     VisualStimuliConfig: "visual_stimuli",
 }

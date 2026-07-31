@@ -191,11 +191,6 @@ calibration_file = "calibrations/liquid_lens.csv"
 [visual_stimuli]
 active = true
 config_file = "configs/visual_stimuli.toml"
-
-[monitoring]
-active = true
-host = "0.0.0.0"
-port = 5000
 ```
 
 **Operational notes:**

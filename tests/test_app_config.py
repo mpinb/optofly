@@ -9,7 +9,6 @@ def test_load_builds_the_whole_tree():
     assert app.zmq.braid_port > 0
     assert app.braid_publisher.host
     assert app.opto_trigger.port
-    assert isinstance(app.monitoring.active, bool)
     assert app.logging.level
     assert isinstance(app.visual_stimuli.active, bool)
 

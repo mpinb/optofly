@@ -155,11 +155,10 @@ def test_all_alive_produces_no_messages():
 
 
 def test_non_critical_process_death_is_ignored():
-    """A dead Monitoring Server/VisualProcess/CameraProcess must not abort
-    the whole experiment -- only processes known to fail fast and
-    unrecoverably during their own init are critical."""
+    """A dead VisualProcess/CameraProcess must not abort the whole
+    experiment -- only processes known to fail fast and unrecoverably
+    during their own init are critical."""
     processes = [
-        ("Monitoring Server", _FakeDeadProcess()),
         ("VisualProcess", _FakeDeadProcess()),
         ("CameraProcess", _FakeDeadProcess()),
     ]
@@ -273,16 +272,15 @@ def test_start_spawns_core_processes_and_status_reports_running(config_path):
 
 
 def test_start_spawns_active_flag_gated_processes(config_path):
-    """configs/config.example.toml has monitoring.active, camera.active, and
-    visual_stimuli.active all set to true -- exercise the gated branches and
-    confirm they actually spawn, so a regression in the `active`-flag
-    checks (wrong attribute, inverted condition, code moved outside its
-    `if`) fails a test instead of silently skipping these processes."""
+    """configs/config.example.toml has camera.active and visual_stimuli.active
+    both set to true -- exercise the gated branches and confirm they actually
+    spawn, so a regression in the `active`-flag checks (wrong attribute,
+    inverted condition, code moved outside its `if`) fails a test instead of
+    silently skipping these processes."""
     exp = Experiment()
     exp.start(config_path, metadata=None)
 
     processes = exp.status()["processes"]
-    assert "Monitoring Server" in processes
     assert "VisualProcess" in processes
     assert "CameraProcess" in processes
     assert "LiquidLens" in processes

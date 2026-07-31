@@ -31,7 +31,6 @@ dependencies:
   - pip:
       - rerun-sdk>=0.23.2
       - tomli-w>=1.1.0
-      - flask>=3.1.2
       - panda3d>=1.10.0
       - opencv-python>=4.13.0.92
       # Git installs -- conda cannot express these. optotune-lens is fetched

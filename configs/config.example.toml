@@ -36,11 +36,6 @@ lens_update_conflate = true
 # Global logging level
 level = "INFO"
 
-[monitoring]
-active = true
-host = "0.0.0.0"
-port = 5000
-
 # ==============================================================================
 # TRACKING & DATA INPUT
 # ==============================================================================
@@ -113,7 +108,7 @@ y_max = 0.02833
 
 [opto_trigger]
 # LED optogenetic stimulation
-active = true
+active = false
 # NOTE: 'port' is required below even when active = false. AppConfig.load()
 # validates every section on every load regardless of its active flag, so
 # this key must stay present (even as a placeholder) or config loading

@@ -83,22 +83,21 @@ def test_a_valid_config_still_loads(tmp_path):
 
 
 def test_optional_sections_may_be_absent(tmp_path):
-    """[monitoring], [logging] and [visual_stimuli] are entirely defaulted --
-    omitting them must keep working, or existing configs break."""
+    """[logging] and [visual_stimuli] are entirely defaulted -- omitting them
+    must keep working, or existing configs break."""
     source = open(EXAMPLE).read()
-    for section in ("[monitoring]", "[logging]", "[visual_stimuli]"):
+    for section in ("[logging]", "[visual_stimuli]"):
         assert section in source
     trimmed = "\n".join(
         line
         for line in source.splitlines()
-        if not line.startswith(("active =", "host =", "port = 5000", "level ="))
+        if not line.startswith(("active =", "host =", "level ="))
     )
     path = tmp_path / "no_optional.toml"
-    path.write_text(trimmed.replace("[monitoring]", "").replace("[logging]", ""))
+    path.write_text(trimmed.replace("[logging]", ""))
 
     config = AppConfig.load(str(path))
 
-    assert config.monitoring.active is False
     assert config.logging.level == "INFO"
 
 

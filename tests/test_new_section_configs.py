@@ -2,22 +2,7 @@ import logging
 
 import pytest
 
-from src.utils.config import LoggingConfig, MonitoringConfig, VisualStimuliConfig
-
-
-def test_monitoring_config_defaults():
-    cfg = MonitoringConfig.from_section({})
-    assert cfg.active is False
-    assert cfg.host == "0.0.0.0"
-    assert cfg.port == 5000
-
-
-def test_monitoring_config_explicit():
-    cfg = MonitoringConfig.from_section(
-        {"active": True, "host": "127.0.0.1", "port": 9000}
-    )
-    assert cfg.active is True
-    assert cfg.port == 9000
+from src.utils.config import LoggingConfig, VisualStimuliConfig
 
 
 def test_logging_config_defaults_and_level_int():
@@ -44,6 +29,6 @@ def test_visual_stimuli_config_defaults():
 
 
 def test_frozen_instances_cannot_be_mutated():
-    cfg = MonitoringConfig.from_section({})
+    cfg = VisualStimuliConfig.from_section({})
     with pytest.raises(Exception):
         cfg.active = True

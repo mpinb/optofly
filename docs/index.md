@@ -29,4 +29,3 @@ OptoFly integrates multiple hardware and software components for automated close
 - **Liquid Lens** — Dynamic autofocus with optional predictive tracking
 - **Visual Stimuli** — Configurable Panda3D patterns (background, looming, oscillating square)
 - **Latency Logger** — Per-trial end-to-end latency records (`latency.csv`) for opto, visual, and lens triggers
-- **Monitoring** — Web dashboard for real-time trigger visualization

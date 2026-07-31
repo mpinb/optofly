@@ -70,8 +70,7 @@ TriggerHandler (SUB 5555)  →  ZMQ PUB  topics=ZONE_ENTER/ZONE_EXIT/OPTO_ZONE_E
     ├── RustCameraProcess    (starts recording on ZONE_ENTER; stamps trigger_frame_idx on ZONE_ENTER)
     ├── LiquidLens           (starts focusing on ZONE_ENTER via ACTIVE_BRAID; writes lens_timing.csv per video) ─┐
     ├── OptoTriggerWorker    (fires LED on OPTO_ZONE_ENTER, one-shot)                                     ├─→ ZMQ PUSH  port=latency_port ─→ LatencyLogger (ZMQ PULL, writes latency.csv)
-    ├── VisualProcess        (Panda3D; renders stimuli on VISUAL_ZONE_ENTER, one-shot)                    ─┘
-    └── Monitoring Server    (web dashboard, optional)
+    └── VisualProcess        (Panda3D; renders stimuli on VISUAL_ZONE_ENTER, one-shot)                    ─┘
 ```
 
 The ZMQ BRAID feed is only live when the full stack is running. Standalone tools (calibration, simulators) that need tracking data must connect directly to the Braid HTTP SSE endpoint (`/events`) — with two exceptions: `braid_visualizer` consumes the ZMQ BRAID feed, and `braid_simulator` binds the BRAID PUB port itself, so the visualizer works against either the full stack or the simulator.
@@ -93,7 +92,7 @@ The ZMQ BRAID feed is only live when the full stack is running. Standalone tools
 
 ### Process Model
 
-All worker processes inherit `WorkerProcess` (`src/utils/worker.py`) and run as `multiprocessing.Process` instances (the one exception is the Monitoring Server, a plain daemon `mp.Process`). They:
+All worker processes inherit `WorkerProcess` (`src/utils/worker.py`) and run as `multiprocessing.Process` instances. They:
 - Accept a shared `mp.Event` for coordinated shutdown
 - Initialize ZMQ sockets inside `_run()` (not `__init__`) to avoid fork issues
 - Receive multipart ZMQ messages: `[topic_bytes, json_bytes]` (exception: the LATENCY PUSH/PULL channel is a single JSON frame, no topic prefix)
@@ -132,7 +131,7 @@ Each config class has exactly two constructors, and no others:
 
 Both end at the dataclass-generated `__init__`, so **the declared fields are the construction interface**: add a field to the dataclass and forget it in `from_section()` and you get a `TypeError` naming the field at config-load time, not an `AttributeError` inside a child process at trigger time. Never construct these via `object.__new__` + `__dict__` assignment — that was the previous pattern and it made the two lists drift silently. `tests/test_config_construction.py` pins this.
 
-`AppConfig.load()` builds and validates all nine config sections in one pass — regardless of any given section's own `active` flag. This means `configs/config.toml` must always have valid `[liquid_lens]`, `[opto_trigger]`, etc. sections present (each with its required `port` key) even when that subsystem is disabled via `active = false`, and even if you only ever need a single section (e.g. `ZMQConfig.from_path(path)`). Standalone tools that only need one section (e.g. `src/tools/braid_visualizer.py`, `src/tools/braid_simulator.py`) still need a fully valid config file for this reason.
+`AppConfig.load()` builds and validates all eight config sections in one pass — regardless of any given section's own `active` flag. This means `configs/config.toml` must always have valid `[liquid_lens]`, `[opto_trigger]`, etc. sections present (each with its required `port` key) even when that subsystem is disabled via `active = false`, and even if you only ever need a single section (e.g. `ZMQConfig.from_path(path)`). Standalone tools that only need one section (e.g. `src/tools/braid_visualizer.py`, `src/tools/braid_simulator.py`) still need a fully valid config file for this reason.
 
 Every config is frozen except `OptoTriggerConfig`, which `OptoTrigger.set_parameters()` mutates once per trigger to record the balanced-randomization-selected trial parameters.
 
@@ -166,7 +165,6 @@ Not every process has an `active` flag, and criticality is derived from config r
 | `CameraProcess` | `camera.active` | never |
 | `LiquidLens` | **`camera.active`** — it has no `active` flag of its own, since autofocus is only meaningful while the camera records | `camera.active` |
 | `OptoTriggerWorker` | always — it also drives the backlight | **`opto_trigger.active`** only |
-| `Monitoring Server` | `monitoring.active` | never |
 
 The two bolded rows are the surprising ones. Searching for `[liquid_lens] active` to disable the lens will find nothing; disable the camera instead. And `OptoTriggerWorker` is spawned even with `opto_trigger.active = false`, but a hardware failure there is then survivable — the process keeps running without the backlight rather than aborting a rig that has no Arduino attached. See `_critical_names()` in `src/orchestration.py`.
 

@@ -31,7 +31,6 @@ from src.utils.logger import configure_process_logging
 from src.utils.metadata import append_metadata_to_csv
 from src.utils.metadata import extract_config_columns
 from src.utils.metadata import write_metadata
-# from src.monitoring.server import run_server  # monitoring server disabled
 
 logger = logging.getLogger(__name__)
 # Always emit this module's milestone messages at INFO regardless of the root
@@ -101,8 +100,8 @@ def _check_critical_processes_alive(
 
     `processes` is a list of (name, process) tuples. Only names in `critical`
     (default: every name in _CRITICAL_INIT_HINTS) are checked -- everything
-    else (Monitoring Server, VisualProcess, CameraProcess, LatencyLogger)
-    dying is not fatal here. Callers that have an AppConfig should pass
+    else (VisualProcess, CameraProcess, LatencyLogger) dying is not fatal
+    here. Callers that have an AppConfig should pass
     _critical_names(app_config) so config-disabled subsystems are excluded.
 
     `reported_reasons` maps process name to the exception the child itself
@@ -346,7 +345,6 @@ class Experiment:
         time.sleep(0.5)
 
         logger.info("Starting optional processes...")
-        # Monitoring server disabled — module kept for future reinstatement.
 
         if app_config.visual_stimuli.active:
             visual_process = VisualProcess(

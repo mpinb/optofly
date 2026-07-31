@@ -24,7 +24,6 @@ TriggerHandler (src/processes/tracking.py)
     +---> LiquidLens           (starts on ZONE_ENTER; then follows ACTIVE_BRAID until ZONE_EXIT)
     +---> OptoTriggerWorker    (one-shot LED on OPTO_ZONE_ENTER only)
     +---> VisualProcess        (Panda3D; renders stimuli on VISUAL_ZONE_ENTER, one-shot)
-    +---> Monitoring Server    (web dashboard, ZONE_ENTER only, optional)
     +---> BraidPublisher       (feedback: learns which object is active)
 
 OptoTriggerWorker, VisualProcess, LiquidLens
@@ -40,7 +39,7 @@ TriggerHandler is the single admission controller. Each object can produce at mo
 
 ## Process Model
 
-All worker processes inherit from `WorkerProcess` (`src/utils/worker.py`) and run as `multiprocessing.Process` instances; the one exception is the Monitoring Server, a plain daemon `mp.Process`. The pool's lifecycle (spawn order, startup failure detection, mid-run health checks, ordered shutdown) is owned by `Experiment` in `src/orchestration.py` — `main.py` is only a thin CLI over it. See CLAUDE.md's Orchestration section for the lifecycle details.
+All worker processes inherit from `WorkerProcess` (`src/utils/worker.py`) and run as `multiprocessing.Process` instances. The pool's lifecycle (spawn order, startup failure detection, mid-run health checks, ordered shutdown) is owned by `Experiment` in `src/orchestration.py` — `main.py` is only a thin CLI over it. See CLAUDE.md's Orchestration section for the lifecycle details.
 
 | Process | ZMQ Role | Source |
 |---------|----------|--------|
@@ -51,7 +50,6 @@ All worker processes inherit from `WorkerProcess` (`src/utils/worker.py`) and ru
 | VisualProcess | SUB on 5556 (VISUAL_ZONE_ENTER) + PUSH on 5558 (LATENCY) | `src/visual/process.py` |
 | LiquidLens | SUB on 5557 (ACTIVE_BRAID) + SUB on 5556 (ZONE_ENTER, ZONE_EXIT) + PUSH on 5558 (LATENCY) | `src/processes/lens.py` |
 | LatencyLogger | PULL bind on 5558 (LATENCY) | `src/processes/latency_logger.py` |
-| Monitoring Server | SUB on 5556 (ZONE_ENTER) | `src/monitoring/server.py` |
 
 Port numbers above are the defaults from `[zmq]` in `configs/config.toml`; all four are configurable (`braid_port`, `trigger_port`, `active_braid_port`, `latency_port`), as are the topic names.
 
@@ -112,7 +110,7 @@ Before publishing, `BraidPublisher` injects two extra fields into every Birth/Up
 
 `frame` is the Braid frame at which *this* system fired (i.e. at `OPTO_ZONE_ENTER` / `VISUAL_ZONE_ENTER`), while `record_frame` is the frame at which the outer `ZONE_ENTER` fired and camera recording began. The two differ whenever `opto_zone_scale`/`visual_zone_scale` is below `1.0`; `record_frame` is what aligns a stimulus onset against the recorded video.
 
-**ZONE_EXIT topic** (TriggerHandler → camera, lens, monitoring):
+**ZONE_EXIT topic** (TriggerHandler → camera, lens):
 ```json
 {
   "obj_id": 1,
