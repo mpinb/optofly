@@ -26,6 +26,9 @@ This gets the software installed and runnable. It skips camera, lens, and arena 
 # Install dependencies
 uv sync
 
+# Install the XIMEA camera SDK (system driver, not a Python package; needs a reboot after)
+sudo scripts/install_ximea_driver.sh
+
 # Copy and customize configs
 cp configs/config.example.toml configs/config.toml
 cp configs/visual_stimuli.example.toml configs/visual_stimuli.toml
