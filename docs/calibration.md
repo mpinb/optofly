@@ -159,12 +159,14 @@ The z for each plane is read automatically from Braid — the tool computes the 
 - Liquid lens connected with `calibrations/liquid_lens.csv` built (see Liquid Lens Calibration above)
 - A laser pointer or bright LED you can hold at the frame edges
 - OptoFly environment activated (`uv sync`)
+- You're in the OptoFly repo's own root directory (`~/src/OptoFly`, or wherever you cloned it) — the tool's `--config configs/config.toml` path is relative and won't resolve from anywhere else
 
 ### Procedure
 
-1. Launch the calibration tool:
+1. Launch the calibration tool from the OptoFly repo root:
 
    ```bash
+   cd ~/src/OptoFly   # or wherever you cloned OptoFly
    uv run python -m src.tools.calibrate_braid_ximea --config configs/config.toml
    ```
 
@@ -199,6 +201,7 @@ The z for each plane is read automatically from Braid — the tool computes the 
 - **"No Braid fix"**: Braid is not tracking the laser. Ensure the dot is inside the tracking volume before recording.
 - **FOV looks wrong after saving**: re-run and ensure the laser is at the edges of the frame (not the centre). Add more than 4 points if the live bounds estimate is noisy.
 - **Lens does not refocus**: check the serial port in `[liquid_lens] port` in `config.toml`.
+- **Timeout messages in the terminal**: safe to ignore. They just mean no object was detected in that window (e.g. the laser dot briefly moved out of frame or below the detection threshold) — they don't indicate a crash or a failed run.
 
 ---
 
@@ -259,6 +262,8 @@ Same as Camera FOV Calibration above.
 
 - **Trigger zone still looks wrong**: the frustum interpolates linearly. If distortion is non-linear, narrow `z_min`/`z_max` so the fly spends less time in the interpolated region.
 
+- **Timeout messages in the terminal**: same tool as Camera FOV Calibration above — safe to ignore, they just mean no object was detected in that window.
+
 ### Output
 
 `calibrate_braid_ximea` writes directly to `configs/config.toml`, replacing the `[camera.FOV]` section:
@@ -298,12 +303,12 @@ y_max = 0.041
 
 Screen assignment for the Panda3D pipeline comes from `screen_mapping` in `[visual_stimuli.arena]`. No interactive tool is needed there: just list which physical screen, left to right, faces which compass direction.
 
-Aligning Braid's heading coordinate frame with the arena needs `braid_heading_offset_rad` and `braid_heading_flip`. Fit both automatically:
+Aligning Braid's heading coordinate frame with the arena needs `braid_heading_offset_rad` and `braid_heading_flip`. The first command below is all you need to perform the actual Braid-to-screen calibration; the other two are optional variants, not extra steps to run afterward:
 
 ```bash
-uv run python -m src.tools.calibrate_heading
-uv run python -m src.tools.calibrate_heading --standalone       # no Braid connection
-uv run python -m src.tools.calibrate_heading --screens North South   # calibrate a subset
+uv run python -m src.tools.calibrate_heading                          # performs the calibration
+uv run python -m src.tools.calibrate_heading --standalone              # variant: no Braid connection
+uv run python -m src.tools.calibrate_heading --screens North South     # variant: calibrate a subset of screens
 ```
 
 The tool shows a bright dot on each arena screen in turn. Place a Braid-trackable target (a small white ball works) directly in front of the dot and press Enter. After all screens, it fits `braid_heading_offset_rad` and `braid_heading_flip` from the Braid *position* angle of the target at each known screen direction, and offers to write both values into `visual_stimuli.toml`.
