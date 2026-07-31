@@ -84,6 +84,12 @@ def configure_test_trigger(handler):
     # Replace the handler's config with the test config
     handler.config = test_config
 
+    # The test camera config above is flat (no near/far FOV), but
+    # handler.fov_frustum was already latched from the real config file
+    # in __init__ -- clear it so _get_fov_at_z() uses the flat bounds
+    # below instead of stale near/far interpolation.
+    handler.fov_frustum = False
+
     # Update the handler's mirrored attributes from the new config
     handler.fov_x_min = test_config.fov_x_min
     handler.fov_x_max = test_config.fov_x_max
