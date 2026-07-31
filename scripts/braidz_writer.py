@@ -16,7 +16,7 @@ compressed) with paths relative to ``src_dir`` and no leading directory name,
 and ``README.md`` moved first if present.
 
 Run with:
-    python3 scripts/braidz_writer.py /mnt/data/experiments/<timestamp>.braid
+    uv run python scripts/braidz_writer.py /mnt/data/experiments/<timestamp>.braid
 """
 
 from __future__ import annotations

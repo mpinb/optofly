@@ -40,6 +40,9 @@ uv run python -m src.tools.calibrate_braid_ximea
 
 # Camera CSV QA plots (frame-counter gaps, inter-frame intervals, jitter)
 uv run python -m src.tools.generate_camera_histograms /mnt/data/videos/<braid_dir>
+
+# Recover a crashed/leftover .braid folder into .braidz (stdlib only, no Rust toolchain needed)
+uv run python scripts/braidz_writer.py /mnt/data/experiments/<timestamp>.braid
 ```
 
 ## Configuration

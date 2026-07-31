@@ -126,6 +126,22 @@ repo emits a `diopter` column instead — rename it to `dpt` before use.
   driver — it must be configured once via Optotune Cockpit and saved as the
   startup snapshot on the controller itself.
 
+## Data Recovery
+
+**Braid or the machine crashed mid-recording, leaving a `.braid` folder instead of `.braidz`:**
+
+Braid normally zips its `.braid` working folder into a single `.braidz` file itself when a
+recording stops cleanly. If that never happens, zip it by hand with the stdlib-only recovery
+script instead of installing the Rust toolchain just to run `braidz-writer`:
+
+```bash
+uv run python scripts/braidz_writer.py /mnt/data/experiments/<timestamp>.braid
+```
+
+Produces the same archive layout as the Rust crate (text header, uncompressed ZIP, `README.md`
+first). Pass `--dest` to override the output path, or `--force` to overwrite an existing
+`.braidz`.
+
 ## Performance
 
 **Visual stimuli FPS drops below target (Panda3D pipeline):**
