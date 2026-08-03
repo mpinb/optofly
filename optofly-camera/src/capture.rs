@@ -122,6 +122,12 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
         .set_subscribe(cfg.zmq_zone_exit_topic.as_bytes())
         .map_err(|e| format!("ZMQ subscribe error: {}", e))?;
     zmq_sub
+        .set_subscribe(cfg.zmq_opto_enter_topic.as_bytes())
+        .map_err(|e| format!("ZMQ subscribe error: {}", e))?;
+    zmq_sub
+        .set_subscribe(cfg.zmq_visual_enter_topic.as_bytes())
+        .map_err(|e| format!("ZMQ subscribe error: {}", e))?;
+    zmq_sub
         .set_subscribe(b"kill")
         .map_err(|e| format!("ZMQ subscribe error: {}", e))?;
     log::info!("ZMQ connected to {}", cfg.zmq_trigger_address);
@@ -241,6 +247,9 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
     let mut total_frames: u64 = 0;
     // Frame index within the current recording buffer at which ZONE_ENTER fired.
     let mut trigger_frame_idx: Option<u64> = None;
+    // Frame index at which OPTO_ZONE_ENTER/VISUAL_ZONE_ENTER fired for the current recording.
+    let mut opto_frame_idx: Option<u64> = None;
+    let mut visual_frame_idx: Option<u64> = None;
 
     // --- Start acquisition (consumes cam, returns AcquisitionBuffer) ---
     let acq = cam
@@ -313,6 +322,8 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                                 rec_dropped = 0;
                                 rec_prev_nframe = None;
                                 trigger_frame_idx = Some(0);
+                                opto_frame_idx = None;
+                                visual_frame_idx = None;
                                 state = State::Recording;
                                 log::info!(
                                     "ZONE_ENTER obj_id={} — started recording (max {} frames)",
@@ -360,7 +371,7 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                     }
                 }
 
-                // Poll ZMQ for ZONE_EXIT or kill
+                // Poll ZMQ for ZONE_EXIT, OPTO_ZONE_ENTER, VISUAL_ZONE_ENTER, or kill
                 if let Ok(parts) = zmq_sub.recv_multipart(zmq::DONTWAIT) {
                     if !parts.is_empty() {
                         let topic = String::from_utf8_lossy(&parts[0]);
@@ -378,32 +389,63 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                                 height,
                                 rec_dropped,
                                 trigger_frame_idx,
+                                opto_frame_idx,
+                                visual_frame_idx,
                                 "kill",
                             );
                             trigger_frame_idx = None;
+                            opto_frame_idx = None;
+                            visual_frame_idx = None;
                             log::info!("Received kill signal during recording");
                             break;
-                        } else if topic.as_ref() == cfg.zmq_zone_exit_topic && parts.len() >= 2 {
+                        } else if parts.len() >= 2 {
                             let msg: serde_json::Value =
                                 serde_json::from_slice(&parts[1]).unwrap_or_default();
-                            if msg["obj_id"].as_u64().unwrap_or(0) == recording_obj_id {
-                                let reason = msg["reason"].as_str().unwrap_or("unknown");
-                                finish_recording(
-                                    &mut buffers,
-                                    &mut active_idx,
-                                    &mut state,
-                                    &encoder_tx,
-                                    recording_obj_id,
-                                    recording_frame,
-                                    &cfg.save_folder,
-                                    fps,
-                                    width,
-                                    height,
-                                    rec_dropped,
-                                    trigger_frame_idx,
-                                    reason,
-                                );
-                                trigger_frame_idx = None;
+                            match classify_recording_message(
+                                topic.as_ref(),
+                                &msg,
+                                recording_obj_id,
+                                &cfg.zmq_zone_exit_topic,
+                                &cfg.zmq_opto_enter_topic,
+                                &cfg.zmq_visual_enter_topic,
+                            ) {
+                                RecordingEvent::ZoneExit { reason } => {
+                                    finish_recording(
+                                        &mut buffers,
+                                        &mut active_idx,
+                                        &mut state,
+                                        &encoder_tx,
+                                        recording_obj_id,
+                                        recording_frame,
+                                        &cfg.save_folder,
+                                        fps,
+                                        width,
+                                        height,
+                                        rec_dropped,
+                                        trigger_frame_idx,
+                                        opto_frame_idx,
+                                        visual_frame_idx,
+                                        &reason,
+                                    );
+                                    trigger_frame_idx = None;
+                                    opto_frame_idx = None;
+                                    visual_frame_idx = None;
+                                }
+                                RecordingEvent::OptoZoneEnter => {
+                                    if opto_frame_idx.is_none() {
+                                        opto_frame_idx = buffers[active_idx]
+                                            .as_ref()
+                                            .map(|b| b.filled() as u64);
+                                    }
+                                }
+                                RecordingEvent::VisualZoneEnter => {
+                                    if visual_frame_idx.is_none() {
+                                        visual_frame_idx = buffers[active_idx]
+                                            .as_ref()
+                                            .map(|b| b.filled() as u64);
+                                    }
+                                }
+                                RecordingEvent::Unmatched => {}
                             }
                         }
                     }
@@ -432,9 +474,13 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                             height,
                             rec_dropped,
                             trigger_frame_idx,
+                            opto_frame_idx,
+                            visual_frame_idx,
                             "buffer_full",
                         );
                         trigger_frame_idx = None;
+                        opto_frame_idx = None;
+                        visual_frame_idx = None;
                     }
                 }
             }
@@ -459,6 +505,8 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
             height,
             rec_dropped,
             trigger_frame_idx,
+            opto_frame_idx,
+            visual_frame_idx,
             "shutdown",
         );
     }
@@ -487,6 +535,8 @@ fn finish_recording(
     height: u32,
     rec_dropped: u64,
     trigger_frame_idx: Option<u64>,
+    opto_frame_idx: Option<u64>,
+    visual_frame_idx: Option<u64>,
     reason: &str,
 ) {
     let n_filled = buffers[*active_idx]
@@ -516,6 +566,8 @@ fn finish_recording(
         width,
         height,
         trigger_frame_idx,
+        opto_frame_idx,
+        visual_frame_idx,
     }) {
         Ok(()) => {}
         Err(std::sync::mpsc::TrySendError::Full(job)) => {
