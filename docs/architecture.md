@@ -108,7 +108,7 @@ Before publishing, `BraidPublisher` injects two extra fields into every Birth/Up
 
 `system` is `"opto"`, `"visual"`, or `"lens"`. `LatencyLogger` computes `latency_ms = (activation_timestamp - braid_timestamp) * 1000` for non-sham trials. `LiquidLens` publishes only for the first commanded diopter per trial, not every subsequent tracking update.
 
-`frame` is the Braid frame at which *this* system fired (i.e. at `OPTO_ZONE_ENTER` / `VISUAL_ZONE_ENTER`), while `record_frame` is the frame at which the outer `ZONE_ENTER` fired and camera recording began. The two differ whenever `opto_zone_scale`/`visual_zone_scale` is below `1.0`; `record_frame` is what aligns a stimulus onset against the recorded video.
+`frame` is the Braid frame at which *this* system fired (i.e. at `OPTO_ZONE_ENTER` / `VISUAL_ZONE_ENTER`), while `record_frame` is the frame at which the outer `ZONE_ENTER` fired and camera recording began. The two differ whenever `opto_zone_scale`/`visual_zone_scale` is below `1.0`; `record_frame` is what aligns a stimulus onset against the recorded video — `src/tools/frame_alignment.py` automates that conversion (fps-ratio scaled Braid-frame delta) against a completed recording, `.braidz` zip included. See `docs/camera.md`.
 
 **ZONE_EXIT topic** (TriggerHandler → camera, lens):
 ```json

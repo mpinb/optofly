@@ -130,7 +130,7 @@ The subscription is vestigial; don't build on it without adding a publisher.
 frame_idx,nframe,ts_sec,ts_usec,cam_time_ns,trigger_frame_idx
 0,100,1234,567890,1234567890000,0
 ```
-`trigger_frame_idx` is written to every row and indicates which buffer frame corresponds to the real `ZONE_ENTER` moment — that is, it marks **recording start**, not stimulus onset. Since the capture buffer resets at `ZONE_ENTER`, it is always `0` (there are no pre-trigger frames). Actual stimulus onset for opto/visual is in `latency.csv`'s `frame` field for that system's row (`"opto"`/`"visual"`); `record_frame` on that same row is the Braid frame at which the outer `ZONE_ENTER` fired — the same moment `trigger_frame_idx` marks, but on the Braid frame counter — so `(row.frame - row.record_frame)` is the number of Braid frames between recording start and stimulus onset. Convert to camera frames via the fps ratio if needed for video alignment (Braid runs ~100Hz; camera fps is in `configs/config.toml`'s `[camera]` section).
+`trigger_frame_idx` is written to every row and indicates which buffer frame corresponds to the real `ZONE_ENTER` moment — that is, it marks **recording start**, not stimulus onset. Since the capture buffer resets at `ZONE_ENTER`, it is always `0` (there are no pre-trigger frames). Actual stimulus onset for opto/visual is in `latency.csv`'s `frame` field for that system's row (`"opto"`/`"visual"`); `record_frame` on that same row is the Braid frame at which the outer `ZONE_ENTER` fired — the same moment `trigger_frame_idx` marks, but on the Braid frame counter — so `(row.frame - row.record_frame)` is the number of Braid frames between recording start and stimulus onset. Convert to camera frames via the fps ratio if needed for video alignment (Braid runs ~100Hz; camera fps is in `configs/config.toml`'s `[camera]` section) — or use `src/tools/frame_alignment.py` below, which does this automatically and cross-checks the result against the video's actual frame count.
 
 **Lens timing CSV:** `{save_folder}/obj_id_{obj_id}_frame_{frame}_lens_timing.csv`
 
@@ -144,6 +144,18 @@ t_braid,t_relay,t_lens_recv,t_serial_start,t_diopter_sent,delay_ms,frame,obj_id,
 **Debug histograms:** Generate offline with `src/tools/generate_camera_histograms.py`
 - Reads CSV files and produces PNG histograms showing frame counter diffs, inter-frame interval, jitter, timeline
 - Usage: `python src/tools/generate_camera_histograms.py /path/to/videos/`
+
+**Stimulus-onset → video-frame alignment:** `src/tools/frame_alignment.py`
+- For each `opto`/`visual` (or `lens`, via `--systems`) row in `latency.csv`, computes the corresponding video frame from `(row.frame - row.record_frame)` scaled by the camera/Braid fps ratio, joins it against the matching `obj_id_{obj_id}_frame_{record_frame}.csv` to report that video's actual frame count, and warns when the computed frame falls outside it (recording ended — `zone_timeout`/buffer-full/`left_fov` — before the stimulus fired).
+- Works directly against a completed recording's zipped `.braidz` file (reads `latency.csv` and `config.toml` — for `camera.fps` — as zip members) as well as a still-open or crashed/leftover raw `.braid` folder; no unzipping needed. Point it at the videos folder with `--video-folder` if it isn't the one auto-derived from `src/orchestration.py`'s layout (`<data_root>/videos/<name>.braid`, sibling of `<data_root>/experiments/`).
+- This is a frame-count approximation, not an exact timestamp lookup — the camera's own per-frame timestamps aren't on a clock synchronized with Braid's, so there's no more precise cross-referencing available.
+- Usage: `uv run python -m src.tools.frame_alignment /mnt/data/experiments/<timestamp>.braidz` — prints one row per trigger to stdout as CSV (or write it out with `--output`):
+```csv
+obj_id,system,record_frame,braid_frame,braid_frame_delta,video_frame,video_csv,video_frame_count,sham,latency_ms
+1,opto,12345,12350,5,25,obj_id_1_frame_12345.csv,100,False,12.4
+```
+  `video_frame` is the row's answer — the frame in `video_csv` where the stimulus fired. `video_frame_count` (from the matching metadata CSV, blank if it wasn't found) is what `video_frame` is range-checked against; a warning is printed to stderr per row that falls outside it.
+- Options: `--video-folder` (override the auto-derived videos folder), `--camera-fps` (skip reading `config.toml`, e.g. for recordings that predate config-copying), `--braid-fps` (override the 100 Hz default), `--systems` (comma-separated, default `opto,visual`; add `lens` to include liquid-lens triggers), `--output` (write the CSV to a file instead of stdout).
 
 ## Troubleshooting
 
