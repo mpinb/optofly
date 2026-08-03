@@ -28,7 +28,11 @@ def generate_histogram(csv_path: Path, png_path: Path) -> bool:
     Returns True if successful, False otherwise.
     """
     try:
-        data = np.loadtxt(csv_path, delimiter=",", skiprows=1)
+        # Only read the columns this tool actually uses (frame_idx, nframe, ts_sec,
+        # ts_usec, cam_time_ns). Pinning usecols keeps this immune to additive columns
+        # like opto_frame_idx/visual_frame_idx, which are blank whenever that stimulus
+        # system never fired and can't be parsed as floats by np.loadtxt.
+        data = np.loadtxt(csv_path, delimiter=",", skiprows=1, usecols=(0, 1, 2, 3, 4))
         if data.shape[0] < 2:
             print(f"  {csv_path.name}: too few frames ({data.shape[0]}), skipping")
             return False
