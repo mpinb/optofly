@@ -127,10 +127,12 @@ The subscription is vestigial; don't build on it without adding a publisher.
 
 **Metadata CSV:** `{save_folder}/obj_id_{obj_id}_frame_{frame}.csv`
 ```csv
-frame_idx,nframe,ts_sec,ts_usec,cam_time_ns,trigger_frame_idx
-0,100,1234,567890,1234567890000,0
+frame_idx,nframe,ts_sec,ts_usec,cam_time_ns,trigger_frame_idx,opto_frame_idx,visual_frame_idx
+0,100,1234,567890,1234567890000,0,3,
 ```
-`trigger_frame_idx` is written to every row and indicates which buffer frame corresponds to the real `ZONE_ENTER` moment — that is, it marks **recording start**, not stimulus onset. Since the capture buffer resets at `ZONE_ENTER`, it is always `0` (there are no pre-trigger frames). Actual stimulus onset for opto/visual is in `latency.csv`'s `frame` field for that system's row (`"opto"`/`"visual"`); `record_frame` on that same row is the Braid frame at which the outer `ZONE_ENTER` fired — the same moment `trigger_frame_idx` marks, but on the Braid frame counter — so `(row.frame - row.record_frame)` is the number of Braid frames between recording start and stimulus onset. Convert to camera frames via the fps ratio if needed for video alignment (Braid runs ~100Hz; camera fps is in `configs/config.toml`'s `[camera]` section) — or use `src/tools/frame_alignment.py` below, which does this automatically and cross-checks the result against the video's actual frame count.
+`trigger_frame_idx` is written to every row and indicates which buffer frame corresponds to the real `ZONE_ENTER` moment — that is, it marks **recording start**, not stimulus onset. Since the capture buffer resets at `ZONE_ENTER`, it is always `0` (there are no pre-trigger frames).
+
+`opto_frame_idx`/`visual_frame_idx` mark the buffer frame at which `OPTO_ZONE_ENTER`/`VISUAL_ZONE_ENTER` arrived on the ZMQ trigger socket — a frame-exact, live-captured stimulus-onset marker, with no fps-ratio math and no dropped-frame assumption. Each is written as a constant value across every row (same style as `trigger_frame_idx`) and is blank when that system never fired during the recording (system inactive, or the fly never reached the inner zone).
 
 **Lens timing CSV:** `{save_folder}/obj_id_{obj_id}_frame_{frame}_lens_timing.csv`
 
@@ -146,6 +148,7 @@ t_braid,t_relay,t_lens_recv,t_serial_start,t_diopter_sent,delay_ms,frame,obj_id,
 - Usage: `python src/tools/generate_camera_histograms.py /path/to/videos/`
 
 **Stimulus-onset → video-frame alignment:** `src/tools/frame_alignment.py`
+- **For opto/visual, prefer `opto_frame_idx`/`visual_frame_idx` in the metadata CSV above** — they're exact, live-captured frame numbers with no fps-ratio approximation. This tool is now needed only for the `lens` system (no analogous live marker — see the Lens timing CSV above) or for recordings made before this feature shipped.
 - For each `opto`/`visual` (or `lens`, via `--systems`) row in `latency.csv`, computes the corresponding video frame from `(row.frame - row.record_frame)` scaled by the camera/Braid fps ratio, joins it against the matching `obj_id_{obj_id}_frame_{record_frame}.csv` to report that video's actual frame count, and warns when the computed frame falls outside it (recording ended — `zone_timeout`/buffer-full/`left_fov` — before the stimulus fired).
 - Works directly against a completed recording's zipped `.braidz` file (reads `latency.csv` and `config.toml` — for `camera.fps` — as zip members) as well as a still-open or crashed/leftover raw `.braid` folder; no unzipping needed. Point it at the videos folder with `--video-folder` if it isn't the one auto-derived from `src/orchestration.py`'s layout (`<data_root>/videos/<name>.braid`, sibling of `<data_root>/experiments/`).
 - This is a frame-count approximation, not an exact timestamp lookup — the camera's own per-frame timestamps aren't on a clock synchronized with Braid's, so there's no more precise cross-referencing available.
