@@ -63,6 +63,42 @@ fn centered_roi(
     Ok(((sensor_w - width) / 2, (sensor_h - height) / 2))
 }
 
+#[derive(Debug, PartialEq)]
+enum RecordingEvent {
+    ZoneExit { reason: String },
+    OptoZoneEnter,
+    VisualZoneEnter,
+    Unmatched,
+}
+
+/// Classifies a single ZMQ trigger message received while `State::Recording`.
+///
+/// Pure: no ZMQ socket, no camera buffer, no XIMEA calls. `"kill"` is handled
+/// separately by the caller since it isn't a per-`obj_id` event.
+fn classify_recording_message(
+    topic: &str,
+    payload: &serde_json::Value,
+    recording_obj_id: u64,
+    zone_exit_topic: &str,
+    opto_enter_topic: &str,
+    visual_enter_topic: &str,
+) -> RecordingEvent {
+    let msg_obj_id = payload["obj_id"].as_u64().unwrap_or(0);
+    if msg_obj_id != recording_obj_id {
+        return RecordingEvent::Unmatched;
+    }
+    if topic == zone_exit_topic {
+        let reason = payload["reason"].as_str().unwrap_or("unknown").to_string();
+        RecordingEvent::ZoneExit { reason }
+    } else if topic == opto_enter_topic {
+        RecordingEvent::OptoZoneEnter
+    } else if topic == visual_enter_topic {
+        RecordingEvent::VisualZoneEnter
+    } else {
+        RecordingEvent::Unmatched
+    }
+}
+
 pub fn run(cfg: AppConfig) -> Result<(), String> {
     // --- SIGTERM handler ---
     let shutdown = Arc::new(AtomicBool::new(false));
@@ -518,7 +554,8 @@ fn finish_recording(
 
 #[cfg(test)]
 mod tests {
-    use super::centered_roi;
+    use super::*;
+    use serde_json::json;
 
     #[test]
     fn centers_a_smaller_roi_on_the_sensor() {
@@ -552,5 +589,71 @@ mod tests {
     fn height_larger_than_the_sensor_is_rejected() {
         let err = centered_roi(2112, 2112, 2112, 4000).unwrap_err();
         assert!(err.contains("4000"), "must name the requested height: {}", err);
+    }
+
+    #[test]
+    fn zone_exit_with_matching_obj_id_returns_reason() {
+        let payload = json!({"obj_id": 5, "reason": "left_fov"});
+        let event = classify_recording_message(
+            "ZONE_EXIT", &payload, 5, "ZONE_EXIT", "OPTO_ZONE_ENTER", "VISUAL_ZONE_ENTER",
+        );
+        assert_eq!(
+            event,
+            RecordingEvent::ZoneExit { reason: "left_fov".to_string() }
+        );
+    }
+
+    #[test]
+    fn zone_exit_with_non_matching_obj_id_is_unmatched() {
+        let payload = json!({"obj_id": 99, "reason": "left_fov"});
+        let event = classify_recording_message(
+            "ZONE_EXIT", &payload, 5, "ZONE_EXIT", "OPTO_ZONE_ENTER", "VISUAL_ZONE_ENTER",
+        );
+        assert_eq!(event, RecordingEvent::Unmatched);
+    }
+
+    #[test]
+    fn opto_zone_enter_with_matching_obj_id_is_opto_zone_enter() {
+        let payload = json!({"obj_id": 5});
+        let event = classify_recording_message(
+            "OPTO_ZONE_ENTER", &payload, 5, "ZONE_EXIT", "OPTO_ZONE_ENTER", "VISUAL_ZONE_ENTER",
+        );
+        assert_eq!(event, RecordingEvent::OptoZoneEnter);
+    }
+
+    #[test]
+    fn opto_zone_enter_with_non_matching_obj_id_is_unmatched() {
+        let payload = json!({"obj_id": 99});
+        let event = classify_recording_message(
+            "OPTO_ZONE_ENTER", &payload, 5, "ZONE_EXIT", "OPTO_ZONE_ENTER", "VISUAL_ZONE_ENTER",
+        );
+        assert_eq!(event, RecordingEvent::Unmatched);
+    }
+
+    #[test]
+    fn visual_zone_enter_with_matching_obj_id_is_visual_zone_enter() {
+        let payload = json!({"obj_id": 5});
+        let event = classify_recording_message(
+            "VISUAL_ZONE_ENTER", &payload, 5, "ZONE_EXIT", "OPTO_ZONE_ENTER", "VISUAL_ZONE_ENTER",
+        );
+        assert_eq!(event, RecordingEvent::VisualZoneEnter);
+    }
+
+    #[test]
+    fn unrecognized_topic_is_unmatched() {
+        let payload = json!({"obj_id": 5});
+        let event = classify_recording_message(
+            "SOME_OTHER_TOPIC", &payload, 5, "ZONE_EXIT", "OPTO_ZONE_ENTER", "VISUAL_ZONE_ENTER",
+        );
+        assert_eq!(event, RecordingEvent::Unmatched);
+    }
+
+    #[test]
+    fn missing_obj_id_in_payload_is_unmatched() {
+        let payload = json!({});
+        let event = classify_recording_message(
+            "OPTO_ZONE_ENTER", &payload, 5, "ZONE_EXIT", "OPTO_ZONE_ENTER", "VISUAL_ZONE_ENTER",
+        );
+        assert_eq!(event, RecordingEvent::Unmatched);
     }
 }
