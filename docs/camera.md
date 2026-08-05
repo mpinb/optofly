@@ -132,7 +132,7 @@ frame_idx,nframe,ts_sec,ts_usec,cam_time_ns,trigger_frame_idx,opto_frame_idx,vis
 ```
 `trigger_frame_idx` is written to every row and indicates which buffer frame corresponds to the real `ZONE_ENTER` moment — that is, it marks **recording start**, not stimulus onset. Since the capture buffer resets at `ZONE_ENTER`, it is always `0` (there are no pre-trigger frames).
 
-`opto_frame_idx`/`visual_frame_idx` mark the buffer frame at which `OPTO_ZONE_ENTER`/`VISUAL_ZONE_ENTER` arrived on the ZMQ trigger socket — a frame-exact, live-captured stimulus-onset marker, with no fps-ratio math and no dropped-frame assumption. Each is written as a constant value across every row (same style as `trigger_frame_idx`) and is blank when that system never fired during the recording (system inactive, or the fly never reached the inner zone).
+`opto_frame_idx`/`visual_frame_idx` mark the buffer frame at which `OPTO_ZONE_ENTER`/`VISUAL_ZONE_ENTER` arrived on the ZMQ trigger socket — a frame-exact, live-captured stimulus-onset marker, with no fps-ratio math and no dropped-frame assumption. They live in this same per-video metadata CSV (`{save_folder}/obj_id_{obj_id}_frame_{frame}.csv`, next to that trial's `.mp4`) — there is no separate stimulus-data file per video. Each is written as a constant value across every row (same style as `trigger_frame_idx`) and is blank when that system never fired during the recording (system inactive, or the fly never reached the inner zone).
 
 **Lens timing CSV:** `{save_folder}/obj_id_{obj_id}_frame_{frame}_lens_timing.csv`
 
@@ -159,6 +159,23 @@ obj_id,system,record_frame,braid_frame,braid_frame_delta,video_frame,video_csv,v
 ```
   `video_frame` is the row's answer — the frame in `video_csv` where the stimulus fired. `video_frame_count` (from the matching metadata CSV, blank if it wasn't found) is what `video_frame` is range-checked against; a warning is printed to stderr per row that falls outside it.
 - Options: `--video-folder` (override the auto-derived videos folder), `--camera-fps` (skip reading `config.toml`, e.g. for recordings that predate config-copying), `--braid-fps` (override the 100 Hz default), `--systems` (comma-separated, default `opto,visual`; add `lens` to include liquid-lens triggers), `--output` (write the CSV to a file instead of stdout).
+
+## Finding a video's stimulus parameters
+
+A video's filename only gives you `obj_id` and `record_frame` — the Braid frame `ZONE_ENTER` fired on, i.e. recording start. That's not enough on its own to look up the LED or visual-stimulus parameters used for that trial, because `opto.csv`/`stim.csv` are keyed by `frame`, the Braid frame `OPTO_ZONE_ENTER`/`VISUAL_ZONE_ENTER` actually fired on. `frame` and `record_frame` only coincide when `opto_zone_scale`/`visual_zone_scale` is `1.0`; at the default of `0.8` they typically differ by a handful of Braid frames (see [Configuration](architecture.md#configuration-loading) in `docs/architecture.md`).
+
+`latency.csv` is the bridge, since every row carries both `frame` and `record_frame` for the same trigger:
+
+1. Parse `obj_id` and `record_frame` from the video filename (`obj_id_{obj_id}_frame_{record_frame}.mp4`).
+2. Find the `latency.csv` row with that `obj_id`/`record_frame` and the system you want (`system` = `"opto"` or `"visual"`) — its `frame` column is the key into the next file.
+3. Look up that `obj_id`/`frame` pair in `opto.csv` (LED parameters, see [docs/opto-trigger.md](opto-trigger.md)) or `stim.csv` (visual stimulus parameters, see [docs/visual-stimuli-panda3d.md](visual-stimuli-panda3d.md)).
+
+**`latency.csv` columns:**
+`system, obj_id, frame, record_frame, braid_timestamp, trigger_timestamp, activation_timestamp, sham, latency_ms`
+
+`system` is `"opto"`, `"visual"`, or `"lens"`. `latency_ms = (activation_timestamp - braid_timestamp) * 1000`, blank for sham trials. Written solely by `LatencyLogger` (`src/processes/latency_logger.py`) — see the LATENCY message format in `docs/architecture.md` for the full wire-format description this file mirrors.
+
+If you only need the exact video frame the stimulus fired on rather than its parameters, skip this lookup entirely — the per-video metadata CSV's `opto_frame_idx`/`visual_frame_idx` above already gives you that directly, no `latency.csv` join required.
 
 ## Troubleshooting
 
