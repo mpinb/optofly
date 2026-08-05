@@ -34,6 +34,23 @@ cp configs/visual_stimuli.example.toml configs/visual_stimuli.toml
 uv run python main.py
 ```
 
+## Web GUI
+
+An alternative to the CLI — a local browser-based control panel at `http://localhost:5050`.
+
+```bash
+uv run python -m src.gui
+```
+
+Four tabs:
+
+- **Run** — metadata form, start/stop experiment, process health at a glance
+- **Config** — form fields for commonly-tweaked settings (opto parameters, active toggles, stimulus flags)
+- **Advanced** — raw TOML editor for hardware ports, calibration paths, and everything else
+- **Monitor** — live trigger feed enriched with opto/stimulus parameters per trial
+
+The GUI is local-only (same machine as the hardware processes). `uv run python main.py` still works unchanged for headless/scripted runs.
+
 ## Real-Time Tracking And Liquid Lens Path
 
 OptoFly receives live Braid tracking data from the Braid model server SSE endpoint

@@ -1,64 +1,132 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Run Experiment</h1>
+<h1 class="page-title">Run Experiment</h1>
 
-<div id="status-line"></div>
+<div class="status-bar" id="status-bar">
+    <span class="status-dot idle" id="status-dot"></span>
+    <span class="status-text" id="status-text">Idle</span>
+    <span class="braid-folder" id="braid-folder-label"></span>
+</div>
 
-<button id="prepare-btn">Check Braid folder</button>
-<span id="braid-folder"></span>
+<div class="card">
+    <div class="card-title">Metadata</div>
+    <form id="metadata-form">
+        <input type="hidden" name="config_path" value="configs/config.toml">
+        <div class="field-group">
+            <div class="field-row">
+                <label class="field-label" for="experimenter">Experimenter</label>
+                <input class="field-input" id="experimenter" name="experimenter">
+            </div>
+            <div class="field-row">
+                <label class="field-label" for="cross">Cross / genotype</label>
+                <input class="field-input" id="cross" name="cross">
+            </div>
+            <div class="field-row">
+                <label class="field-label" for="cross_date">Cross date</label>
+                <input class="field-input" id="cross_date" name="cross_date" placeholder="YYYY-MM-DD">
+            </div>
+            <div class="field-row">
+                <label class="field-label" for="f1_date">F1 date</label>
+                <input class="field-input" id="f1_date" name="f1_date" placeholder="YYYY-MM-DD">
+            </div>
+            <div class="field-row">
+                <label class="field-label" for="atr_date">ATR date</label>
+                <input class="field-input" id="atr_date" name="atr_date" placeholder="YYYY-MM-DD">
+            </div>
+            <div class="field-row">
+                <label class="field-label" for="n_flies">Number of flies</label>
+                <input class="field-input" id="n_flies" name="n_flies" type="number">
+            </div>
+            <div class="field-row">
+                <label class="field-label" for="experiment_duration">Duration (hours)</label>
+                <input class="field-input" id="experiment_duration" name="experiment_duration" type="number" step="0.5" value="24">
+            </div>
+            <div class="field-row" style="align-items: flex-start;">
+                <label class="field-label" for="notes">Notes</label>
+                <textarea class="field-input textarea" id="notes" name="notes" rows="3"></textarea>
+            </div>
+        </div>
+        <hr>
+        <div style="display:flex; gap: var(--space-sm); align-items: center;">
+            <button class="btn btn-primary" type="submit" id="start-btn">Start</button>
+            <button class="btn btn-danger" type="button" id="stop-btn" disabled>Stop</button>
+        </div>
+    </form>
+</div>
 
-<form id="metadata-form">
-    <input type="hidden" name="config_path" value="configs/config.toml">
-    <label>Experimenter <input name="experimenter"></label><br>
-    <label>Cross / genotype <input name="cross"></label><br>
-    <label>Cross date <input name="cross_date" placeholder="YYYY-MM-DD"></label><br>
-    <label>F1 date <input name="f1_date" placeholder="YYYY-MM-DD"></label><br>
-    <label>ATR date <input name="atr_date" placeholder="YYYY-MM-DD"></label><br>
-    <label>Experiment date <input name="experiment_date" placeholder="YYYY-MM-DD"></label><br>
-    <label>Number of flies <input name="n_flies" type="number"></label><br>
-    <label>Experiment duration (hours) <input name="experiment_duration" type="number" step="0.5" value="24"></label><br>
-    <label>Notes <textarea name="notes"></textarea></label><br>
-    <button type="submit" id="start-btn">Start</button>
-</form>
-
-<button id="stop-btn">Stop</button>
-
-<div id="processes"></div>
+<div class="card" id="processes-card" style="display:none;">
+    <div class="card-title">Processes</div>
+    <div class="process-grid" id="processes"></div>
+</div>
 
 <script>
-document.getElementById("prepare-btn").addEventListener("click", async () => {
-    const configPath = document.querySelector('[name="config_path"]').value;
-    const resp = await fetch("/run/prepare", {
-        method: "POST",
-        body: new URLSearchParams({config_path: configPath}),
-    });
-    const data = await resp.json();
-    document.getElementById("braid-folder").textContent = data.braid_folder || data.error;
-});
+const statusDot = document.getElementById("status-dot");
+const statusText = document.getElementById("status-text");
+const braidFolderLabel = document.getElementById("braid-folder-label");
+const startBtn = document.getElementById("start-btn");
+const stopBtn = document.getElementById("stop-btn");
+const processesCard = document.getElementById("processes-card");
+
+function setStatus(state, msg, folder) {
+    statusDot.className = "status-dot " + state;
+    statusText.textContent = msg;
+    braidFolderLabel.textContent = folder || "";
+}
 
 document.getElementById("metadata-form").addEventListener("submit", async (event) => {
     event.preventDefault();
+    startBtn.disabled = true;
     const resp = await fetch("/run/start", {
         method: "POST",
         body: new URLSearchParams(new FormData(event.target)),
     });
     const data = await resp.json();
-    document.getElementById("status-line").textContent = data.error || "Experiment started.";
+    if (data.error) {
+        showToast(data.error, true);
+        startBtn.disabled = false;
+    } else {
+        setStatus("running", "Experiment running");
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        processesCard.style.display = "block";
+        showToast("Experiment started");
+    }
 });
 
 document.getElementById("stop-btn").addEventListener("click", async () => {
+    stopBtn.disabled = true;
     const resp = await fetch("/run/stop", {method: "POST"});
     const data = await resp.json();
-    document.getElementById("status-line").textContent = data.error || "Experiment stopped.";
+    if (data.error) {
+        showToast(data.error, true);
+        stopBtn.disabled = false;
+    } else {
+        setStatus("idle", "Stopped");
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        showToast("Experiment stopped");
+    }
 });
 
 async function pollStatus() {
     const resp = await fetch("/api/status");
     const data = await resp.json();
     const processesDiv = document.getElementById("processes");
-    processesDiv.innerHTML = Object.entries(data.processes)
-        .map(([name, info]) => `<div>${info.alive ? "🟢" : "🔴"} ${name} ${info.failed_reason || ""}</div>`)
+    processesDiv.innerHTML = Object.entries(data.processes || {})
+        .map(([name, info]) => {
+            const dot = info.alive ? "alive" : "stopped";
+            const reason = info.failed_reason ? `<span class="reason">${info.failed_reason}</span>` : "";
+            return `<div class="process-cell"><span class="dot ${dot}"></span><span class="name">${name}</span>${reason}</div>`;
+        })
         .join("");
+    if (data.running) {
+        setStatus("running", "Experiment running", data.braid_folder || "");
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        processesCard.style.display = "block";
+    }
+    const hasDead = Object.values(data.processes || {}).some(p => p.failed_reason);
+    if (hasDead) setStatus("error", "Process failure");
 }
 setInterval(pollStatus, 1000);
 pollStatus();

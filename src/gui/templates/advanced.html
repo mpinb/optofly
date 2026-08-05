@@ -1,13 +1,18 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Advanced (raw TOML)</h1>
+<h1 class="page-title">Advanced (raw TOML)</h1>
 
-<form id="advanced-form">
-    <input type="hidden" name="path" value="{{ path }}">
-    <textarea name="content" rows="30" cols="100">{{ content }}</textarea><br>
-    <button type="submit">Save</button>
-</form>
-<div id="advanced-error"></div>
+<div class="card">
+    <div class="card-title">{{ path }}</div>
+    <form id="advanced-form">
+        <input type="hidden" name="path" value="{{ path }}">
+        <textarea class="field-input textarea" name="content" rows="30" style="font-size:0.8125rem;">{{ content }}</textarea>
+        <div style="margin-top: var(--space-sm); display:flex; gap: var(--space-sm); align-items: center;">
+            <button class="btn btn-primary" type="submit">Save</button>
+        </div>
+    </form>
+    <div id="advanced-error" style="margin-top: var(--space-sm); font-size:0.8125rem; color: var(--red);"></div>
+</div>
 
 <script>
 document.getElementById("advanced-form").addEventListener("submit", async (event) => {
@@ -17,7 +22,13 @@ document.getElementById("advanced-form").addEventListener("submit", async (event
         body: new URLSearchParams(new FormData(event.target)),
     });
     const data = await resp.json();
-    document.getElementById("advanced-error").textContent = data.error || "Saved.";
+    const errorDiv = document.getElementById("advanced-error");
+    if (data.error) {
+        errorDiv.textContent = data.error;
+    } else {
+        errorDiv.textContent = "";
+        showToast("Saved");
+    }
 });
 </script>
 {% endblock %}

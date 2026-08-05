@@ -1,30 +1,80 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Monitor</h1>
+<h1 class="page-title">Monitor</h1>
 
-<h2>Process health</h2>
-<div id="processes"></div>
+<div class="card">
+    <div class="card-title">Process Health</div>
+    <div class="process-grid" id="processes"></div>
+</div>
 
-<h2>Triggers (<span id="trigger-count">0</span>)</h2>
-<div id="trigger-log" style="height:400px;overflow-y:auto;border:1px solid #555;padding:10px;"></div>
+<div class="card">
+    <div class="card-title">Trigger Events</div>
+    <div style="display:flex; align-items:baseline; gap: var(--space-sm); margin-bottom: var(--space-md);">
+        <span class="trigger-count" id="trigger-count">0</span>
+        <span class="trigger-count-label">events</span>
+    </div>
+    <div class="trigger-log" id="trigger-log"></div>
+</div>
 
 <script>
+const logDiv = document.getElementById("trigger-log");
+const countSpan = document.getElementById("trigger-count");
+let eventCount = 0;
+
 const eventSource = new EventSource("/monitor/stream");
 eventSource.onmessage = function(event) {
     const data = JSON.parse(event.data);
-    const logDiv = document.getElementById("trigger-log");
+    eventCount++;
+    countSpan.textContent = eventCount;
+
     const entry = document.createElement("div");
-    entry.textContent = JSON.stringify(data);
+    entry.className = "trigger-entry";
+
+    const idSpan = document.createElement("span");
+    idSpan.className = "tf-id";
+    idSpan.textContent = "#" + data.obj_id;
+    entry.appendChild(idSpan);
+
+    const frameSpan = document.createElement("span");
+    frameSpan.className = "tf-frame";
+    frameSpan.textContent = "f" + data.frame;
+    entry.appendChild(frameSpan);
+
+    const tsSpan = document.createElement("span");
+    tsSpan.className = "tf-ts";
+    tsSpan.textContent = data.timestamp ? data.timestamp.toFixed(2) : "-";
+    entry.appendChild(tsSpan);
+
+    if (data.opto) {
+        const optoSpan = document.createElement("span");
+        optoSpan.className = "tf-opto";
+        optoSpan.textContent = "opto:" + (data.opto.sham ? "sham" : data.opto.color || "pulse");
+        entry.appendChild(optoSpan);
+    }
+    if (data.stim) {
+        const stimSpan = document.createElement("span");
+        stimSpan.className = "tf-stim";
+        stimSpan.textContent = "stim:" + (data.stim.sham ? "sham" : "active");
+        entry.appendChild(stimSpan);
+    }
+
     logDiv.insertBefore(entry, logDiv.firstChild);
+
+    while (logDiv.children.length > 200) {
+        logDiv.removeChild(logDiv.lastChild);
+    }
 };
 
 async function pollStatus() {
     const resp = await fetch("/api/status");
     const data = await resp.json();
-    document.getElementById("trigger-count").textContent = "";
     const processesDiv = document.getElementById("processes");
-    processesDiv.innerHTML = Object.entries(data.processes)
-        .map(([name, info]) => `<div>${info.alive ? "🟢" : "🔴"} ${name} ${info.failed_reason || ""} ${info.shutdown || ""}</div>`)
+    processesDiv.innerHTML = Object.entries(data.processes || {})
+        .map(([name, info]) => {
+            const dot = info.alive ? "alive" : (info.failed_reason ? "dead" : "stopped");
+            const reason = info.failed_reason ? `<span class="reason">${info.failed_reason}</span>` : "";
+            return `<div class="process-cell"><span class="dot ${dot}"></span><span class="name">${name}</span>${reason}</div>`;
+        })
         .join("");
 }
 setInterval(pollStatus, 1000);

@@ -1,42 +1,361 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OptoFly</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz@14..32&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --ink: #0a0a0b;
+            --surface: #121214;
+            --surface-raised: #1a1a1e;
+            --surface-hover: #222226;
+            --border: #2a2a2e;
+            --border-light: #35353a;
+            --text-primary: #e4e4e7;
+            --text-secondary: #a1a1aa;
+            --text-muted: #6b6b76;
+            --amber: #d97706;
+            --amber-dim: rgba(217, 119, 6, 0.15);
+            --amber-glow: rgba(217, 119, 6, 0.08);
+            --cyan: #22bcb4;
+            --cyan-dim: rgba(34, 188, 180, 0.12);
+            --green: #22c55e;
+            --green-dim: rgba(34, 197, 94, 0.12);
+            --red: #ef4444;
+            --red-dim: rgba(239, 68, 68, 0.12);
+            --radius: 6px;
+            --space-xs: 4px;
+            --space-sm: 8px;
+            --space-md: 16px;
+            --space-lg: 24px;
+            --space-xl: 32px;
+            --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code", "Fira Code", monospace;
+            --ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+        }
+
+        html { font-size: 14px; }
+        *, *::before, *::after { box-sizing: border-box; }
         body {
-            font-family: sans-serif;
             margin: 0;
-            background-color: #1e1e1e;
-            color: #d4d4d4;
+            font-family: var(--font-sans);
+            background: var(--surface);
+            color: var(--text-primary);
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
         }
-        nav {
-            background-color: #252526;
-            padding: 12px 20px;
-            border-bottom: 1px solid #444;
+
+        ::selection { background: var(--amber-dim); color: var(--text-primary); }
+        :focus-visible { outline: 1.5px solid var(--amber); outline-offset: 2px; }
+
+        a { color: var(--text-secondary); text-decoration: none; transition: color 150ms var(--ease); }
+        a:hover { color: var(--text-primary); }
+
+        .app-shell { display: flex; min-height: 100vh; }
+
+        .sidebar {
+            width: 200px;
+            flex-shrink: 0;
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            padding: var(--space-lg) 0;
+            display: flex;
+            flex-direction: column;
         }
-        nav a {
-            color: #d4d4d4;
-            text-decoration: none;
-            margin-right: 20px;
-            font-weight: bold;
+
+        .sidebar-logo {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            letter-spacing: -0.01em;
+            padding: 0 var(--space-lg) var(--space-xl);
+            border-bottom: 1px solid var(--border);
+            margin-bottom: var(--space-sm);
         }
-        nav a:hover {
-            color: #ffffff;
+        .sidebar-logo span { color: var(--amber); }
+
+        .nav-stack { display: flex; flex-direction: column; gap: 2px; padding: 0 var(--space-sm); }
+        .nav-link {
+            display: flex;
+            align-items: center;
+            gap: var(--space-sm);
+            padding: var(--space-sm) var(--space-md);
+            border-radius: var(--radius);
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            font-weight: 450;
+            transition: all 150ms var(--ease);
         }
-        main {
-            padding: 20px;
+        .nav-link:hover { background: var(--surface-hover); color: var(--text-primary); }
+        .nav-link.active {
+            background: var(--amber-dim);
+            color: var(--amber);
+        }
+        .nav-link .nav-icon {
+            width: 18px;
+            height: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0.7;
+        }
+        .nav-link.active .nav-icon { opacity: 1; }
+
+        .main-area {
+            flex: 1;
+            padding: var(--space-xl);
+            overflow-y: auto;
+            max-width: 1080px;
+        }
+
+        .page-title {
+            font-size: 1.25rem;
+            font-weight: 550;
+            letter-spacing: -0.01em;
+            margin: 0 0 var(--space-lg);
+            color: var(--text-primary);
+        }
+
+        .card {
+            background: var(--surface-raised);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: var(--space-lg);
+        }
+        .card + .card { margin-top: var(--space-md); }
+        .card-title {
+            font-size: 0.8125rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin: 0 0 var(--space-md);
+        }
+
+        .field-group { display: flex; flex-direction: column; gap: var(--space-sm); }
+        .field-row {
+            display: flex;
+            align-items: center;
+            gap: var(--space-md);
+            min-height: 32px;
+        }
+        .field-label {
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+            min-width: 140px;
+            flex-shrink: 0;
+        }
+        .field-input {
+            font-family: var(--font-sans);
+            font-size: 0.875rem;
+            color: var(--text-primary);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 5px 10px;
+            transition: border-color 150ms var(--ease);
+            width: 220px;
+        }
+        .field-input:focus { border-color: var(--amber); outline: none; }
+        .field-input::placeholder { color: var(--text-muted); }
+        .field-input.textarea { width: 100%; resize: vertical; font-family: var(--font-mono); font-size: 0.8125rem; line-height: 1.5; }
+        .field-input.mono { font-family: var(--font-mono); font-size: 0.8125rem; }
+        input[type="checkbox"] { accent-color: var(--amber); width: 16px; height: 16px; }
+
+        .btn {
+            font-family: var(--font-sans);
+            font-size: 0.8125rem;
+            font-weight: 500;
+            padding: 6px 16px;
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            background: var(--surface-raised);
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: all 150ms var(--ease);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn:hover { background: var(--surface-hover); border-color: var(--border-light); }
+        .btn-primary {
+            background: var(--amber);
+            border-color: var(--amber);
+            color: var(--ink);
+            font-weight: 550;
+        }
+        .btn-primary:hover { background: #b45309; border-color: #b45309; }
+        .btn-danger {
+            border-color: var(--red-dim);
+            color: var(--red);
+        }
+        .btn-danger:hover { background: var(--red-dim); border-color: var(--red); }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .status-bar {
+            display: flex;
+            align-items: center;
+            gap: var(--space-md);
+            padding: var(--space-sm) var(--space-md);
+            background: var(--surface-raised);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+            min-height: 36px;
+        }
+        .status-bar .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .status-bar .status-dot.idle { background: var(--text-muted); }
+        .status-bar .status-dot.running { background: var(--green); box-shadow: 0 0 6px var(--green-dim); }
+        .status-bar .status-dot.error { background: var(--red); box-shadow: 0 0 6px var(--red-dim); }
+        .status-bar .status-text { flex: 1; }
+        .status-bar .braid-folder { font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted); }
+
+        .process-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: var(--space-sm);
+        }
+        .process-cell {
+            display: flex;
+            align-items: center;
+            gap: var(--space-sm);
+            padding: var(--space-sm) var(--space-md);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            font-size: 0.8125rem;
+        }
+        .process-cell .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .process-cell .dot.alive { background: var(--green); box-shadow: 0 0 4px var(--green-dim); }
+        .process-cell .dot.dead { background: var(--red); box-shadow: 0 0 4px var(--red-dim); }
+        .process-cell .dot.stopped { background: var(--text-muted); }
+        .process-cell .name { color: var(--text-secondary); }
+        .process-cell .reason { font-family: var(--font-mono); font-size: 0.6875rem; color: var(--red); margin-left: auto; }
+
+        .trigger-log {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+            max-height: 480px;
+            overflow-y: auto;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+        }
+        .trigger-entry {
+            display: flex;
+            align-items: center;
+            gap: var(--space-md);
+            padding: 5px var(--space-sm);
+            background: var(--surface);
+            border-radius: 3px;
+        }
+        .trigger-entry .tf-id { color: var(--cyan); min-width: 24px; }
+        .trigger-entry .tf-frame { color: var(--text-muted); min-width: 56px; }
+        .trigger-entry .tf-ts { color: var(--text-muted); min-width: 80px; }
+        .trigger-entry .tf-opto { color: var(--amber); }
+        .trigger-entry .tf-stim { color: var(--cyan); }
+
+        .toast {
+            position: fixed;
+            bottom: var(--space-lg);
+            right: var(--space-lg);
+            padding: var(--space-sm) var(--space-md);
+            background: var(--surface-raised);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            font-size: 0.8125rem;
+            color: var(--text-primary);
+            box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+            opacity: 0;
+            transform: translateY(8px);
+            transition: all 200ms var(--ease);
+            pointer-events: none;
+        }
+        .toast.show { opacity: 1; transform: translateY(0); }
+        .toast.error { border-color: var(--red-dim); color: var(--red); }
+
+        .trigger-count {
+            font-family: var(--font-mono);
+            font-size: 1.5rem;
+            font-weight: 500;
+            color: var(--amber);
+        }
+        .trigger-count-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+
+        hr { border: none; border-top: 1px solid var(--border); margin: var(--space-md) 0; }
+
+        @media (max-width: 640px) {
+            .sidebar { width: 56px; }
+            .sidebar-logo { padding: 0 var(--space-md) var(--space-lg); font-size: 0; }
+            .sidebar-logo::after { content: "OF"; font-size: 1rem; color: var(--amber); font-weight: 600; }
+            .nav-link { justify-content: center; padding: var(--space-sm); }
+            .nav-link .nav-label { display: none; }
+            .main-area { padding: var(--space-md); }
+            .field-row { flex-direction: column; align-items: flex-start; gap: 4px; }
+            .field-label { min-width: unset; }
+            .field-input { width: 100%; }
+            .process-grid { grid-template-columns: 1fr 1fr; }
         }
     </style>
 </head>
 <body>
-    <nav>
-        <a href="/run">Run</a>
-        <a href="/config">Config</a>
-        <a href="/advanced">Advanced</a>
-        <a href="/monitor">Monitor</a>
-    </nav>
-    <main>
-        {% block content %}{% endblock %}
-    </main>
+    <div class="app-shell">
+        <nav class="sidebar">
+            <div class="sidebar-logo">Opto<span>Fly</span></div>
+            <div class="nav-stack">
+                <a class="nav-link {% if request.path.startswith('/run') %}active{% endif %}" href="/run">
+                    <span class="nav-icon">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="4,2 14,8 4,14"/></svg>
+                    </span>
+                    <span class="nav-label">Run</span>
+                </a>
+                <a class="nav-link {% if request.path == '/config' %}active{% endif %}" href="/config">
+                    <span class="nav-icon">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="3"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41"/></svg>
+                    </span>
+                    <span class="nav-label">Config</span>
+                </a>
+                <a class="nav-link {% if request.path == '/advanced' %}active{% endif %}" href="/advanced">
+                    <span class="nav-icon">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+                    </span>
+                    <span class="nav-label">Advanced</span>
+                </a>
+                <a class="nav-link {% if request.path == '/monitor' %}active{% endif %}" href="/monitor">
+                    <span class="nav-icon">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="14" height="10" rx="1"/><path d="M5 11l3-4 2 2 2-3"/></svg>
+                    </span>
+                    <span class="nav-label">Monitor</span>
+                </a>
+            </div>
+        </nav>
+        <div class="main-area">
+            {% block content %}{% endblock %}
+        </div>
+    </div>
+    <div id="toast" class="toast"></div>
+    <script>
+        function showToast(msg, isError) {
+            const t = document.getElementById("toast");
+            t.textContent = msg;
+            t.className = "toast show" + (isError ? " error" : "");
+            setTimeout(() => t.classList.remove("show"), 3000);
+        }
+    </script>
 </body>
 </html>
