@@ -141,8 +141,8 @@ Key parameters in `[trigger_handler]`:
 | `min_tracking_age` | 0.1 s | Object age before it can trigger |
 | `zone_timeout` | 2.0 s | Auto-emit `ZONE_EXIT` if tracking is lost; also used by BraidPublisher to expire the ACTIVE_BRAID active object when zone events stop |
 | `cooldown_period` | 10.0 s | Global cooldown between `ZONE_ENTER` events |
-| `opto_zone_scale` | 0.5 | Inner zone for `OPTO_ZONE_ENTER`, as a fraction of the outer FOV (centered). Must be in (0.0, 1.0]; `1.0` fires on the same frame as `ZONE_ENTER` |
-| `visual_zone_scale` | 1.0 | Same, for `VISUAL_ZONE_ENTER` |
+| `opto_zone_scale` | 0.8 | Inner zone for `OPTO_ZONE_ENTER`, as a fraction of the outer FOV (centered). Must be in (0.0, 1.0]; `1.0` fires on the same frame as `ZONE_ENTER` |
+| `visual_zone_scale` | 0.8 | Same, for `VISUAL_ZONE_ENTER` |
 
 The trigger zone's x/y bounds come from the camera FOV. Note `zone_timeout` is *not* used for camera buffer sizing — that is `camera.max_recording_time`, which should be set ≥ `zone_timeout` (`main.py` warns at startup when it isn't).
 

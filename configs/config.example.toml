@@ -59,8 +59,8 @@ max_velocity = 1.0               # Maximum velocity to filter noise (m/s)
 min_tracking_age = 0.1           # Object must exist this long before triggering (seconds)
 zone_timeout = 3.0               # Auto ZONE_EXIT if no updates for this long (seconds)
 cooldown_period = 10.0         # Global cooldown between ZONE_ENTER events (seconds)
-opto_zone_scale = 0.5           # Opto fires only once the fly reaches this fraction of the FOV, centered (0-1]
-visual_zone_scale = 1.0         # Visual fires at this fraction of the FOV, centered (0-1]; 1.0 = same as camera FOV
+opto_zone_scale = 0.8           # Opto fires only once the fly reaches this fraction of the FOV, centered (0-1]
+visual_zone_scale = 0.8         # Visual fires at this fraction of the FOV, centered (0-1]; 1.0 = same as camera FOV
 
 [camera]
 # High-speed camera settings
