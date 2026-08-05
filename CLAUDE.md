@@ -233,7 +233,7 @@ Verify: `claude --version` should print a version like `2.1.X (Claude Code)`.
 ### First run
 
 ```bash
-cd ~/src/OptoFly
+cd ~/src/optofly
 claude
 ```
 

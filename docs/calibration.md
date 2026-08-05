@@ -113,7 +113,7 @@ uv sync
 uv run lens-calibrate --calibration /path/to/calibration_charuco.xml
 ```
 
-It writes two files: a full, timestamped CSV (`calibrations/lens_calib_YYYYMMDD_HHMMSS.csv`, relative to wherever you ran it from) with every raw measurement, and — written directly into **this** repo, at the hardcoded path `/home/nfc/src/OptoFly/calibrations/liquid_lens.csv` — just the two columns OptoFly's loader (`setup_lens_calibration` in `src/processes/lens.py`) expects: `z` and `dpt`. No manual column-renaming step is needed. If `calibrations/liquid_lens.csv` already exists, you're prompted `replace it with this calibration? [Y/n]` — **defaults to yes**, backing up the old file in place as `calibrations/liquid_lens.csv.bak-YYYYMMDD_HHMMSS` before writing the new one. Type `n` explicitly to decline instead; that leaves the existing file untouched and saves the new calibration as `calibrations/lens_calib_YYYYMMDD_HHMMSS_optofly.csv` for you to review.
+It writes two files: a full, timestamped CSV (`calibrations/lens_calib_YYYYMMDD_HHMMSS.csv`, relative to wherever you ran it from) with every raw measurement, and — written directly into **this** repo, at the hardcoded path `/home/nfc/src/optofly/calibrations/liquid_lens.csv` — just the two columns OptoFly's loader (`setup_lens_calibration` in `src/processes/lens.py`) expects: `z` and `dpt`. No manual column-renaming step is needed. If `calibrations/liquid_lens.csv` already exists, you're prompted `replace it with this calibration? [Y/n]` — **defaults to yes**, backing up the old file in place as `calibrations/liquid_lens.csv.bak-YYYYMMDD_HHMMSS` before writing the new one. Type `n` explicitly to decline instead; that leaves the existing file untouched and saves the new calibration as `calibrations/lens_calib_YYYYMMDD_HHMMSS_optofly.csv` for you to review.
 
 See that repo's own README for hardware setup and the full option list.
 
@@ -153,14 +153,14 @@ The z for each plane is read automatically from Braid — the tool computes the 
 - A laser pointer or bright LED you can hold at the frame edges
 - Arena lighting **off** — both the overhead lights and the floor backlight must be off. Either light source can wash out the laser dot or be mistaken for it by the detection threshold.
 - OptoFly environment activated (`uv sync`)
-- You're in the OptoFly repo's own root directory (`~/src/OptoFly`, or wherever you cloned it) — the tool's `--config configs/config.toml` path is relative and won't resolve from anywhere else
+- You're in the OptoFly repo's own root directory (`~/src/optofly`, or wherever you cloned it) — the tool's `--config configs/config.toml` path is relative and won't resolve from anywhere else
 
 ### Procedure
 
 1. Launch the calibration tool from the OptoFly repo root:
 
    ```bash
-   cd ~/src/OptoFly   # or wherever you cloned OptoFly
+   cd ~/src/optofly   # or wherever you cloned OptoFly
    uv run python -m src.tools.calibrate_braid_ximea --config configs/config.toml
    ```
 
