@@ -99,6 +99,26 @@ fn classify_recording_message(
     }
 }
 
+/// Latches the buffer index of the frame during which a live `OPTO_ZONE_ENTER`/
+/// `VISUAL_ZONE_ENTER` trigger was noticed, the first time it's noticed.
+///
+/// Callers poll ZMQ *after* committing the current iteration's frame, so
+/// `buf_filled` (a count) is always one past the index of that just-committed
+/// frame — the frame during which the trigger actually arrived. Returns
+/// `buf_filled - 1`, not `buf_filled`, to avoid off-by-one: pointing at the
+/// next, not-yet-captured frame instead of the one the trigger landed on.
+///
+/// Pure: no camera buffer borrow, just the count and the already-latched value.
+fn latch_frame_idx(existing: Option<u64>, buf_filled: usize) -> Option<u64> {
+    if existing.is_some() {
+        return existing;
+    }
+    if buf_filled == 0 {
+        return None;
+    }
+    Some((buf_filled - 1) as u64)
+}
+
 pub fn run(cfg: AppConfig) -> Result<(), String> {
     // --- SIGTERM handler ---
     let shutdown = Arc::new(AtomicBool::new(false));
@@ -432,18 +452,16 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                                     visual_frame_idx = None;
                                 }
                                 RecordingEvent::OptoZoneEnter => {
-                                    if opto_frame_idx.is_none() {
-                                        opto_frame_idx = buffers[active_idx]
-                                            .as_ref()
-                                            .map(|b| b.filled() as u64);
-                                    }
+                                    opto_frame_idx = latch_frame_idx(
+                                        opto_frame_idx,
+                                        buffers[active_idx].as_ref().map_or(0, |b| b.filled()),
+                                    );
                                 }
                                 RecordingEvent::VisualZoneEnter => {
-                                    if visual_frame_idx.is_none() {
-                                        visual_frame_idx = buffers[active_idx]
-                                            .as_ref()
-                                            .map(|b| b.filled() as u64);
-                                    }
+                                    visual_frame_idx = latch_frame_idx(
+                                        visual_frame_idx,
+                                        buffers[active_idx].as_ref().map_or(0, |b| b.filled()),
+                                    );
                                 }
                                 RecordingEvent::Unmatched => {}
                             }
@@ -707,5 +725,35 @@ mod tests {
             "OPTO_ZONE_ENTER", &payload, 5, "ZONE_EXIT", "OPTO_ZONE_ENTER", "VISUAL_ZONE_ENTER",
         );
         assert_eq!(event, RecordingEvent::Unmatched);
+    }
+
+    #[test]
+    fn latch_frame_idx_points_at_the_just_committed_frame_not_the_next_one() {
+        // One frame has been committed (filled=1, valid frame_idx 0..0) when
+        // the trigger is noticed — it should latch onto frame_idx 0, the frame
+        // that was just written, not frame_idx 1, which doesn't exist yet.
+        assert_eq!(latch_frame_idx(None, 1), Some(0));
+    }
+
+    #[test]
+    fn latch_frame_idx_matches_buffer_full_boundary() {
+        // If the trigger is noticed on the very frame that fills the buffer
+        // to capacity, the latched index must still be a valid frame_idx
+        // (capacity - 1), not the out-of-range `capacity`.
+        assert_eq!(latch_frame_idx(None, 500), Some(499));
+    }
+
+    #[test]
+    fn latch_frame_idx_only_latches_the_first_trigger() {
+        // A second OPTO_ZONE_ENTER/VISUAL_ZONE_ENTER later in the same
+        // recording must not overwrite the already-latched onset frame.
+        assert_eq!(latch_frame_idx(Some(0), 50), Some(0));
+    }
+
+    #[test]
+    fn latch_frame_idx_with_no_frames_committed_yet_is_none() {
+        // Defensive: shouldn't occur in practice (a frame is always
+        // committed before the ZMQ poll runs), but must not underflow.
+        assert_eq!(latch_frame_idx(None, 0), None);
     }
 }
