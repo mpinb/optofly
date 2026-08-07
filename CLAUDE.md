@@ -43,6 +43,9 @@ uv run python -m src.tools.generate_camera_histograms /mnt/data/videos/<braid_di
 
 # Recover a crashed/leftover .braid folder into .braidz (stdlib only, no Rust toolchain needed)
 uv run python scripts/braidz_writer.py /mnt/data/experiments/<timestamp>.braid
+
+# Install/update the XIMEA camera driver (one-time hardware setup)
+sudo scripts/install_ximea_driver.sh
 ```
 
 ## Configuration
@@ -88,7 +91,7 @@ The ZMQ BRAID feed is only live when the full stack is running. Standalone tools
 
 `Experiment.start()`:
 - Copies `config.toml` (and `visual_stimuli.toml` when visual is active) into the braid folder, and attaches the main-process log to `optofly.log` there.
-- Spawns in fixed order with a 0.5 s stagger: `BraidPublisher` → `TriggerHandler` → `LatencyLogger` → optional processes → `OptoTriggerWorker` (always last).
+- Spawns in fixed order: `BraidPublisher` → `TriggerHandler` → `LatencyLogger` (each separated by a 0.5 s stagger) → optional processes → `OptoTriggerWorker` (always last, no inter-process stagger after `LatencyLogger`).
 - Waits 1 s, then treats a dead critical process as `ExperimentStartError`, quoting the child's own reported exception (workers report crashes through an `mp.Queue` failure channel) before falling back to the static per-process hints in `_CRITICAL_INIT_HINTS`.
 
 `check_health()` is the mid-run equivalent: a critical death sets the stop event (fatal); a non-critical death is logged once and the run continues. `stop()` signals the shared event, joins each process (`_SHUTDOWN_TIMEOUTS`: 35 s for the camera, 5 s default; `terminate()` fallback), verifies Braid CSVs, and stops the Braid recording. `main.py` also warns at startup when `camera.max_recording_time < trigger_handler.zone_timeout`.

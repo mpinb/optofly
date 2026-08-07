@@ -42,7 +42,7 @@ Install the XIMEA SDK separately; it's not a Python package:
 sudo scripts/install_ximea_driver.sh
 ```
 
-This downloads and installs the current XIMEA Linux PCIe driver, skipping the download if it already matches what's installed, and reminds you to reboot afterward: the PCIe driver won't take effect until you do. Full prerequisite list, including the conda/mamba alternative to `uv`: [setup reference](#installation-reference) below.
+This downloads the current XIMEA Linux PCIe driver, skipping the install step if the downloaded package already matches what's installed, and reminds you to reboot afterward: the PCIe driver won't take effect until you do. Full prerequisite list, including the conda/mamba alternative to `uv`: [setup reference](#installation-reference) below.
 
 ## 2. Calibrate each tracking camera's intrinsics
 
@@ -138,7 +138,7 @@ sudo apt-get install -y \
 sudo scripts/install_ximea_driver.sh
 ```
 
-Downloads and installs the current [XIMEA Linux PCIe driver](https://www.ximea.com/support/wiki/apis/XIMEA_Linux_Software_Package). Safe to re-run: it skips the download if the installed version already matches. Reboot afterward for the PCIe driver to take effect.
+Downloads and installs the current [XIMEA Linux PCIe driver](https://www.ximea.com/support/wiki/apis/XIMEA_Linux_Software_Package). Safe to re-run: it skips the install step if the downloaded package already matches what's installed. Reboot afterward for the PCIe driver to take effect.
 
 ## Configuration Reference
 
