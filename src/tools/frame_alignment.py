@@ -112,6 +112,10 @@ def derive_video_folder(braid_path: Path) -> Path:
 def compute_video_frame(
     braid_frame: int, record_frame: int, camera_fps: float, braid_fps: float
 ) -> tuple[int, int]:
+    if camera_fps <= 0:
+        raise ValueError(f"camera_fps must be positive, got {camera_fps}")
+    if braid_fps <= 0:
+        raise ValueError(f"braid_fps must be positive, got {braid_fps}")
     delta = braid_frame - record_frame
     video_frame = round(delta * camera_fps / braid_fps)
     return delta, video_frame
@@ -248,13 +252,25 @@ def main(argv: Optional[list[str]] = None) -> int:
             file=sys.stderr,
         )
 
-    camera_fps = args.camera_fps or load_camera_fps(braid_path)
+    camera_fps = (
+        args.camera_fps if args.camera_fps is not None else load_camera_fps(braid_path)
+    )
     if camera_fps is None:
         print(
             "Could not determine camera fps from this recording's "
             "config.toml — pass --camera-fps explicitly.",
             file=sys.stderr,
         )
+        return 1
+    if camera_fps <= 0:
+        print(
+            f"camera fps must be positive (got {camera_fps}) — the recording's "
+            "config.toml may be corrupt; pass --camera-fps explicitly.",
+            file=sys.stderr,
+        )
+        return 1
+    if args.braid_fps <= 0:
+        print(f"--braid-fps must be positive (got {args.braid_fps}).", file=sys.stderr)
         return 1
 
     systems = tuple(s.strip() for s in args.systems.split(",") if s.strip())

@@ -91,6 +91,16 @@ def test_compute_video_frame(
     assert video_frame == expected_video_frame
 
 
+def test_compute_video_frame_rejects_non_positive_camera_fps():
+    with pytest.raises(ValueError):
+        compute_video_frame(12350, 12345, 0.0, 100.0)
+
+
+def test_compute_video_frame_rejects_non_positive_braid_fps():
+    with pytest.raises(ValueError):
+        compute_video_frame(12350, 12345, 500.0, 0.0)
+
+
 @pytest.mark.parametrize(
     "braid_path, expected",
     [
