@@ -116,8 +116,8 @@ class TriggerHandlerConfig:
 
         heading_cone_deg = float(section.get("heading_cone_deg", 45.0))
 
-        opto_zone_scale = float(section.get("opto_zone_scale", 0.5))
-        visual_zone_scale = float(section.get("visual_zone_scale", 1.0))
+        opto_zone_scale = float(section.get("opto_zone_scale", 0.8))
+        visual_zone_scale = float(section.get("visual_zone_scale", 0.8))
         if not (0.0 < opto_zone_scale <= 1.0):
             raise ValueError(
                 f"trigger_handler.opto_zone_scale must be in (0.0, 1.0], got {opto_zone_scale}"

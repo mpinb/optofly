@@ -46,6 +46,10 @@ uv run python scripts/braidz_writer.py /mnt/data/experiments/<timestamp>.braid
 
 # Install/update the XIMEA camera driver (one-time hardware setup)
 sudo scripts/install_ximea_driver.sh
+
+# Map an opto/visual/lens latency.csv trigger frame to its recorded-video frame
+# (reads latency.csv/config.toml straight out of a .braidz zip, or a raw .braid folder)
+uv run python -m src.tools.frame_alignment /mnt/data/experiments/<timestamp>.braidz
 ```
 
 ## Configuration
@@ -197,7 +201,7 @@ State machine (Rust binary):
 
 Output files per trial (all in `camera.save_folder`):
 - `obj_id_{N}_frame_{M}.mp4` — encoded video
-- `obj_id_{N}_frame_{M}.csv` — per-frame metadata (`frame_idx`, `nframe`, `ts_sec`, `ts_usec`, `cam_time_ns`, `trigger_frame_idx`). `trigger_frame_idx` repeats on every row — it is the buffer index at which `ZONE_ENTER` fired, marking **recording start**, not stimulus onset. Actual stimulus onset for opto/visual is in `latency.csv`'s `frame` field for that system's row (`"opto"`/`"visual"`); `record_frame` on that same row is the Braid frame at which the outer `ZONE_ENTER` fired — the same moment `trigger_frame_idx` marks, but on the Braid frame counter — so `(row.frame - row.record_frame)` is the number of Braid frames between recording start and stimulus onset — convert to camera frames via the fps ratio if needed for video alignment (Braid runs ~100Hz; camera fps is in `configs/config.toml`'s `[camera]` section).
+- `obj_id_{N}_frame_{M}.csv` — per-frame metadata (`frame_idx`, `nframe`, `ts_sec`, `ts_usec`, `cam_time_ns`, `trigger_frame_idx`, `opto_frame_idx`, `visual_frame_idx`). `trigger_frame_idx` repeats on every row — it is the buffer index at which `ZONE_ENTER` fired, marking **recording start**, not stimulus onset. `opto_frame_idx`/`visual_frame_idx` are each the live-captured frame number at which that stimulus system fired during the recording — the exact stimulus onset, no fps-ratio math needed — and blank (empty string) whenever that system never fired on that trial (e.g. `visual_frame_idx` is blank on every recording on an opto-only rig). This marks when the trigger broadcast reached the capture loop, not when the LED/stimulus physically actuated; add `(activation_timestamp - trigger_timestamp) × camera_fps` from `latency.csv` to get actuation onset. `latency.csv`'s fps-ratio conversion (`(row.frame - row.record_frame)` via `src/tools/frame_alignment.py`) is only useful for recordings made before this feature shipped; for `lens`, see the limitation in `docs/camera.md`.
 - `obj_id_{N}_frame_{M}_lens_timing.csv`: per-adjustment lens timing (`t_braid`, `t_relay`, `t_lens_recv`, `t_serial_start`, `t_diopter_sent`, `delay_ms`, `z`, `focus_z`, `diopter`, `target_diopter`, `predictor`, ...)
 
 **`max_recording_time` vs `zone_timeout`**: `camera.max_recording_time` is a frame-buffer size limit — it counts from `ZONE_ENTER`. `trigger_handler.zone_timeout` is the tracker's dead-reckoning timeout for declaring a fly has left the zone. Set `max_recording_time` ≥ `zone_timeout`.
@@ -232,7 +236,7 @@ Verify: `claude --version` should print a version like `2.1.X (Claude Code)`.
 ### First run
 
 ```bash
-cd ~/src/OptoFly
+cd ~/src/optofly
 claude
 ```
 

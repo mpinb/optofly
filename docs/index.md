@@ -28,4 +28,4 @@ OptoFly integrates multiple hardware and software components for automated close
 - **Optogenetic Trigger** — LED stimulation control via Arduino
 - **Liquid Lens** — Dynamic autofocus with optional predictive tracking
 - **Visual Stimuli** — Configurable Panda3D patterns (background, looming, oscillating square)
-- **Latency Logger** — Per-trial end-to-end latency records (`latency.csv`) for opto, visual, and lens triggers
+- **Latency Logger** — Per-trial end-to-end latency records (`latency.csv`) for opto, visual, and lens triggers — see [Camera](camera.md) for `src/tools/frame_alignment.py`, which maps a `latency.csv` trigger to its recorded-video frame

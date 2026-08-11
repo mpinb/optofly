@@ -14,6 +14,8 @@ pub struct EncodeJob {
     pub width: u32,
     pub height: u32,
     pub trigger_frame_idx: Option<u64>,
+    pub opto_frame_idx: Option<u64>,
+    pub visual_frame_idx: Option<u64>,
 }
 
 fn detect_nvenc() -> bool {
@@ -162,7 +164,13 @@ pub fn spawn() -> (mpsc::SyncSender<EncodeJob>, mpsc::Receiver<FrameBuffer>) {
                     continue;
                 }
 
-                if let Err(e) = metadata::write_csv(&job.buffer, &csv_path, job.trigger_frame_idx) {
+                if let Err(e) = metadata::write_csv(
+                    &job.buffer,
+                    &csv_path,
+                    job.trigger_frame_idx,
+                    job.opto_frame_idx,
+                    job.visual_frame_idx,
+                ) {
                     log::error!("CSV write failed: {}", e);
                 }
 

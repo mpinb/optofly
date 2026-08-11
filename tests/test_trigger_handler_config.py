@@ -50,8 +50,8 @@ def test_path_based_constructor_still_works():
 
 def test_from_section_defaults_zone_scales_to_expected_values():
     cfg = TriggerHandlerConfig.from_section({}, camera=_camera(), zmq=_zmq())
-    assert cfg.opto_zone_scale == 0.5
-    assert cfg.visual_zone_scale == 1.0
+    assert cfg.opto_zone_scale == 0.8
+    assert cfg.visual_zone_scale == 0.8
 
 
 def test_from_section_reads_explicit_zone_scales():

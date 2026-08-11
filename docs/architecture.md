@@ -108,7 +108,7 @@ Before publishing, `BraidPublisher` injects two extra fields into every Birth/Up
 
 `system` is `"opto"`, `"visual"`, or `"lens"`. `LatencyLogger` computes `latency_ms = (activation_timestamp - braid_timestamp) * 1000` for non-sham trials. `LiquidLens` publishes only for the first commanded diopter per trial, not every subsequent tracking update.
 
-`frame` is the Braid frame at which *this* system fired (i.e. at `OPTO_ZONE_ENTER` / `VISUAL_ZONE_ENTER`), while `record_frame` is the frame at which the outer `ZONE_ENTER` fired and camera recording began. The two differ whenever `opto_zone_scale`/`visual_zone_scale` is below `1.0`; `record_frame` is what aligns a stimulus onset against the recorded video.
+`frame` is the Braid frame at which *this* system fired (i.e. at `OPTO_ZONE_ENTER` / `VISUAL_ZONE_ENTER`), while `record_frame` is the frame at which the outer `ZONE_ENTER` fired and camera recording began. The two differ whenever `opto_zone_scale`/`visual_zone_scale` is below `1.0`; `record_frame` is what aligns a stimulus onset against the recorded video — `src/tools/frame_alignment.py` automates that conversion (fps-ratio scaled Braid-frame delta) against a completed recording, `.braidz` zip included. See `docs/camera.md`.
 
 **ZONE_EXIT topic** (TriggerHandler → camera, lens):
 ```json
@@ -141,8 +141,8 @@ Key parameters in `[trigger_handler]`:
 | `min_tracking_age` | 0.1 s | Object age before it can trigger |
 | `zone_timeout` | 2.0 s | Auto-emit `ZONE_EXIT` if tracking is lost; also used by BraidPublisher to expire the ACTIVE_BRAID active object when zone events stop |
 | `cooldown_period` | 10.0 s | Global cooldown between `ZONE_ENTER` events |
-| `opto_zone_scale` | 0.5 | Inner zone for `OPTO_ZONE_ENTER`, as a fraction of the outer FOV (centered). Must be in (0.0, 1.0]; `1.0` fires on the same frame as `ZONE_ENTER` |
-| `visual_zone_scale` | 1.0 | Same, for `VISUAL_ZONE_ENTER` |
+| `opto_zone_scale` | 0.8 | Inner zone for `OPTO_ZONE_ENTER`, as a fraction of the outer FOV (centered). Must be in (0.0, 1.0]; `1.0` fires on the same frame as `ZONE_ENTER` |
+| `visual_zone_scale` | 0.8 | Same, for `VISUAL_ZONE_ENTER` |
 
 The trigger zone's x/y bounds come from the camera FOV. Note `zone_timeout` is *not* used for camera buffer sizing — that is `camera.max_recording_time`, which should be set ≥ `zone_timeout` (`main.py` warns at startup when it isn't).
 

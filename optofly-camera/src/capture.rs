@@ -63,6 +63,62 @@ fn centered_roi(
     Ok(((sensor_w - width) / 2, (sensor_h - height) / 2))
 }
 
+#[derive(Debug, PartialEq)]
+enum RecordingEvent {
+    ZoneExit { reason: String },
+    OptoZoneEnter,
+    VisualZoneEnter,
+    Unmatched,
+}
+
+/// Classifies a single ZMQ trigger message received while `State::Recording`.
+///
+/// Pure: no ZMQ socket, no camera buffer, no XIMEA calls. `"kill"` is handled
+/// separately by the caller since it isn't a per-`obj_id` event.
+fn classify_recording_message(
+    topic: &str,
+    payload: &serde_json::Value,
+    recording_obj_id: u64,
+    zone_exit_topic: &str,
+    opto_enter_topic: &str,
+    visual_enter_topic: &str,
+) -> RecordingEvent {
+    let msg_obj_id = payload["obj_id"].as_u64().unwrap_or(0);
+    if msg_obj_id != recording_obj_id {
+        return RecordingEvent::Unmatched;
+    }
+    if topic == zone_exit_topic {
+        let reason = payload["reason"].as_str().unwrap_or("unknown").to_string();
+        RecordingEvent::ZoneExit { reason }
+    } else if topic == opto_enter_topic {
+        RecordingEvent::OptoZoneEnter
+    } else if topic == visual_enter_topic {
+        RecordingEvent::VisualZoneEnter
+    } else {
+        RecordingEvent::Unmatched
+    }
+}
+
+/// Latches the buffer index of the frame during which a live `OPTO_ZONE_ENTER`/
+/// `VISUAL_ZONE_ENTER` trigger was noticed, the first time it's noticed.
+///
+/// Callers poll ZMQ *after* committing the current iteration's frame, so
+/// `buf_filled` (a count) is always one past the index of that just-committed
+/// frame — the frame during which the trigger actually arrived. Returns
+/// `buf_filled - 1`, not `buf_filled`, to avoid off-by-one: pointing at the
+/// next, not-yet-captured frame instead of the one the trigger landed on.
+///
+/// Pure: no camera buffer borrow, just the count and the already-latched value.
+fn latch_frame_idx(existing: Option<u64>, buf_filled: usize) -> Option<u64> {
+    if existing.is_some() {
+        return existing;
+    }
+    if buf_filled == 0 {
+        return None;
+    }
+    Some((buf_filled - 1) as u64)
+}
+
 pub fn run(cfg: AppConfig) -> Result<(), String> {
     // --- SIGTERM handler ---
     let shutdown = Arc::new(AtomicBool::new(false));
@@ -84,6 +140,12 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
         .map_err(|e| format!("ZMQ subscribe error: {}", e))?;
     zmq_sub
         .set_subscribe(cfg.zmq_zone_exit_topic.as_bytes())
+        .map_err(|e| format!("ZMQ subscribe error: {}", e))?;
+    zmq_sub
+        .set_subscribe(cfg.zmq_opto_enter_topic.as_bytes())
+        .map_err(|e| format!("ZMQ subscribe error: {}", e))?;
+    zmq_sub
+        .set_subscribe(cfg.zmq_visual_enter_topic.as_bytes())
         .map_err(|e| format!("ZMQ subscribe error: {}", e))?;
     zmq_sub
         .set_subscribe(b"kill")
@@ -205,6 +267,9 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
     let mut total_frames: u64 = 0;
     // Frame index within the current recording buffer at which ZONE_ENTER fired.
     let mut trigger_frame_idx: Option<u64> = None;
+    // Frame index at which OPTO_ZONE_ENTER/VISUAL_ZONE_ENTER fired for the current recording.
+    let mut opto_frame_idx: Option<u64> = None;
+    let mut visual_frame_idx: Option<u64> = None;
 
     // --- Start acquisition (consumes cam, returns AcquisitionBuffer) ---
     let acq = cam
@@ -277,6 +342,8 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                                 rec_dropped = 0;
                                 rec_prev_nframe = None;
                                 trigger_frame_idx = Some(0);
+                                opto_frame_idx = None;
+                                visual_frame_idx = None;
                                 state = State::Recording;
                                 log::info!(
                                     "ZONE_ENTER obj_id={} — started recording (max {} frames)",
@@ -324,7 +391,7 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                     }
                 }
 
-                // Poll ZMQ for ZONE_EXIT or kill
+                // Poll ZMQ for ZONE_EXIT, OPTO_ZONE_ENTER, VISUAL_ZONE_ENTER, or kill
                 if let Ok(parts) = zmq_sub.recv_multipart(zmq::DONTWAIT) {
                     if !parts.is_empty() {
                         let topic = String::from_utf8_lossy(&parts[0]);
@@ -342,32 +409,61 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                                 height,
                                 rec_dropped,
                                 trigger_frame_idx,
+                                opto_frame_idx,
+                                visual_frame_idx,
                                 "kill",
                             );
                             trigger_frame_idx = None;
+                            opto_frame_idx = None;
+                            visual_frame_idx = None;
                             log::info!("Received kill signal during recording");
                             break;
-                        } else if topic.as_ref() == cfg.zmq_zone_exit_topic && parts.len() >= 2 {
+                        } else if parts.len() >= 2 {
                             let msg: serde_json::Value =
                                 serde_json::from_slice(&parts[1]).unwrap_or_default();
-                            if msg["obj_id"].as_u64().unwrap_or(0) == recording_obj_id {
-                                let reason = msg["reason"].as_str().unwrap_or("unknown");
-                                finish_recording(
-                                    &mut buffers,
-                                    &mut active_idx,
-                                    &mut state,
-                                    &encoder_tx,
-                                    recording_obj_id,
-                                    recording_frame,
-                                    &cfg.save_folder,
-                                    fps,
-                                    width,
-                                    height,
-                                    rec_dropped,
-                                    trigger_frame_idx,
-                                    reason,
-                                );
-                                trigger_frame_idx = None;
+                            match classify_recording_message(
+                                topic.as_ref(),
+                                &msg,
+                                recording_obj_id,
+                                &cfg.zmq_zone_exit_topic,
+                                &cfg.zmq_opto_enter_topic,
+                                &cfg.zmq_visual_enter_topic,
+                            ) {
+                                RecordingEvent::ZoneExit { reason } => {
+                                    finish_recording(
+                                        &mut buffers,
+                                        &mut active_idx,
+                                        &mut state,
+                                        &encoder_tx,
+                                        recording_obj_id,
+                                        recording_frame,
+                                        &cfg.save_folder,
+                                        fps,
+                                        width,
+                                        height,
+                                        rec_dropped,
+                                        trigger_frame_idx,
+                                        opto_frame_idx,
+                                        visual_frame_idx,
+                                        &reason,
+                                    );
+                                    trigger_frame_idx = None;
+                                    opto_frame_idx = None;
+                                    visual_frame_idx = None;
+                                }
+                                RecordingEvent::OptoZoneEnter => {
+                                    opto_frame_idx = latch_frame_idx(
+                                        opto_frame_idx,
+                                        buffers[active_idx].as_ref().map_or(0, |b| b.filled()),
+                                    );
+                                }
+                                RecordingEvent::VisualZoneEnter => {
+                                    visual_frame_idx = latch_frame_idx(
+                                        visual_frame_idx,
+                                        buffers[active_idx].as_ref().map_or(0, |b| b.filled()),
+                                    );
+                                }
+                                RecordingEvent::Unmatched => {}
                             }
                         }
                     }
@@ -396,9 +492,13 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
                             height,
                             rec_dropped,
                             trigger_frame_idx,
+                            opto_frame_idx,
+                            visual_frame_idx,
                             "buffer_full",
                         );
                         trigger_frame_idx = None;
+                        opto_frame_idx = None;
+                        visual_frame_idx = None;
                     }
                 }
             }
@@ -423,6 +523,8 @@ pub fn run(cfg: AppConfig) -> Result<(), String> {
             height,
             rec_dropped,
             trigger_frame_idx,
+            opto_frame_idx,
+            visual_frame_idx,
             "shutdown",
         );
     }
@@ -451,6 +553,8 @@ fn finish_recording(
     height: u32,
     rec_dropped: u64,
     trigger_frame_idx: Option<u64>,
+    opto_frame_idx: Option<u64>,
+    visual_frame_idx: Option<u64>,
     reason: &str,
 ) {
     let n_filled = buffers[*active_idx]
@@ -480,6 +584,8 @@ fn finish_recording(
         width,
         height,
         trigger_frame_idx,
+        opto_frame_idx,
+        visual_frame_idx,
     }) {
         Ok(()) => {}
         Err(std::sync::mpsc::TrySendError::Full(job)) => {
@@ -518,7 +624,8 @@ fn finish_recording(
 
 #[cfg(test)]
 mod tests {
-    use super::centered_roi;
+    use super::*;
+    use serde_json::json;
 
     #[test]
     fn centers_a_smaller_roi_on_the_sensor() {
@@ -552,5 +659,101 @@ mod tests {
     fn height_larger_than_the_sensor_is_rejected() {
         let err = centered_roi(2112, 2112, 2112, 4000).unwrap_err();
         assert!(err.contains("4000"), "must name the requested height: {}", err);
+    }
+
+    #[test]
+    fn zone_exit_with_matching_obj_id_returns_reason() {
+        let payload = json!({"obj_id": 5, "reason": "left_fov"});
+        let event = classify_recording_message(
+            "ZONE_EXIT", &payload, 5, "ZONE_EXIT", "OPTO_ZONE_ENTER", "VISUAL_ZONE_ENTER",
+        );
+        assert_eq!(
+            event,
+            RecordingEvent::ZoneExit { reason: "left_fov".to_string() }
+        );
+    }
+
+    #[test]
+    fn zone_exit_with_non_matching_obj_id_is_unmatched() {
+        let payload = json!({"obj_id": 99, "reason": "left_fov"});
+        let event = classify_recording_message(
+            "ZONE_EXIT", &payload, 5, "ZONE_EXIT", "OPTO_ZONE_ENTER", "VISUAL_ZONE_ENTER",
+        );
+        assert_eq!(event, RecordingEvent::Unmatched);
+    }
+
+    #[test]
+    fn opto_zone_enter_with_matching_obj_id_is_opto_zone_enter() {
+        let payload = json!({"obj_id": 5});
+        let event = classify_recording_message(
+            "OPTO_ZONE_ENTER", &payload, 5, "ZONE_EXIT", "OPTO_ZONE_ENTER", "VISUAL_ZONE_ENTER",
+        );
+        assert_eq!(event, RecordingEvent::OptoZoneEnter);
+    }
+
+    #[test]
+    fn opto_zone_enter_with_non_matching_obj_id_is_unmatched() {
+        let payload = json!({"obj_id": 99});
+        let event = classify_recording_message(
+            "OPTO_ZONE_ENTER", &payload, 5, "ZONE_EXIT", "OPTO_ZONE_ENTER", "VISUAL_ZONE_ENTER",
+        );
+        assert_eq!(event, RecordingEvent::Unmatched);
+    }
+
+    #[test]
+    fn visual_zone_enter_with_matching_obj_id_is_visual_zone_enter() {
+        let payload = json!({"obj_id": 5});
+        let event = classify_recording_message(
+            "VISUAL_ZONE_ENTER", &payload, 5, "ZONE_EXIT", "OPTO_ZONE_ENTER", "VISUAL_ZONE_ENTER",
+        );
+        assert_eq!(event, RecordingEvent::VisualZoneEnter);
+    }
+
+    #[test]
+    fn unrecognized_topic_is_unmatched() {
+        let payload = json!({"obj_id": 5});
+        let event = classify_recording_message(
+            "SOME_OTHER_TOPIC", &payload, 5, "ZONE_EXIT", "OPTO_ZONE_ENTER", "VISUAL_ZONE_ENTER",
+        );
+        assert_eq!(event, RecordingEvent::Unmatched);
+    }
+
+    #[test]
+    fn missing_obj_id_in_payload_is_unmatched() {
+        let payload = json!({});
+        let event = classify_recording_message(
+            "OPTO_ZONE_ENTER", &payload, 5, "ZONE_EXIT", "OPTO_ZONE_ENTER", "VISUAL_ZONE_ENTER",
+        );
+        assert_eq!(event, RecordingEvent::Unmatched);
+    }
+
+    #[test]
+    fn latch_frame_idx_points_at_the_just_committed_frame_not_the_next_one() {
+        // One frame has been committed (filled=1, valid frame_idx 0..0) when
+        // the trigger is noticed — it should latch onto frame_idx 0, the frame
+        // that was just written, not frame_idx 1, which doesn't exist yet.
+        assert_eq!(latch_frame_idx(None, 1), Some(0));
+    }
+
+    #[test]
+    fn latch_frame_idx_matches_buffer_full_boundary() {
+        // If the trigger is noticed on the very frame that fills the buffer
+        // to capacity, the latched index must still be a valid frame_idx
+        // (capacity - 1), not the out-of-range `capacity`.
+        assert_eq!(latch_frame_idx(None, 500), Some(499));
+    }
+
+    #[test]
+    fn latch_frame_idx_only_latches_the_first_trigger() {
+        // A second OPTO_ZONE_ENTER/VISUAL_ZONE_ENTER later in the same
+        // recording must not overwrite the already-latched onset frame.
+        assert_eq!(latch_frame_idx(Some(0), 50), Some(0));
+    }
+
+    #[test]
+    fn latch_frame_idx_with_no_frames_committed_yet_is_none() {
+        // Defensive: shouldn't occur in practice (a frame is always
+        // committed before the ZMQ poll runs), but must not underflow.
+        assert_eq!(latch_frame_idx(None, 0), None);
     }
 }

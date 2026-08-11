@@ -127,10 +127,12 @@ The subscription is vestigial; don't build on it without adding a publisher.
 
 **Metadata CSV:** `{save_folder}/obj_id_{obj_id}_frame_{frame}.csv`
 ```csv
-frame_idx,nframe,ts_sec,ts_usec,cam_time_ns,trigger_frame_idx
-0,100,1234,567890,1234567890000,0
+frame_idx,nframe,ts_sec,ts_usec,cam_time_ns,trigger_frame_idx,opto_frame_idx,visual_frame_idx
+0,100,1234,567890,1234567890000,0,3,
 ```
-`trigger_frame_idx` is written to every row and indicates which buffer frame corresponds to the real `ZONE_ENTER` moment — that is, it marks **recording start**, not stimulus onset. Since the capture buffer resets at `ZONE_ENTER`, it is always `0` (there are no pre-trigger frames). Actual stimulus onset for opto/visual is in `latency.csv`'s `frame` field for that system's row (`"opto"`/`"visual"`); `record_frame` on that same row is the Braid frame at which the outer `ZONE_ENTER` fired — the same moment `trigger_frame_idx` marks, but on the Braid frame counter — so `(row.frame - row.record_frame)` is the number of Braid frames between recording start and stimulus onset. Convert to camera frames via the fps ratio if needed for video alignment (Braid runs ~100Hz; camera fps is in `configs/config.toml`'s `[camera]` section).
+`trigger_frame_idx` is written to every row and indicates which buffer frame corresponds to the real `ZONE_ENTER` moment — that is, it marks **recording start**, not stimulus onset. Since the capture buffer resets at `ZONE_ENTER`, it is always `0` (there are no pre-trigger frames).
+
+`opto_frame_idx`/`visual_frame_idx` mark the buffer frame at which `OPTO_ZONE_ENTER`/`VISUAL_ZONE_ENTER` arrived on the ZMQ trigger socket — a frame-exact, live-captured stimulus-onset marker, with no fps-ratio math and no dropped-frame assumption. They live in this same per-video metadata CSV (`{save_folder}/obj_id_{obj_id}_frame_{frame}.csv`, next to that trial's `.mp4`) — there is no separate stimulus-data file per video. Each is written as a constant value across every row (same style as `trigger_frame_idx`) and is blank when that system never fired during the recording (system inactive, or the fly never reached the inner zone). This marks when the trigger broadcast reached the capture loop, not when the LED/stimulus physically actuated; add `(activation_timestamp - trigger_timestamp) × camera_fps` from `latency.csv` to get actuation onset.
 
 **Lens timing CSV:** `{save_folder}/obj_id_{obj_id}_frame_{frame}_lens_timing.csv`
 
@@ -144,6 +146,37 @@ t_braid,t_relay,t_lens_recv,t_serial_start,t_diopter_sent,delay_ms,frame,obj_id,
 **Debug histograms:** Generate offline with `src/tools/generate_camera_histograms.py`
 - Reads CSV files and produces PNG histograms showing frame counter diffs, inter-frame interval, jitter, timeline
 - Usage: `python src/tools/generate_camera_histograms.py /path/to/videos/`
+
+**Stimulus-onset → video-frame alignment:** `src/tools/frame_alignment.py`
+- **For opto/visual, prefer `opto_frame_idx`/`visual_frame_idx` in the metadata CSV above** — they're exact, live-captured frame numbers with no fps-ratio approximation. The tool now surfaces the same value itself (as `live_frame_idx`, read straight from that CSV) alongside its own fps-ratio estimate, so for recordings made after this feature shipped you don't need to cross-reference the metadata CSV by hand.
+- **`lens` has no comparable live marker, and its `latency.csv` delta is not currently meaningful**: `LiquidLens` publishes its `frame`/`record_frame` pair from the `ZONE_ENTER` snapshot rather than the frame the first diopter command was actually sent on, so the two are always equal and this tool's `video_frame`/`live_frame_idx` output for `lens` will always be `0`/blank. Use `lens_timing.csv`'s own `frame` column (see above) for lens timing per adjustment.
+- For each `opto`/`visual` (or `lens`, via `--systems`) row in `latency.csv`, computes the corresponding video frame from `(row.frame - row.record_frame)` scaled by the camera/Braid fps ratio, joins it against the matching `obj_id_{obj_id}_frame_{record_frame}.csv` to report that video's actual frame count and (for opto/visual) its live `opto_frame_idx`/`visual_frame_idx`, and warns when the computed frame falls outside the video's frame count (recording ended — `zone_timeout`/buffer-full/`left_fov` — before the stimulus fired).
+- Works directly against a completed recording's zipped `.braidz` file (reads `latency.csv` and `config.toml` — for `camera.fps` — as zip members) as well as a still-open or crashed/leftover raw `.braid` folder; no unzipping needed. Point it at the videos folder with `--video-folder` if it isn't the one auto-derived from `src/orchestration.py`'s layout (`<data_root>/videos/<name>.braid`, sibling of `<data_root>/experiments/`).
+- `video_frame` is a frame-count approximation, not an exact timestamp lookup — the camera's own per-frame timestamps aren't on a clock synchronized with Braid's. `live_frame_idx` (opto/visual only, when present) is exact — prefer it when both are available.
+- Usage: `uv run python -m src.tools.frame_alignment /mnt/data/experiments/<timestamp>.braidz` — prints one row per trigger to stdout as CSV (or write it out with `--output`):
+```csv
+obj_id,system,record_frame,braid_frame,braid_frame_delta,video_frame,live_frame_idx,video_csv,video_frame_count,sham,latency_ms
+1,opto,12345,12350,5,25,26,obj_id_1_frame_12345.csv,100,False,12.4
+```
+  `video_frame` is the fps-ratio estimate; `live_frame_idx` (blank for `lens`, or for recordings made before this feature shipped) is the exact value read from `video_csv`'s `opto_frame_idx`/`visual_frame_idx` column — prefer it when present. `video_frame_count` (from the matching metadata CSV, blank if it wasn't found) is what `video_frame` is range-checked against; a warning is printed to stderr per row that falls outside it.
+- Options: `--video-folder` (override the auto-derived videos folder), `--camera-fps` (skip reading `config.toml`, e.g. for recordings that predate config-copying; must be positive), `--braid-fps` (override the 100 Hz default; must be positive), `--systems` (comma-separated, default `opto,visual`; add `lens` to include liquid-lens triggers, though see the limitation above), `--output` (write the CSV to a file instead of stdout).
+
+## Finding a video's stimulus parameters
+
+A video's filename only gives you `obj_id` and `record_frame` — the Braid frame `ZONE_ENTER` fired on, i.e. recording start. That's not enough on its own to look up the LED or visual-stimulus parameters used for that trial, because `opto.csv`/`stim.csv` are keyed by `frame`, the Braid frame `OPTO_ZONE_ENTER`/`VISUAL_ZONE_ENTER` actually fired on. `frame` and `record_frame` only coincide when `opto_zone_scale`/`visual_zone_scale` is `1.0`; at the default of `0.8` they typically differ by a handful of Braid frames (see [Configuration](architecture.md#configuration-loading) in `docs/architecture.md`).
+
+`latency.csv` is the bridge, since every row carries both `frame` and `record_frame` for the same trigger:
+
+1. Parse `obj_id` and `record_frame` from the video filename (`obj_id_{obj_id}_frame_{record_frame}.mp4`).
+2. Find the `latency.csv` row with that `obj_id`/`record_frame` and the system you want (`system` = `"opto"` or `"visual"`) — its `frame` column is the key into the next file.
+3. Look up that `obj_id`/`frame` pair in `opto.csv` (LED parameters, see [docs/opto-trigger.md](opto-trigger.md)) or `stim.csv` (visual stimulus parameters, see [docs/visual-stimuli-panda3d.md](visual-stimuli-panda3d.md)).
+
+**`latency.csv` columns:**
+`obj_id, frame, record_frame, system, braid_timestamp, trigger_timestamp, activation_timestamp, latency_ms, sham`
+
+`system` is `"opto"`, `"visual"`, or `"lens"`. `latency_ms = (activation_timestamp - braid_timestamp) * 1000`, blank for sham trials. Written solely by `LatencyLogger` (`src/processes/latency_logger.py`) — see the LATENCY message format in `docs/architecture.md` for the full wire-format description this file mirrors.
+
+If you only need the exact video frame the stimulus fired on rather than its parameters, skip this lookup entirely — the per-video metadata CSV's `opto_frame_idx`/`visual_frame_idx` above already gives you that directly, no `latency.csv` join required.
 
 ## Troubleshooting
 
