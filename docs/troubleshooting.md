@@ -110,7 +110,9 @@ If the device is there but you get permission denied, add yourself to `dialout`
 The lens also fails to start on a bad calibration file. `calibrations/liquid_lens.csv`
 must have exactly two columns named `z` and `dpt`. The
 [`liquid-lens-calibration`](https://github.com/mpinb/liquid-lens-calibration)
-repo emits a `diopter` column instead — rename it to `dpt` before use.
+repo already writes the OptoFly-targeted CSV with `z`/`dpt` columns directly —
+no manual renaming step is needed. (Its separate raw-dataset CSV does use a
+`diopter` column, but OptoFly never reads that file.)
 
 **ICC-1C-specific setup notes** (controller as of the `icc-1c` branch):
 - Power the controller from the dedicated barrel supply connector, or a USB-C
