@@ -51,6 +51,7 @@ class AlignmentRow:
     braid_frame: int
     braid_frame_delta: int
     video_frame: int
+    live_frame_idx: Optional[int]
     video_csv: str
     video_frame_count: Optional[int]
     sham: bool
@@ -121,15 +122,31 @@ def compute_video_frame(
     return delta, video_frame
 
 
-def count_video_frames(
-    video_folder: Path, obj_id: str, record_frame: str
-) -> tuple[str, Optional[int]]:
+LIVE_FRAME_IDX_COLUMNS = {"opto": "opto_frame_idx", "visual": "visual_frame_idx"}
+
+
+def read_video_csv_info(
+    video_folder: Path, obj_id: str, record_frame: str, system: str
+) -> tuple[str, Optional[int], Optional[int]]:
+    """Return (csv_name, frame_count, live_frame_idx) for the metadata CSV
+    matching this trigger. live_frame_idx is the system's live-captured
+    opto_frame_idx/visual_frame_idx column value (None for lens, or when
+    the column is blank/missing — e.g. a pre-this-feature recording)."""
     csv_name = f"obj_id_{obj_id}_frame_{record_frame}.csv"
     csv_path = video_folder / csv_name
     if not csv_path.is_file():
-        return csv_name, None
+        return csv_name, None, None
+    live_column = LIVE_FRAME_IDX_COLUMNS.get(system)
+    live_frame_idx = None
+    frame_count = 0
     with open(csv_path, newline="") as f:
-        return csv_name, sum(1 for _ in csv.DictReader(f))
+        for row in csv.DictReader(f):
+            frame_count += 1
+            if live_frame_idx is None and live_column:
+                value = row.get(live_column)
+                if value not in (None, ""):
+                    live_frame_idx = int(value)
+    return csv_name, frame_count, live_frame_idx
 
 
 def build_alignment(
@@ -152,8 +169,8 @@ def build_alignment(
         delta, video_frame = compute_video_frame(
             frame, record_frame, camera_fps, braid_fps
         )
-        csv_name, frame_count = count_video_frames(
-            video_folder, obj_id, str(record_frame)
+        csv_name, frame_count, live_frame_idx = read_video_csv_info(
+            video_folder, obj_id, str(record_frame), raw["system"]
         )
         latency_ms = raw.get("latency_ms")
         rows.append(
@@ -164,6 +181,7 @@ def build_alignment(
                 braid_frame=frame,
                 braid_frame_delta=delta,
                 video_frame=video_frame,
+                live_frame_idx=live_frame_idx,
                 video_csv=csv_name,
                 video_frame_count=frame_count,
                 sham=raw.get("sham", "").strip().lower() == "true",
@@ -180,6 +198,7 @@ FIELDNAMES = [
     "braid_frame",
     "braid_frame_delta",
     "video_frame",
+    "live_frame_idx",
     "video_csv",
     "video_frame_count",
     "sham",

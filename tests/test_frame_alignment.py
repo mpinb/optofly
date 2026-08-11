@@ -275,3 +275,64 @@ def test_build_alignment_skips_rows_missing_obj_id(tmp_path):
         systems=("opto", "visual"),
     )
     assert rows == []
+
+
+def _write_video_csv_with_live_idx(
+    path: Path, n: int, opto_frame_idx=None, visual_frame_idx=None
+) -> None:
+    rows = [
+        {
+            "frame_idx": i,
+            "nframe": 100 + i,
+            "ts_sec": 0,
+            "ts_usec": 0,
+            "cam_time_ns": 0,
+            "trigger_frame_idx": 0 if i == 0 else "",
+            "opto_frame_idx": opto_frame_idx if opto_frame_idx is not None else "",
+            "visual_frame_idx": visual_frame_idx if visual_frame_idx is not None else "",
+        }
+        for i in range(n)
+    ]
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def test_build_alignment_reports_live_frame_idx_when_present(tmp_path):
+    braid_dir = _make_braid_folder(
+        tmp_path, [_opto_row(obj_id=1, frame=12350, record_frame=12345)]
+    )
+    video_folder = tmp_path / "videos" / "20260803_120000.braid"
+    video_folder.mkdir(parents=True)
+    _write_video_csv_with_live_idx(
+        video_folder / "obj_id_1_frame_12345.csv", 100, opto_frame_idx=26
+    )
+
+    rows = build_alignment(
+        braid_dir,
+        video_folder,
+        camera_fps=500.0,
+        braid_fps=100.0,
+        systems=("opto", "visual"),
+    )
+    assert rows[0].live_frame_idx == 26
+    assert rows[0].video_frame == 25  # fps-ratio approximation is unchanged
+
+
+def test_build_alignment_live_frame_idx_none_when_column_blank(tmp_path):
+    braid_dir = _make_braid_folder(
+        tmp_path, [_opto_row(obj_id=1, frame=12350, record_frame=12345)]
+    )
+    video_folder = tmp_path / "videos" / "20260803_120000.braid"
+    video_folder.mkdir(parents=True)
+    _write_video_csv_with_live_idx(video_folder / "obj_id_1_frame_12345.csv", 100)
+
+    rows = build_alignment(
+        braid_dir,
+        video_folder,
+        camera_fps=500.0,
+        braid_fps=100.0,
+        systems=("opto", "visual"),
+    )
+    assert rows[0].live_frame_idx is None
