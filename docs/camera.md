@@ -172,7 +172,7 @@ A video's filename only gives you `obj_id` and `record_frame` — the Braid fram
 3. Look up that `obj_id`/`frame` pair in `opto.csv` (LED parameters, see [docs/opto-trigger.md](opto-trigger.md)) or `stim.csv` (visual stimulus parameters, see [docs/visual-stimuli-panda3d.md](visual-stimuli-panda3d.md)).
 
 **`latency.csv` columns:**
-`system, obj_id, frame, record_frame, braid_timestamp, trigger_timestamp, activation_timestamp, sham, latency_ms`
+`obj_id, frame, record_frame, system, braid_timestamp, trigger_timestamp, activation_timestamp, latency_ms, sham`
 
 `system` is `"opto"`, `"visual"`, or `"lens"`. `latency_ms = (activation_timestamp - braid_timestamp) * 1000`, blank for sham trials. Written solely by `LatencyLogger` (`src/processes/latency_logger.py`) — see the LATENCY message format in `docs/architecture.md` for the full wire-format description this file mirrors.
 
