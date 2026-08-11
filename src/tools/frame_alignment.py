@@ -95,7 +95,10 @@ def load_camera_fps(path: Path) -> Optional[float]:
     text = _read_member_text(path, "config.toml")
     if text is None:
         return None
-    fps = tomllib.loads(text).get("camera", {}).get("fps")
+    try:
+        fps = tomllib.loads(text).get("camera", {}).get("fps")
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError):
+        return None
     return float(fps) if fps is not None else None
 
 

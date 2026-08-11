@@ -185,6 +185,12 @@ def test_load_camera_fps_missing_config_returns_none(tmp_path):
     assert load_camera_fps(braid_dir) is None
 
 
+def test_load_camera_fps_corrupt_config_returns_none(tmp_path):
+    braid_dir = _make_braid_folder(tmp_path, [_opto_row()], write_config=False)
+    (braid_dir / "config.toml").write_text("[camera\nfps = 500\n")
+    assert load_camera_fps(braid_dir) is None
+
+
 def test_build_alignment_joins_video_csv_and_flags_out_of_range(tmp_path):
     braid_dir = _make_braid_folder(
         tmp_path,

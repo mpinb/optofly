@@ -195,7 +195,7 @@ config_file = "configs/visual_stimuli.toml"
 
 **Operational notes:**
 - An existing rig `configs/config.toml` (git-ignored, not touched by upgrades) that predates the opto/visual zone split has none of `opto_zone_scale`, `visual_zone_scale`, `opto_enter_topic`, or `visual_enter_topic`. On the next run, opto will silently start firing at 80% of the FOV instead of the full FOV (the `opto_zone_scale` default). Visual is affected the same way, but it's the bigger change: `visual_zone_scale`'s default used to be `1.0` (same-frame as `ZONE_ENTER` — zero delay), so this is the *first* onset delay visual stimuli will ever see on an upgrading rig, not just a bigger one. This is not a bug — just worth knowing before your first run after upgrading, since the recorded video will look identical but both the LED and the visual stimulus will fire later than they used to, visual for the first time.
-- It's now possible for a trial to have a recording plus lens/visual latency rows but *no* opto latency row at all, if the fly left the outer zone before ever reaching the smaller opto zone. This is expected, not a dropped message — check `opto_zone_scale` if you expect opto to fire on every trial.
+- It's now possible for a trial to have a recording plus lens latency rows but *no* opto or visual latency row at all, if the fly left the outer zone before ever reaching the smaller opto/visual zone. This is expected, not a dropped message — check `opto_zone_scale`/`visual_zone_scale` if you expect opto/visual to fire on every trial.
 
 ### configs/visual_stimuli.toml
 
