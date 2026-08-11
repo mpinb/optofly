@@ -260,3 +260,18 @@ def test_build_alignment_skips_rows_missing_frame(tmp_path):
         systems=("opto", "visual"),
     )
     assert rows == []
+
+
+def test_build_alignment_skips_rows_missing_obj_id(tmp_path):
+    row = _opto_row()
+    row["obj_id"] = ""
+    braid_dir = _make_braid_folder(tmp_path, [row])
+
+    rows = build_alignment(
+        braid_dir,
+        tmp_path / "videos",
+        camera_fps=500.0,
+        braid_fps=100.0,
+        systems=("opto", "visual"),
+    )
+    assert rows == []

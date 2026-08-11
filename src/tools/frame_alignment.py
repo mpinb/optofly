@@ -143,8 +143,9 @@ def build_alignment(
     for raw in load_latency_rows(braid_path):
         if raw.get("system") not in systems:
             continue
+        obj_id = raw.get("obj_id")
         frame, record_frame = raw.get("frame"), raw.get("record_frame")
-        if frame in (None, "") or record_frame in (None, ""):
+        if obj_id in (None, "") or frame in (None, "") or record_frame in (None, ""):
             continue
         frame, record_frame = int(frame), int(record_frame)
 
@@ -152,12 +153,12 @@ def build_alignment(
             frame, record_frame, camera_fps, braid_fps
         )
         csv_name, frame_count = count_video_frames(
-            video_folder, raw["obj_id"], str(record_frame)
+            video_folder, obj_id, str(record_frame)
         )
         latency_ms = raw.get("latency_ms")
         rows.append(
             AlignmentRow(
-                obj_id=int(raw["obj_id"]),
+                obj_id=int(obj_id),
                 system=raw["system"],
                 record_frame=record_frame,
                 braid_frame=frame,
