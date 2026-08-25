@@ -279,10 +279,15 @@ class VisualProcess(WorkerProcess):
         )
 
         stim_params: dict = {}
+        fired = False
+        displayed = False
         for stim in self._stimuli:
             try:
                 result = stim.on_trigger(world_heading, data)
                 if result:
+                    fired = True
+                    if not result.pop("sham", False):
+                        displayed = True
                     stim_params.update(result)
                     stim_name = type(stim).__name__.replace("Stimulus", "").lower()
                     parts = ["  visual:  %s" % stim_name]
@@ -318,9 +323,32 @@ class VisualProcess(WorkerProcess):
                 }
             )
 
-        self._publish_latency(data, activated)
+        # BackgroundStimulus is always-on ambient texture and never responds
+        # to a trigger (see the stim.csv gating comment above) -- exclude it
+        # so a background-only rig doesn't get flagged as "every stimulus
+        # declined" on every single trial.
+        interactive_stimuli = [
+            s for s in self._stimuli if not isinstance(s, BackgroundStimulus)
+        ]
+        if interactive_stimuli and not fired:
+            # Every stimulus capable of responding declined this trigger --
+            # e.g. Looming was still animating a previous object's trial.
+            # Nothing was shown, so don't fabricate a LATENCY row for it:
+            # unlike a designed sham (a stimulus's own randomized no-display
+            # draw), this is a dropped trial and should stay visible as one
+            # rather than silently blending into sham statistics.
+            self.logger.warning(
+                "VISUAL_ZONE_ENTER [obj=%s frame=%s]: every registered "
+                "stimulus declined (likely busy with a concurrent trial) -- "
+                "no LATENCY message published",
+                obj_id,
+                frame,
+            )
+            return
 
-    def _publish_latency(self, data: dict, activated: bool) -> None:
+        self._publish_latency(data, displayed)
+
+    def _publish_latency(self, data: dict, displayed: bool) -> None:
         """Publish one LATENCY message for the methods-paper latency log.
 
         activation_timestamp is stamped right after the on_trigger()
@@ -338,8 +366,8 @@ class VisualProcess(WorkerProcess):
             "record_frame": data.get("record_frame"),
             "braid_timestamp": timing.braid_timestamp,
             "trigger_timestamp": timing.handler_timestamp,
-            "activation_timestamp": time.time() if activated else None,
-            "sham": not activated,
+            "activation_timestamp": time.time() if displayed else None,
+            "sham": not displayed,
         }
         try:
             self._latency_socket.send(json.dumps(message).encode("utf-8"))

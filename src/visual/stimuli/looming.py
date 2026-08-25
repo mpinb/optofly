@@ -168,6 +168,7 @@ class LoomingStimulus(BaseStimulus):
         if self._rng.random() < self._sham_prob:
             return {
                 **base,
+                "sham": True,
                 "looming_sham": True,
                 "looming_stimulus_heading_deg": None,
                 "looming_offset_deg": None,
@@ -186,6 +187,7 @@ class LoomingStimulus(BaseStimulus):
         )
         return {
             **base,
+            "sham": False,
             "looming_sham": False,
             "looming_stimulus_heading_deg": self._stimulus_heading,
             "looming_offset_deg": offset_deg,

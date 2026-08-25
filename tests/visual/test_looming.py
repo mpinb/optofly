@@ -1,10 +1,36 @@
 import math
+from unittest.mock import MagicMock
+
 from src.visual.stimuli.looming import (
     compute_lv_ratio_size,
     compute_exponential_size,
     compute_linear_size,
     PositionBalancer,
+    LoomingStimulus,
 )
+
+
+def _make_looming(config: dict) -> LoomingStimulus:
+    stim = object.__new__(LoomingStimulus)
+    stim.scene = MagicMock(viewing_distance_cm=25.0)
+    stim.config = config
+    stim.setup()
+    return stim
+
+
+def test_on_trigger_sham_draw_reports_sham_true_and_no_position():
+    stim = _make_looming({"sham_probability": 1.0})
+    result = stim.on_trigger(heading_deg=0.0, trigger_data={})
+    assert result["sham"] is True
+    assert result["looming_sham"] is True
+
+
+def test_on_trigger_real_draw_reports_sham_false():
+    stim = _make_looming({"sham_probability": 0.0})
+    stim.add_disk = MagicMock(return_value=MagicMock())
+    result = stim.on_trigger(heading_deg=0.0, trigger_data={})
+    assert result["sham"] is False
+    assert result["looming_sham"] is False
 
 
 def test_exponential_start():

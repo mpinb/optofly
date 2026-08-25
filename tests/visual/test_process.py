@@ -117,7 +117,7 @@ def test_handle_zone_enter_publishes_latency_with_real_activation_when_a_stimulu
 
     class _AlwaysFiresStimulus:
         def on_trigger(self, heading_deg, trigger_data):
-            return {"looming_sham": False}
+            return {"looming_sham": False, "sham": False}
 
     proc._stimuli = [_AlwaysFiresStimulus()]
     proc._csv_writer = None
@@ -139,6 +139,110 @@ def test_handle_zone_enter_publishes_latency_with_real_activation_when_a_stimulu
     sent = proc._latency_socket.sent
     assert sent[0]["sham"] is False
     assert sent[0]["activation_timestamp"] == 999.0
+
+
+def test_handle_zone_enter_reports_sham_when_stimulus_reports_its_own_sham_draw(
+    monkeypatch,
+):
+    """A stimulus's own randomized no-display draw (e.g. LoomingStimulus's
+    sham_probability) must be reported as sham=True with no activation
+    timestamp -- even though on_trigger returned a non-empty (truthy) dict.
+    This is the exact shape that let the sham/activated conflation bug
+    through: a truthy dict does not mean something was displayed."""
+    proc = _make_process(visual_enter_topic="VISUAL_ZONE_ENTER")
+
+    class _SelfShamStimulus:
+        def on_trigger(self, heading_deg, trigger_data):
+            return {"looming_sham": True, "sham": True}
+
+    proc._stimuli = [_SelfShamStimulus()]
+    proc._csv_writer = None
+    proc._offset_rad = 0.0
+    proc._flip = False
+    proc._latency_socket = FakeLatencySocket()
+    monkeypatch.setattr("src.visual.process.time.time", lambda: 999.0)
+    proc._trial_count = 0
+
+    proc._handle_zone_enter(
+        {
+            "obj_id": 7,
+            "frame": 100,
+            "braid_timestamp": 500.0,
+            "handler_timestamp": 500.01,
+        }
+    )
+
+    sent = proc._latency_socket.sent
+    assert len(sent) == 1
+    assert sent[0]["sham"] is True
+    assert sent[0]["activation_timestamp"] is None
+
+
+def test_handle_zone_enter_skips_latency_when_every_stimulus_declines():
+    """When every interactive stimulus declines (e.g. LoomingStimulus is still
+    animating a previous object's trial), nothing was shown -- this is a
+    dropped trial, not a sham, and must not be reported on the latency
+    socket at all."""
+    proc = _make_process(visual_enter_topic="VISUAL_ZONE_ENTER")
+
+    class _AlwaysDeclinesStimulus:
+        def on_trigger(self, heading_deg, trigger_data):
+            return None
+
+    proc._stimuli = [_AlwaysDeclinesStimulus()]
+    proc._csv_writer = None
+    proc._offset_rad = 0.0
+    proc._flip = False
+    proc._latency_socket = FakeLatencySocket()
+    warnings = []
+    proc.logger.warning = lambda *a, **k: warnings.append(a)
+    proc._trial_count = 0
+
+    proc._handle_zone_enter(
+        {
+            "obj_id": 7,
+            "frame": 100,
+            "braid_timestamp": 500.0,
+            "handler_timestamp": 500.01,
+        }
+    )
+
+    assert proc._latency_socket.sent == []
+    assert len(warnings) == 1
+
+
+def test_handle_zone_enter_reports_sham_for_background_only_rig():
+    """A background-only rig (no interactive stimulus registered at all)
+    must keep reporting sham=True on every trial, exactly as before --
+    BackgroundStimulus always declines and must not be mistaken for a
+    busy/collision drop."""
+    from src.visual.stimuli.background import BackgroundStimulus
+
+    proc = _make_process(visual_enter_topic="VISUAL_ZONE_ENTER")
+    proc._stimuli = [object.__new__(BackgroundStimulus)]
+    proc._stimuli[0].on_trigger = lambda heading_deg, trigger_data: None
+    proc._csv_writer = None
+    proc._offset_rad = 0.0
+    proc._flip = False
+    proc._latency_socket = FakeLatencySocket()
+    warnings = []
+    proc.logger.warning = lambda *a, **k: warnings.append(a)
+    proc._trial_count = 0
+
+    proc._handle_zone_enter(
+        {
+            "obj_id": 7,
+            "frame": 100,
+            "braid_timestamp": 500.0,
+            "handler_timestamp": 500.01,
+        }
+    )
+
+    assert warnings == []
+    sent = proc._latency_socket.sent
+    assert len(sent) == 1
+    assert sent[0]["sham"] is True
+    assert sent[0]["activation_timestamp"] is None
 
 
 def test_setup_zmq_stores_configured_visual_enter_topic():

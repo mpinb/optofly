@@ -121,7 +121,15 @@ class BaseStimulus(ABC):
         """Called on ZONE_ENTER. heading_deg is Braid->world converted (degrees).
 
         Return a dict of stimulus parameters to log (merged into stim.csv row),
-        or None if nothing was logged / stimulus was inactive.
+        or None if nothing was logged / stimulus was inactive (e.g. busy with
+        another trial).
+
+        The dict may include a reserved "sham" key (bool). VisualProcess pops
+        it before merging the rest into stim.csv, and uses it to report
+        activation_timestamp/sham on the LATENCY message: True marks this
+        response as a designed no-display outcome (e.g. a randomized sham
+        draw) rather than an actual presentation. Omit it (defaults to False)
+        for a stimulus that always displays when it returns a result.
         """
 
     @abstractmethod
