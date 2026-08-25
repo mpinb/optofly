@@ -45,11 +45,22 @@ fn build_ffmpeg_cmd(
         "-i", "pipe:0",
     ]);
 
+    // Keyframe every 10 frames. Without -g, ffmpeg defaults to a GOP of 250,
+    // which for these short recordings means one I-frame at the very start --
+    // so stepping *backwards* a frame in a player re-decodes the whole clip
+    // from frame 0. The usual reason not to do this is file size, but that
+    // barely applies here: measured on real recordings, an I-frame is only
+    // ~1.8x a P-frame (at qp 18 on noisy grayscale sensor data, inter
+    // prediction buys little -- what changes between frames is mostly noise,
+    // and noise doesn't predict). GOP 10 costs ~7% disk and makes backward
+    // scrubbing instant. It also bounds corruption to 10 frames instead of
+    // 250 and speeds up random-access seeking in analysis pipelines.
     if use_nvenc {
         cmd.args([
             "-c:v", "h264_nvenc",
             "-preset", "p4",
             "-bf", "0",
+            "-g", "10",
             "-rc", "constqp",
             "-qp", "18",
             "-rc-lookahead", "32",
@@ -62,6 +73,7 @@ fn build_ffmpeg_cmd(
             "-c:v", "libx264",
             "-preset", "ultrafast",
             "-crf", "18",
+            "-g", "10",
         ]);
     }
 
