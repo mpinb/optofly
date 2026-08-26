@@ -36,6 +36,7 @@ def make_publisher():
     pub._active_topic_bytes = b"ACTIVE_BRAID"
     pub._active_obj_id = None
     pub._active_last_seen = 0.0
+    pub._last_publish_debug_log = 0.0
     pub.config = type(
         "Config",
         (),

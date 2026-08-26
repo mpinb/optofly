@@ -17,7 +17,7 @@ import numpy as np
 import zmq
 
 from src.utils.config import TriggerHandlerConfig
-from src.utils.logger import configure_process_logging
+from src.utils.logger import colorize, configure_process_logging
 from src.utils.worker import WorkerProcess
 
 # Constants
@@ -611,7 +611,12 @@ class TriggerHandler(WorkerProcess):
             self._last_zone_enter_time = now
             self._zone_enter_count += 1
             self._trial_count += 1
-            print(f"\n── Trial #{self._trial_count} obj={tracked_obj.obj_id} ──")
+            print(
+                colorize(
+                    f"\n── Trial #{self._trial_count} obj={tracked_obj.obj_id} ──",
+                    self.log_color,
+                )
+            )
             self.logger.debug(
                 "ZONE_ENTER [#%d obj=%d] pos=(%.3f, %.3f, %.3f)",
                 self._trial_count,
@@ -668,7 +673,12 @@ class TriggerHandler(WorkerProcess):
             message = json.dumps(message_data)
             topic = self.config.zmq.zone_exit_topic.encode("utf-8")
             self.publisher.send_multipart([topic, message.encode("utf-8")])
-            print(f"── Trial #{self._trial_count} end (duration={duration:.2f}s) ──")
+            print(
+                colorize(
+                    f"── Trial #{self._trial_count} end (duration={duration:.2f}s) ──",
+                    self.log_color,
+                )
+            )
             self.logger.debug(
                 "ZONE_EXIT [#%d obj=%d] reason=%s duration=%.2fs",
                 self._trial_count,

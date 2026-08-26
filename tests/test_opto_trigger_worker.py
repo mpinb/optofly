@@ -52,6 +52,7 @@ def _make_worker(trigger_return):
         },
     )()
     worker._trial_count = 0
+    worker.log_color = "RED"
     return worker
 
 

@@ -5,6 +5,7 @@ triggered high-speed video capture.
 
 import multiprocessing as mp
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -17,6 +18,14 @@ from src.utils.config import AppConfig
 from src.utils.worker import WorkerProcess
 
 BINARY_NAME = "optofly-camera"
+
+# env_logger's own "[2026-08-25T23:03:06Z WARN  optofly_camera::capture]"
+# prefix duplicates the outer Python log line's timestamp; strip it so
+# forwarded lines read as "[optofly-camera] WARN capture: <message>"
+# instead of two nested bracketed/timestamped headers.
+_RUST_LOG_PREFIX_RE = re.compile(
+    r"^\[\d{4}-\d{2}-\d{2}T[\d:.]+Z\s+(\w+)\s+([^\]]+)\]\s*(.*)$"
+)
 
 
 def find_camera_binary() -> str:
@@ -277,6 +286,11 @@ class RustCameraProcess(WorkerProcess):
                         continue
                     if any(pattern in line for pattern in self._XIAPI_NOISE_PATTERNS):
                         continue
+                    match = _RUST_LOG_PREFIX_RE.match(line)
+                    if match:
+                        level, target, rest = match.groups()
+                        target = target.rsplit("::", 1)[-1]
+                        line = f"{level} {target}: {rest}"
                     self.logger.info("[optofly-camera] %s", line)
         except Exception as e:
             self.logger.warning("Error reading optofly-camera output: %s", e)

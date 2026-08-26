@@ -17,6 +17,16 @@ _FMT = "[%(asctime)s - %(processName)s - %(name)s] %(levelname)s: %(message)s"
 _DATEFMT = "%Y-%m-%d %H:%M:%S"
 
 
+def colorize(text: str, color: str) -> str:
+    """Wrap `text` in the ANSI code for `color` (see COLORS), reset after.
+
+    For the plain print() banners (trial start/end, opto/visual summaries)
+    that sit outside the logging system but should still carry their
+    process's color so they read as part of that process's output.
+    """
+    return f"{COLORS.get(color.upper(), COLORS['WHITE'])}{text}{COLORS['RESET']}"
+
+
 class ColoredFormatter(logging.Formatter):
     def __init__(self, process_name, color_code):
         super().__init__(_FMT, _DATEFMT)

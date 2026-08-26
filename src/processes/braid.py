@@ -31,6 +31,10 @@ RETRY_DELAY = 2
 # TCP_QUICKACK (set below) eliminates that batching; this threshold catches
 # genuine stalls that survive the fix.
 BOUNDARY_GAP_WARN_S = 0.050
+# Braid runs at 100 Hz, so logging every published message floods optofly.log
+# (hundreds of thousands of near-duplicate DEBUG lines over a multi-hour run).
+# Sample it instead.
+PUBLISH_LOG_INTERVAL_S = 1.0
 
 _HAS_QUICKACK = hasattr(_socket, "TCP_QUICKACK")
 
@@ -153,6 +157,7 @@ class BraidPublisher(WorkerProcess):
         self.stream_thread = None
         self.is_connected = False
         self._first_update_seen = False
+        self._last_publish_debug_log = 0.0
 
     def _handle_signal(self, signum, frame):
         """Handle termination signals by setting the stop event."""
@@ -384,7 +389,10 @@ class BraidPublisher(WorkerProcess):
             self.active_braid_socket.send_multipart(
                 [self._active_topic_bytes, active_message.encode("utf-8")]
             )
-        self.logger.debug("Published message: %.50s...", message)
+        now = time.monotonic()
+        if now - self._last_publish_debug_log >= PUBLISH_LOG_INTERVAL_S:
+            self.logger.debug("Published message: %.50s...", message)
+            self._last_publish_debug_log = now
         self._first_update_seen = True
 
     def _process_stream(self) -> None:
@@ -436,7 +444,10 @@ class BraidPublisher(WorkerProcess):
                         if last_boundary is not None and self._first_update_seen:
                             gap = now - last_boundary
                             if gap > BOUNDARY_GAP_WARN_S:
-                                self.logger.warning(
+                                # Debug-only: expected during idle stretches between
+                                # trials, not actionable on its own, and drowns out
+                                # everything else on the console at trial cadence.
+                                self.logger.debug(
                                     f"SSE boundary gap {gap * 1000:.1f} ms "
                                     f"(>{BOUNDARY_GAP_WARN_S * 1000:.0f} ms)"
                                 )

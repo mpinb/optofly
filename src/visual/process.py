@@ -16,6 +16,7 @@ import zmq
 from direct.task import Task
 
 from src.utils.worker import WorkerProcess
+from src.utils.logger import colorize
 from src.utils.csv_writer import CSVWriter
 from src.utils.trigger_timing import extract_trigger_timing
 from src.visual.scene import ArenaScene, DIRECTION_TO_HEADING
@@ -299,7 +300,7 @@ class VisualProcess(WorkerProcess):
                         if key in result:
                             parts.append("%s=%s" % (label, result[key]))
                     parts.append("frame=%s" % frame)
-                    print(" ".join(parts))
+                    print(colorize(" ".join(parts), self.log_color))
             except Exception:
                 self.logger.exception(
                     "Error in stimulus %s on_trigger", type(stim).__name__

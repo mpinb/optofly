@@ -13,6 +13,7 @@ from typing import Dict, Optional
 import zmq
 
 from src.utils.config import AppConfig
+from src.utils.logger import colorize
 from src.utils.worker import WorkerProcess
 from src.hardware.led import OptoTrigger
 from src.utils.csv_writer import CSVWriter
@@ -248,8 +249,11 @@ class OptoTriggerWorker(WorkerProcess):
             color = self.opto_trigger.config.color
             sham_label = "sham" if was_sham else "real"
             print(
-                "  opto:    %s  %s/255  %dms  %s   frame=%s"
-                % (color, intensity, dur, sham_label, frame)
+                colorize(
+                    "  opto:    %s  %s/255  %dms  %s   frame=%s"
+                    % (color, intensity, dur, sham_label, frame),
+                    self.log_color,
+                )
             )
 
             # Prepare CSV row
